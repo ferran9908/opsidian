@@ -1,0 +1,20 @@
+{
+  "name": "opsidian",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A Markdown-first notebook with self-hosted sync.",
+  "packageManager": "pnpm@12.4.1",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --if-present typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "pnpm format:check && pnpm typecheck"
+  },
+  "devDependencies": {
+    "prettier": "3.9.9",
+    "typescript": "7.0.2"
+  }
+}
