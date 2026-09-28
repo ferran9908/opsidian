@@ -1,0 +1,157 @@
+.cm-editor {
+  font:
+    19px/1.75 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  color: var(--text);
+  min-height: 100%;
+  background: var(--canvas);
+}
+.cm-editor.cm-focused {
+  outline: none;
+}
+.cm-editor .cm-scroller {
+  font-family: inherit;
+  overflow: auto;
+}
+.cm-content {
+  padding: 0 0 180px;
+  caret-color: var(--accent);
+}
+.cm-line {
+  padding: 0;
+}
+.cm-cursor {
+  border-left-color: var(--accent);
+}
+.cm-selectionBackground,
+.cm-focused .cm-selectionBackground {
+  background: var(--selection) !important;
+}
+.cm-content ::selection {
+  background: var(--selection);
+}
+.cm-tooltip {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font:
+    14px/1.6 -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  box-shadow: 0 10px 35px #0003;
+}
+.cm-tooltip-autocomplete ul li {
+  padding: 8px 12px;
+}
+.cm-tooltip-autocomplete ul li[aria-selected] {
+  background: var(--selection);
+  color: var(--accent);
+}
+.cm-completionDetail {
+  color: var(--muted);
+  font-style: normal;
+}
+.cm-panels {
+  background: var(--surface);
+  color: var(--text);
+}
+.cm-textfield,
+.cm-button {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.op-heading {
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  padding-top: 10px;
+}
+.op-h1 {
+  font-size: 38px;
+  line-height: 1.35;
+  padding-top: 0;
+  padding-bottom: 10px;
+}
+.op-h2 {
+  font-size: 26px;
+  line-height: 1.6;
+}
+.op-h3,
+.op-h4,
+.op-h5,
+.op-h6 {
+  font-size: 22px;
+}
+.op-strong {
+  font-weight: 650;
+}
+.op-emphasis {
+  font-style: italic;
+}
+.op-strike {
+  text-decoration: line-through;
+}
+.op-quote {
+  color: var(--muted);
+  font-style: italic;
+}
+.op-syntax {
+  color: var(--muted);
+  font-weight: 400;
+}
+.op-code {
+  font:
+    0.9em/1.6 ui-monospace,
+    monospace;
+  background: var(--surface);
+}
+.cm-editor .op-wikilink,
+.cm-editor .op-link-source {
+  color: var(--accent);
+  background: var(--linkBackground);
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  padding: 1px 4px;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.op-task {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--accent);
+  vertical-align: middle;
+  cursor: pointer;
+}
+.op-image {
+  display: inline-block;
+  max-width: 100%;
+}
+.op-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 340px;
+  border-radius: 8px;
+  object-fit: contain;
+}
+.cm-placeholder {
+  color: var(--muted);
+}
+@media (max-width: 600px) {
+  .cm-editor {
+    font-size: 17px;
+    line-height: 1.75;
+  }
+  .op-h1 {
+    font-size: 30px;
+  }
+  .op-h2 {
+    font-size: 23px;
+  }
+  .cm-content {
+    padding-bottom: 90px;
+  }
+}

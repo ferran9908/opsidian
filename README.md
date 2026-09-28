@@ -4,18 +4,20 @@ A Markdown-first desktop notebook with free, self-hosted sync and an eventual iP
 
 ## Status
 
-Repository foundation only. Workspace boundaries, TypeScript configuration, formatting, design tokens, and decision documentation are present. Electron, Expo, CodeMirror, and the host runtime have **not** been scaffolded or installed yet. There is no runnable app or implemented sync engine.
+Milestone 1's single-note editor prototype is implemented: runnable Electron desktop, a shared CodeMirror editor, and an Expo iPhone shell. Local saving and desktop integration tests are in place. **Real-iPhone editing acceptance is still pending.** Sync and full notebook management are not implemented.
 
 ## Get started
 
-Use Node 24 (the local bootstrap used 24.18.1) and pnpm 12.4.1.
+Use Node 24 and pnpm 12.4.1.
 
 ```sh
 pnpm install
-pnpm check
+pnpm dev:desktop
 ```
 
-`pnpm format` formats the repository. `pnpm typecheck` checks the shared packages. A passing check verifies the scaffold, not application functionality.
+`pnpm dev:preview` opens a browser development preview. `pnpm dev:mobile` starts Expo after bundling the shared editor. See [prototype setup, storage, and device checks](docs/editor-prototype.md).
+
+Run `pnpm check` for formatting, typechecks, and behavioral tests. Run `pnpm test:desktop` for a real Electron save/restart smoke test. `pnpm format` formats the repository.
 
 ## Workspace
 
@@ -40,4 +42,4 @@ Workspace dependencies should use `workspace:*`. Add dependencies when their imp
 - [Design reference](docs/design.md)
 - [Decision log and open questions](docs/decisions.md)
 
-Start with milestone 1: validate the same editor in Electron and on a real iPhone.
+Next acceptance gate: validate the shared editor on a real iPhone before expanding notebook functionality.

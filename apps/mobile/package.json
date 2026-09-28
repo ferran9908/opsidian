@@ -2,5 +2,29 @@
   "name": "@opsidian/mobile",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "ios": "expo run:ios",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@opsidian/core": "workspace:*",
+    "@opsidian/theme": "workspace:*",
+    "expo": "57.0.25",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-webview": "13.16.1",
+    "expo-sqlite": "~57.0.3",
+    "expo-file-system": "~57.0.7",
+    "expo-document-picker": "~57.0.2",
+    "expo-dev-client": "~57.0.19",
+    "expo-status-bar": "~57.0.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.4"
+  }
 }

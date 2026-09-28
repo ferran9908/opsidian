@@ -1,7 +1,3 @@
 # @opsidian/mobile
 
-**Planned stack:** React Native + Expo development builds.
-
-Native iPhone shell, locally bundled shared editor in a WebView, and mobile storage adapters.
-
-Workspace placeholder only. No runnable application exists yet. See [build order](../../docs/build-order.md) for implementation gates.
+Expo iPhone prototype with the locally bundled shared CodeMirror editor in a WebView. From the root, run `pnpm dev:mobile`. Native development builds require Xcode and signing. See [setup and required device checks](../../docs/editor-prototype.md). Real-iPhone acceptance is pending.

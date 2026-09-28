@@ -1,7 +1,3 @@
 # @opsidian/desktop
 
-**Planned stack:** Electron + React + Vite.
-
-Desktop shell, native menus, vault access, and the shared editor.
-
-Workspace placeholder only. No runnable application exists yet. See [build order](../../docs/build-order.md) for implementation gates.
+Runnable Electron + React editor prototype. From the repository root, use `pnpm dev:desktop`; `pnpm test:desktop` runs the native smoke test. See [setup, storage, and limitations](../../docs/editor-prototype.md).

@@ -2,5 +2,28 @@
   "name": "@opsidian/desktop",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:renderer": "vite --host 127.0.0.1",
+    "build": "node scripts/build.mjs",
+    "start": "electron .",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@opsidian/core": "workspace:*",
+    "@opsidian/editor": "workspace:*",
+    "@opsidian/theme": "workspace:*",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "lucide-react": "^0.468.0"
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "vite": "8.3.1",
+    "@vitejs/plugin-react": "6.1.1",
+    "@types/react": "~19.2.4",
+    "@types/react-dom": "~19.2.0"
+  }
 }

@@ -54,3 +54,7 @@ These are implementation design tasks, not reasons to block the editor prototype
 ## Future AI direction
 
 Potential features: organize a messy thought, answer questions over notes with citations, and suggest related notes. A machine-hosted agent and supported Codex/ChatGPT sign-in were explored. No AI integration is committed for the initial milestones; re-check product access and integration documentation when that work begins.
+
+## Prototype implementation — 2026-09-28
+
+Milestone 1 uses a fixed single-note directory to isolate editor validation from vault management. Desktop writes Markdown atomically through Electron IPC. Mobile uses a SQLite latest-content recovery journal before materializing its app-owned Markdown file; this is prototype recovery state, not a replacement for the planned file-based vault or a sync journal. Native iPhone keyboard acceptance remains unresolved.

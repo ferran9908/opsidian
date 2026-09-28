@@ -1,6 +1,6 @@
 # Build order
 
-All six implementation milestones are pending. Repository setup is complete; it is not milestone 1.
+Milestone 1 is implemented as a single-note prototype and is awaiting real-iPhone acceptance. Desktop integration and storage checks pass. Milestones 2–6 are pending. See [prototype setup and validation](editor-prototype.md).
 
 ## 1. Prove the editor on Mac and iPhone
 

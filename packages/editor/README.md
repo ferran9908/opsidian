@@ -1,5 +1,3 @@
 # @opsidian/editor
 
-Shared CodeMirror 6 editor, Live Preview, source mode, note-link completion, and editing commands. Browser-facing; native storage is reached through an explicit bridge.
-
-Package boundary reserved; implementation starts with the milestones in [build order](../../docs/build-order.md).
+Shared CodeMirror 6 editor, Live Preview decorations, Markdown commands, and wiki suggestions. Desktop consumes the TypeScript entry; the mobile build embeds the same editor in local HTML. Native storage is supplied by each shell. See [prototype details](../../docs/editor-prototype.md).

@@ -4,9 +4,23 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./style.css": "./src/style.css"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@opsidian/core": "workspace:*",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.13",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/autocomplete": "6.20.3",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/search": "^6.5.0",
+    "@lezer/markdown": "1.7.2",
+    "@lezer/highlight": "^1.2.0",
+    "@opsidian/theme": "workspace:*"
   }
 }
