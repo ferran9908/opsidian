@@ -92,6 +92,31 @@ async function waitFor(check) {
     await evaluate("document.querySelector('.cm-content').textContent"),
     /\[\[Weekend plans\]\]/,
   );
+  await evaluate("document.querySelector('.cm-content').focus()");
+  web.sendInputEvent({ type: 'keyDown', keyCode: 'F', modifiers: ['meta'] });
+  web.sendInputEvent({ type: 'keyUp', keyCode: 'F', modifiers: ['meta'] });
+  await waitFor(() => evaluate("Boolean(document.querySelector('.op-find'))"));
+  await evaluate(`(() => {
+    const field = document.querySelector('.op-find input');
+    field.value = 'task'; field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  })()`);
+  assert.equal(
+    await evaluate("document.querySelector('.cm-searchMatch-selected')?.textContent"),
+    'task',
+  );
+  await evaluate(`(() => {
+    document.querySelector('[aria-label="Show replacement options"]').click();
+    const field = document.querySelector('[aria-label="Replace with"]');
+    field.value = 'check'; field.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('[aria-label="Replace all matches"]').click();
+  })()`);
+  await waitFor(() => readFileSync(snapshot.location, 'utf8').includes('Try a check'));
+  await evaluate(
+    `document.querySelector('.op-find input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`,
+  );
+  assert.equal(await evaluate("document.querySelector('.op-find') === null"), true);
+  console.log('PASS themed find, match navigation, replacement, Escape');
   await replace('# Close flush\n\nLast keystroke survives.');
   // Close immediately, before the normal autosave debounce expires.
   win.on('closed', () => {

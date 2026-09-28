@@ -17,9 +17,10 @@ import {
   startCompletion,
   type CompletionContext,
 } from '@codemirror/autocomplete';
-import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
+import { createSearchPanel } from './search-panel';
 import { livePreview, isCodeAt, type PreviewOptions } from './live-preview';
 
 export type EditorMode = 'live' | 'source';
@@ -73,6 +74,7 @@ export function createEditor(options: EditorOptions) {
             { tag: tags.processingInstruction, color: 'var(--muted)' },
           ]),
         ),
+        search({ top: true, createPanel: createSearchPanel }),
         highlightSelectionMatches(),
         autocompletion({ override: [source], activateOnTyping: true }),
         keymap.of([
