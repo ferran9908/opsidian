@@ -68,6 +68,17 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Temporary save files are hidden,** so Obsidian, the file watcher and the note list never see them.
 - **Images up to 25 MB on desktop.** They are served from disk, so the 5 MB limit that suits the phone's in-memory images does not apply.
 
+## Sync implementation — 2026-10-14
+
+- **Near real time, not live co-editing.** Confirmed with the user. Saved versions travel; a change reaches the other device in about a second. A CRDT stays out of scope.
+- **The host orders, devices reconcile.** The host accepts a change only if it was made from the file's current version, and never merges. Merging is three-way and line-based, on the device.
+- **No pending queue.** A device derives what to send by comparing its folder with the last state it agreed with the host, so there is no queue to corrupt.
+- **File identity is a host-issued id per file.** App-made moves are reported exactly; outside moves are recognised by unchanged content. No ids are written into notes.
+- **History is never pruned for now.** This removes tombstone collection and rebootstrap from the first version, at the cost of host disk.
+- **The host stores versions by content hash,** not a Markdown folder, so the desktop app and a host on the same Mac never write the same files.
+- **Sync state lives in `.opsidian/` in the notebook; the credential does not.** It is kept in the app's own data, encrypted with the keychain.
+- **Still open:** transport encryption and certificates, packaging the host, history retention, host migration.
+
 ## Future AI direction
 
 Potential features: organize a messy thought, answer questions over notes with citations, and suggest related notes. A machine-hosted agent and supported Codex/ChatGPT sign-in were explored. No AI integration is committed for the initial milestones; re-check product access and integration documentation when that work begins.

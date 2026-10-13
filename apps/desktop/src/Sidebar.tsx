@@ -14,7 +14,14 @@ import {
   Search,
   Trash2,
 } from 'lucide-react';
-import { noteFolder, noteTitle, type VaultInfo, type VaultTree } from '@opsidian/core';
+import {
+  noteFolder,
+  noteTitle,
+  type SyncInfo,
+  type VaultInfo,
+  type VaultTree,
+} from '@opsidian/core';
+import { syncLabel } from './SyncDialog';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -42,6 +49,8 @@ interface Props {
   onTrash(path: string): void;
   onReveal(path: string): void;
   onShowTrash(): void;
+  sync: SyncInfo;
+  onShowSync(): void;
   onFind(): void;
   onSwitch(): void;
 }
@@ -75,7 +84,7 @@ function NameField(props: { label: string; initial?: string; onDone(name?: strin
 }
 
 export function Sidebar(props: Props) {
-  const { vault, tree, active, expanded } = props;
+  const { vault, tree, active, expanded, sync } = props;
   const [renaming, setRenaming] = useState<string | null>(null);
   // The folder a new folder is being named in; '' is the top level.
   const [creating, setCreating] = useState<string | null>(null);
@@ -263,7 +272,9 @@ export function Sidebar(props: Props) {
           <strong className="text-sidebar-accent-foreground block truncate text-[15px] font-semibold">
             {vault.name}
           </strong>
-          <span className="block text-xs">Local notebook</span>
+          <span className="block text-xs">
+            {sync.connected ? 'Synced notebook' : 'Local notebook'}
+          </span>
         </span>
         <ChevronsUpDown size={14} className="shrink-0" />
       </button>
@@ -311,9 +322,27 @@ export function Sidebar(props: Props) {
         >
           <Trash2 size={15} /> Trash
         </button>
-        <p className="text-sidebar-accent-foreground flex items-center gap-2 text-[13px]">
-          <span className="bg-success size-1.5 rounded-full" /> On this Mac
-        </p>
+        <button
+          aria-label="Sync"
+          title={sync.connected ? 'Sync details' : 'Set up sync'}
+          className="hover:bg-sidebar-accent text-sidebar-accent-foreground -mx-2 flex h-[30px] w-[calc(100%+16px)] items-center gap-2 rounded-md px-2 text-[13px]"
+          onClick={props.onShowSync}
+        >
+          <span
+            className={cn(
+              'size-1.5 shrink-0 rounded-full',
+              !sync.connected || sync.state === 'synced'
+                ? 'bg-success'
+                : sync.state === 'syncing'
+                  ? 'bg-link animate-pulse'
+                  : 'bg-destructive',
+            )}
+          />
+          <span role="status" className="min-w-0 flex-1 truncate text-left">
+            {syncLabel(sync)}
+          </span>
+          {!sync.connected && <span className="text-sidebar-foreground text-xs">Set up sync</span>}
+        </button>
         <p className="mt-1.5 truncate" title={vault.location}>
           {vault.location}
         </p>

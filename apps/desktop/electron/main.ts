@@ -1,10 +1,11 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, net, session, Menu, shell } from 'electron';
-import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
+import { lstat, readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validateContent, validateName, type VaultInfo } from '@opsidian/core';
 import { themes } from '@opsidian/theme';
 import { Vault } from './vault';
+import { SyncService, hostAddress } from './sync';
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'opsidian', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -26,11 +27,15 @@ async function start() {
   let mayClose = false;
   let vault: Vault | null = null;
 
+  const sync = new SyncService(app.getPath('userData'), (info) =>
+    window?.webContents.send('sync:info', info),
+  );
   async function use(directory: string, remember: boolean): Promise<VaultInfo> {
     const next = await Vault.open(directory);
     vault?.close();
     vault = next;
     next.watch((paths) => window?.webContents.send('vault:changed', paths));
+    await sync.attach(next);
     if (remember) {
       await mkdir(dirname(settingsPath), { recursive: true });
       await writeFile(settingsPath, JSON.stringify({ vault: next.root }));
@@ -74,15 +79,28 @@ async function start() {
   session.defaultSession.setPermissionRequestHandler((_web, _permission, callback) =>
     callback(false),
   );
+  // macOS refuses Documents, Desktop and Downloads to an app that was never granted them.
+  const denied = (reason: unknown) => {
+    const { code, path } = reason as NodeJS.ErrnoException;
+    if (code !== 'EPERM' && code !== 'EACCES') return undefined;
+    return new Error(
+      `macOS is not letting Opsidian use ${path ? `“${path}”` : 'that folder'}. ` +
+        'Allow it in System Settings → Privacy & Security → Files and Folders, or choose another folder.',
+    );
+  };
   const handle = (channel: string, handler: (...args: unknown[]) => unknown) =>
-    ipcMain.handle(channel, (event, ...args) => {
+    ipcMain.handle(channel, async (event, ...args) => {
       if (
         !window ||
         event.sender !== window.webContents ||
         event.senderFrame !== window.webContents.mainFrame
       )
         throw new Error('Untrusted request');
-      return handler(...args);
+      try {
+        return await handler(...args);
+      } catch (reason) {
+        throw denied(reason) ?? reason;
+      }
     });
 
   handle('vault:current', () => (vault ? { name: vault.name, location: vault.root } : null));
@@ -97,7 +115,10 @@ async function start() {
   handle('vault:create', async (name, parent) => {
     validateName(name);
     const directory = join(parent === undefined ? defaultParent : text(parent, 4000), name);
-    const existing = await readdir(directory).catch(() => []);
+    const existing = await readdir(directory).catch((reason) => {
+      if ((reason as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw reason;
+    });
     if (existing.some((entry) => !entry.startsWith('.')))
       throw new Error(`“${name}” already exists there and is not empty. Open it instead.`);
     return use(directory, true);
@@ -152,6 +173,42 @@ async function start() {
     });
     if (result.canceled || !result.filePaths[0]) return null;
     return open().importImage(result.filePaths[0]);
+  });
+  handle('sync:info', () => sync.info());
+  handle('sync:connect', async (host, code) => {
+    const address = hostAddress(text(host, 500));
+    await sync.adopt(open(), address, await sync.invite(address, text(code, 100)));
+    return sync.info();
+  });
+  handle('sync:disconnect', () => sync.disconnect());
+  handle('sync:confirm-deletions', () => sync.confirmDeletions());
+  handle('sync:history', (path) => sync.history(text(path)));
+  handle('sync:version', (hash) => sync.versionText(text(hash, 64)));
+  handle('vault:join', async (host, code, parent) => {
+    const address = hostAddress(text(host, 500));
+    const root = parent === undefined ? defaultParent : text(parent, 4000);
+    // Check the folder before spending the invitation, which works only once.
+    await mkdir(root, { recursive: true });
+    const pairing = await sync.invite(address, text(code, 100));
+    // The invitation is spent, so nothing from here on may fail for a reason that a
+    // different folder name would have avoided.
+    let name = pairing.notebook.name;
+    try {
+      validateName(name);
+    } catch {
+      name = 'Notebook';
+    }
+    const free = async (directory: string) =>
+      lstat(directory).then(
+        async (found) => found.isDirectory() && !(await readdir(directory)).length,
+        () => true,
+      );
+    let directory = join(root, name);
+    for (let count = 1; !(await free(directory)); count++)
+      directory = join(root, `${name} ${count}`);
+    const info = await use(directory, true);
+    await sync.adopt(open(), address, pairing);
+    return info;
   });
   handle('window:close-failed', async (message) => {
     const result = await dialog.showMessageBox(window!, {

@@ -1,0 +1,116 @@
+# Sync
+
+Milestone 3, 2026-10-14. A notebook can be kept in step between devices through a host you run yourself. This document is the protocol design and a record of what is built.
+
+## What you get
+
+- Every device has a full copy of the notebook as ordinary files and works offline.
+- With both devices online, a change saved on one reaches the other in about a second. The test measures roughly 200 ms on one machine.
+- It is not live co-editing. What travels is saved versions of files, not keystrokes.
+- Nothing is deleted by sync. A file removed elsewhere goes to the notebook's `.trash`. Edits that cannot be combined are kept as two files.
+
+## Running it
+
+On the machine that will be the host (this Mac, another Mac, a VPS):
+
+```sh
+pnpm host serve                 # listens on port 4810, data in ~/.opsidian-host
+pnpm host invite "Personal"     # prints an address and a single-use code
+```
+
+`apps/host/dist/opsidian-host.mjs` is one file with no dependencies beyond Node 22 or later, so it can be copied to a server and run with `node opsidian-host.mjs serve`.
+
+On the first Mac, open the notebook, click the sync line at the bottom of the sidebar, and enter the address and code. On the second Mac, run `invite` again for a fresh code, then choose **Connect to a notebook** on the welcome screen. Each invitation works once and expires after 15 minutes.
+
+Other commands: `devices` lists paired devices, `revoke DEVICE-ID` stops one syncing, `notebooks` lists what the host holds.
+
+**The connection is not encrypted by the host.** Use it over Tailscale, on a network you trust, or behind an HTTPS reverse proxy such as Caddy. Certificates and a guided setup are milestone 5.
+
+## Model
+
+The host keeps, for each notebook, a numbered log of accepted changes and the content of every version. Each file has an identity that stays with it through renames. A file's state on the host is `{ seq, file, path, hash, size }`; `seq` is its position in the log and a null `hash` means deleted.
+
+A device remembers, per file, the last state it agreed with the host (`.opsidian/sync.json` in the notebook folder), and a cursor: the log position it has applied up to. It keeps no queue of pending changes. What is pending is whatever differs between the folder and that remembered state, worked out by looking. A crash therefore cannot corrupt or lose a queue.
+
+The host orders changes and never merges. A device proposes a change naming the version it started from. If the file has moved on, the host refuses, and the device pulls, reconciles locally, and tries again.
+
+```text
+sync round (repeats until nothing is left to do)
+  look at the folder: path -> content hash
+  pull changes since the cursor; for each file changed on the host:
+    unchanged here            -> take the host's version (write, move, or trash)
+    changed here, text        -> three-way merge with the last agreed version
+      different lines         -> write the merge; it is sent in the push below
+      same lines              -> host's version stays; this device's goes beside it
+    changed here, not text    -> keep both, as above
+    deleted there, edited here -> the edit survives and is sent as the file's return
+    deleted here, edited there -> the edit survives and the file comes back
+  save state and cursor
+  push what still differs: deletions, then changes and renames, then new files
+    accepted   -> remember the new version
+    stale      -> another round
+    path taken -> another round; the pull moves one of the two aside
+```
+
+Every local change sync makes is conditional: a write or move happens only if the file still has the content the decision was based on. If the user or another program changed it in the meantime, the round starts over.
+
+## Why failures are safe
+
+- **A request sent twice has one effect.** A change's id is derived from its content, and the host records the answer it gave. Content is stored by its hash.
+- **A lost answer is harmless.** If the host accepted a change but the device never heard, the next pull shows the device its own change, which matches what is on disk.
+- **A crash between any two steps is recoverable.** State is saved after the files it describes. On restart the folder is ahead of the state, and the next round finds that the "difference" already matches the host. The test kills the engine at every step of a scenario that merges, clashes, moves, trashes and creates.
+- **A damaged transfer is refused.** The host checks every upload against its hash, and a device checks every download.
+- **Clocks do not matter.** Order comes from the host's log. Timestamps are for display.
+- **A folder that suddenly looks mostly empty is not trusted.** If half or more of the notebook (and at least ten files) vanish at once, the deletions are held until confirmed in the sync dialog, in case the disk was unmounted or a restore was under way.
+
+## Identity and renames
+
+A move made in the app is reported to sync directly, so the file keeps its identity and history. A move made in Finder or another program is recognised when exactly one file disappeared and one appeared with the same content. A file that is renamed and edited outside the app before the next sync is seen as one file deleted and another created: nothing is lost, but its history starts again.
+
+Two files cannot hold the same path, compared without regard to letter case, since a Mac's disk does not distinguish them. For the same reason a name cannot be a file on one device and a folder on another, and every file in a folder shares one spelling of the folder's name: the first file there decides it, and the host respells later arrivals. Renaming a folder's letter case in the app respells it everywhere. A change of letter case made in Finder is put back, because the app cannot tell it from the disk simply keeping an old spelling. When two devices create the same name, the first to reach the host keeps it and the other is renamed as a conflicted copy. When two devices rename one file differently, the first rename to reach the host stands.
+
+## When something cannot sync
+
+One file that cannot be applied or accepted does not hold up the rest. Everything else syncs, the sidebar says how many files could not, and the sync dialog gives the reason for the first. The host's change is tried again each round, with a growing wait.
+
+A file over 100 MB is left exactly as it is on every device: not uploaded, not overwritten, and not treated as deleted.
+
+## Typing while a change arrives
+
+Sync writes to the file on disk, never into the editor. The editor's own save names the version it started from. If the file has changed, the app combines the two the same way sync does and shows the result, keeping the cursor in place and anything typed in the meantime. If the newest keystrokes touch the very lines that changed elsewhere, they are saved as a separate note.
+
+## Pairing and access
+
+`invite` creates a 12-character single-use code. A device exchanges it for a credential scoped to one notebook, which the desktop app stores outside the notebook folder, encrypted with the Mac's keychain. The host stores only hashes of codes and credentials. Guessing is limited to 20 attempts a minute. A revoked device is refused immediately and keeps its files.
+
+The host checks the credential before it reads a request's body, counts wrong invitation codes per caller, and caps what one notebook may store (50 GB by default).
+
+The host validates every path and refuses anything hidden, absolute, or containing `..`. A device validates paths again before acting on them, so a compromised host cannot write outside the notebook folder.
+
+## Wire protocol, version 1
+
+All paths begin `/v1`. Everything except `pair` needs `Authorization: Bearer <credential>`.
+
+| Request                             | Purpose                                                                                         |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `POST /pair` `{code, device}`       | Spend an invitation. Returns the notebook, the device id and its credential.                    |
+| `GET /changes?since=N&wait=S`       | Latest state of each file changed after `N`. Held open up to `S` seconds when idle.             |
+| `POST /ops` `{ops}`                 | Propose changes. Each answer is `accepted`, `stale`, `path-taken`, `missing-blob` or `invalid`. |
+| `HEAD` / `GET` / `PUT /blobs/:hash` | File content, addressed by sha256. An upload that does not match its hash is refused.           |
+| `GET /files/:id/history`            | Every version of a file, newest first.                                                          |
+
+## Not built
+
+- **Pruning history.** The host keeps every version forever. That is what lets a device return after any absence without bringing old data back, and it means the host's disk only grows.
+- **Encrypted transport and public-host setup.** See above.
+- **A packaged background host.** The host is a command you run; packaging it as a Mac service is milestone 5.
+- **A browsable copy on the host.** The host stores versions by content hash, not as a folder of Markdown files. To read a notebook on the host machine, connect a device to it.
+- **Empty folders.** Folders exist on other devices only once they contain a file.
+- **Files over 100 MB** are not synced.
+- **The iPhone.** It will use the same engine (`packages/sync`) with its own storage adapter in milestone 4.
+- **Rotating a device credential,** and moving a notebook to another host.
+
+## Checks
+
+- `tests/sync.test.ts` runs a real host and real notebook folders: propagation, identity through renames, letter-case renames, files trading names, merging, clashes, delete against edit, name collisions, joining two existing copies, the deletion guard, one unsyncable file among others, an oversized file, a two-second liveness bound, repeated requests, a connection that drops 20% of requests, damaged transfers, a crash at every step, and three devices doing random offline work with random connection failures. The random test checks that all devices end identical and that no line anyone wrote is missing unless someone removed it. `OPSIDIAN_FUZZ_SEEDS=200 pnpm test` runs it longer.
+- `pnpm test:sync` starts the host program and the production desktop app. It connects a local notebook with an invitation, has a second device edit the open note and add another, edits one note from both sides at once, restores an earlier version from history, and joins the notebook from a second, empty app.

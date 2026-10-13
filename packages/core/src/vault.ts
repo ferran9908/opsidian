@@ -17,7 +17,9 @@ export interface NoteDocument {
   revision: string;
 }
 /** A save either lands, or the edit is kept beside a file that changed underneath it. */
-export type SaveResult = { revision: string } | { conflict: string };
+export type SaveResult =
+  /** `merged` is what the file now holds when the edit was combined with a newer version. */
+  { revision: string; merged?: string } | { conflict: string };
 
 /** Where a note or folder ended up, and the notes whose links were rewritten to follow it. */
 export interface MoveResult {
@@ -33,6 +35,33 @@ export interface TrashEntry {
   from?: string;
   folder: boolean;
   /** Milliseconds since the epoch. */
+  at: number;
+}
+
+/** Whether this copy of the notebook is connected to a host, and how that is going. */
+export interface SyncInfo {
+  connected: boolean;
+  host?: string;
+  notebook?: string;
+  device?: string;
+  state?: 'syncing' | 'synced' | 'offline' | 'error';
+  /** Changes made here that the host has not accepted yet. */
+  waiting?: number;
+  message?: string;
+  /** Files that could not be synced; `message` describes the first. */
+  problems?: number;
+  /** Deletions held back until confirmed, because so many arrived at once. */
+  held?: number;
+  /** When this copy last matched the host, milliseconds. */
+  at?: number;
+}
+export interface NoteVersion {
+  seq: number;
+  path: string;
+  /** Null for the version in which the note was deleted. */
+  hash: string | null;
+  size: number;
+  device: string;
   at: number;
 }
 
@@ -69,6 +98,18 @@ export interface VaultBridge {
   reveal(path: string): Promise<void>;
   /** Called with the notes whose content changed outside this window. */
   onChange(callback: (paths: string[]) => void): () => void;
+  syncInfo(): Promise<SyncInfo>;
+  /** Connects the open notebook to a host using a single-use invitation. */
+  connect(host: string, code: string): Promise<SyncInfo>;
+  /** Stops syncing. The notes stay on this device and on the host. */
+  disconnect(): Promise<void>;
+  confirmDeletions(): Promise<void>;
+  /** Creates a folder for a notebook that lives on a host, and downloads it. */
+  joinVault(host: string, code: string, parent?: string): Promise<VaultInfo>;
+  /** Earlier versions of a note, newest first. Empty when the notebook is not synced. */
+  history(path: string): Promise<NoteVersion[]>;
+  versionText(hash: string): Promise<string>;
+  onSync(callback: (info: SyncInfo) => void): () => void;
 }
 
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i;

@@ -16,6 +16,10 @@ export function Welcome({ error: initialError, onOpened, onCancel }: Props) {
   const [fallback, setFallback] = useState('');
   const [error, setError] = useState(initialError);
   const [busy, setBusy] = useState(false);
+  // Joining a notebook that already lives on a host, instead of starting a new one.
+  const [joining, setJoining] = useState(false);
+  const [host, setHost] = useState('');
+  const [code, setCode] = useState('');
   useEffect(() => {
     void bridge.defaultParent().then(setFallback);
   }, []);
@@ -33,8 +37,12 @@ export function Welcome({ error: initialError, onOpened, onCancel }: Props) {
   };
   const create = (event: FormEvent) => {
     event.preventDefault();
-    void run(() => bridge.createVault(name.trim(), parent));
+    void run(() =>
+      joining ? bridge.joinVault(host, code, parent) : bridge.createVault(name.trim(), parent),
+    );
   };
+  const field =
+    'border-input bg-card focus:border-ring mt-2 h-12 w-full rounded-lg border px-4 outline-none';
   return (
     <div className="bg-secondary flex h-full flex-col">
       <div className="drag h-14 shrink-0" />
@@ -44,22 +52,54 @@ export function Welcome({ error: initialError, onOpened, onCancel }: Props) {
           A place for your thoughts.
         </h1>
         <p className="text-muted-foreground mt-3 max-w-[400px] leading-6">
-          Start a notebook. Your notes are saved as Markdown files in a folder you choose.
+          {joining
+            ? 'Connect to a notebook on your host. Its notes are downloaded as Markdown files into a folder you choose, and kept in step.'
+            : 'Start a notebook. Your notes are saved as Markdown files in a folder you choose.'}
         </p>
-        <label className="mt-10 block text-[13px] font-medium" htmlFor="notebook-name">
-          Notebook name
-        </label>
-        <input
-          id="notebook-name"
-          autoFocus
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          className="border-input bg-card focus:border-ring mt-2 h-12 w-full rounded-lg border px-4 outline-none"
-        />
+        {joining ? (
+          <>
+            <label className="mt-10 block text-[13px] font-medium" htmlFor="join-host">
+              Host address
+            </label>
+            <input
+              id="join-host"
+              autoFocus
+              value={host}
+              placeholder="192.168.1.4:4810"
+              spellCheck={false}
+              onChange={(event) => setHost(event.target.value)}
+              className={field}
+            />
+            <label className="mt-5 block text-[13px] font-medium" htmlFor="join-code">
+              Invitation code
+            </label>
+            <input
+              id="join-code"
+              value={code}
+              placeholder="ABCD-EFGH-JKMN"
+              spellCheck={false}
+              onChange={(event) => setCode(event.target.value)}
+              className={field}
+            />
+          </>
+        ) : (
+          <>
+            <label className="mt-10 block text-[13px] font-medium" htmlFor="notebook-name">
+              Notebook name
+            </label>
+            <input
+              id="notebook-name"
+              autoFocus
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className={field}
+            />
+          </>
+        )}
         <div className="text-muted-foreground mt-4 flex items-center gap-4 text-[13px]">
           <span className="min-w-0 flex-1 truncate" title={parent ?? fallback}>
             {parent ?? fallback}
-            {name.trim() && ` / ${name.trim()}`}
+            {joining ? ' / the notebook’s name' : name.trim() && ` / ${name.trim()}`}
           </span>
           <button
             type="button"
@@ -77,14 +117,19 @@ export function Welcome({ error: initialError, onOpened, onCancel }: Props) {
         <Button
           type="submit"
           size="lg"
-          disabled={busy || !name.trim()}
+          disabled={busy || (joining ? !host.trim() || !code.trim() : !name.trim())}
           className="mt-8 h-12 w-full rounded-lg"
         >
-          Create notebook
+          {joining ? (busy ? 'Connecting…' : 'Connect and download') : 'Create notebook'}
         </Button>
         <div className="text-muted-foreground mt-5 flex justify-center gap-6 text-[13px]">
           <button type="button" disabled={busy} onClick={() => void run(() => bridge.openVault())}>
-            Already have a vault? <span className="text-link">Open an existing folder</span>
+            <span className="text-link">Open an existing folder</span>
+          </button>
+          <button type="button" disabled={busy} onClick={() => setJoining(!joining)}>
+            <span className="text-link">
+              {joining ? 'Start a new notebook' : 'Connect to a notebook'}
+            </span>
           </button>
           {onCancel && (
             <button type="button" onClick={onCancel}>

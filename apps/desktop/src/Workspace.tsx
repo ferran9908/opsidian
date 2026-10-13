@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   FolderSearch,
+  History,
   Monitor,
   Moon,
   PanelLeft,
@@ -16,6 +17,7 @@ import {
   noteFolder,
   noteTitle,
   type MoveResult,
+  type SyncInfo,
   type VaultInfo,
   type VaultTree,
 } from '@opsidian/core';
@@ -25,6 +27,8 @@ import { NoteEditor, type NoteEditorHandle } from './NoteEditor';
 import { FolderPicker } from './FolderPicker';
 import { QuickSwitcher } from './QuickSwitcher';
 import { TrashDialog } from './TrashDialog';
+import { SyncDialog } from './SyncDialog';
+import { HistoryDialog } from './HistoryDialog';
 import { Sidebar } from './Sidebar';
 import { cn } from '@/lib/utils';
 
@@ -47,6 +51,9 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
   const [finding, setFinding] = useState(false);
   const [moving, setMoving] = useState<string | null>(null);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [sync, setSync] = useState<SyncInfo>({ connected: false });
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [mode, setMode] = useState<EditorMode>('live');
   const [notice, setNotice] = useState('');
   const [version, setVersion] = useState(0);
@@ -153,6 +160,10 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
     if (!tree) return;
     localStorage.setItem(storageKey, JSON.stringify({ last: open?.path, expanded: [...expanded] }));
   }, [open?.path, expanded, storageKey, tree]);
+  useEffect(() => {
+    void bridge.syncInfo().then(setSync).catch(fail);
+    return bridge.onSync(setSync);
+  }, []);
   useEffect(
     () =>
       window.opsidian?.onCloseRequest(() => {
@@ -284,6 +295,8 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
           onTrash={(path) => void trash(path)}
           onReveal={(path) => void bridge.reveal(path).catch(fail)}
           onShowTrash={() => setTrashOpen(true)}
+          sync={sync}
+          onShowSync={() => setSyncOpen(true)}
           onFind={() => setFinding(true)}
           onSwitch={onSwitch}
         />
@@ -353,6 +366,16 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
                   </button>
                 ))}
               </div>
+              {sync.connected && (
+                <button
+                  aria-label="Version history"
+                  title="Version history"
+                  className={icon}
+                  onClick={() => setHistoryOpen(true)}
+                >
+                  <History size={17} />
+                </button>
+              )}
               <button
                 aria-label="Show in Finder"
                 title="Show in Finder"
@@ -443,6 +466,17 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
             void relocate(moving, () => bridge.move(moving, folder));
           }}
           onClose={() => setMoving(null)}
+        />
+      )}
+      {syncOpen && <SyncDialog info={sync} onClose={() => setSyncOpen(false)} />}
+      {historyOpen && open && (
+        <HistoryDialog
+          path={open.path}
+          onRestore={(content) => {
+            setHistoryOpen(false);
+            editor.current?.restore(content);
+          }}
+          onClose={() => setHistoryOpen(false)}
         />
       )}
       {trashOpen && (

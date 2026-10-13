@@ -116,4 +116,16 @@ export const previewVault: VaultBridge = {
   imageUrl: () => undefined,
   reveal: async () => {},
   onChange: () => () => {},
+  syncInfo: async () => ({ connected: false }),
+  connect: async () => {
+    throw new Error('Sync needs the desktop app.');
+  },
+  disconnect: async () => {},
+  confirmDeletions: async () => {},
+  joinVault: async () => {
+    throw new Error('Sync needs the desktop app.');
+  },
+  history: async () => [],
+  versionText: async () => '',
+  onSync: () => () => {},
 };

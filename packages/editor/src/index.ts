@@ -213,15 +213,37 @@ export function createEditor(options: EditorOptions) {
       if (currentMode === 'live')
         view.dispatch({ effects: mode.reconfigure(livePreview(preview)) });
     },
-    /** Replaces the text with a version loaded from elsewhere, keeping the cursor if it fits. */
-    setContent(content: string) {
-      const { doc, selection } = view.state;
-      if (doc.toString() === content) return;
+    /**
+     * Replaces the text with a version loaded from elsewhere. Only the part that differs is
+     * touched, so the cursor and the scroll position stay with the text around them.
+     */
+    setContent(text: string) {
+      // The editor holds lines joined by "\n", whatever the file uses.
+      const content = text.replace(/\r\n?/g, '\n');
+      const before = view.state.doc.toString();
+      if (before === content) return;
+      let start = 0;
+      const limit = Math.min(before.length, content.length);
+      while (start < limit && before[start] === content[start]) start++;
+      let end = 0;
+      while (
+        end < limit - start &&
+        before[before.length - 1 - end] === content[content.length - 1 - end]
+      )
+        end++;
       view.dispatch({
-        changes: { from: 0, to: doc.length, insert: content },
-        selection: { anchor: Math.min(selection.main.anchor, content.length) },
+        changes: {
+          from: start,
+          to: before.length - end,
+          insert: content.slice(start, content.length - end),
+        },
         annotations: external.of(true),
       });
+    },
+    /** Replaces the whole text as an edit the user made: it is saved and can be undone. */
+    replaceAll(content: string) {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content } });
+      view.focus();
     },
     /** Puts a heading at the top of the view. False when the note has no such heading. */
     scrollToHeading(heading: string): boolean {

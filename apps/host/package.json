@@ -2,5 +2,20 @@
   "name": "@opsidian/host",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "fastify": "^5.12.5",
+    "@opsidian/sync": "workspace:*"
+  },
+  "bin": {
+    "opsidian-host": "dist/opsidian-host.mjs"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && node dist/opsidian-host.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
 }
