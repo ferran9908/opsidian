@@ -3,6 +3,7 @@ import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { PrototypeStore } from './storage';
 import { validateContent } from '@opsidian/core';
+import { themes } from '@opsidian/theme';
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'opsidian', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -89,7 +90,7 @@ async function start() {
       minWidth: 740,
       minHeight: 550,
       title: 'Opsidian',
-      backgroundColor: '#171D22',
+      backgroundColor: themes.dark.background,
       titleBarStyle: 'hiddenInset',
       trafficLightPosition: { x: 24, y: 24 },
       webPreferences: {

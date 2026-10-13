@@ -71,7 +71,7 @@ export function createEditor(options: EditorOptions) {
             { tag: tags.emphasis, fontStyle: 'italic' },
             { tag: tags.strikethrough, textDecoration: 'line-through' },
             { tag: tags.monospace, fontFamily: 'ui-monospace, monospace' },
-            { tag: tags.processingInstruction, color: 'var(--muted)' },
+            { tag: tags.processingInstruction, color: 'var(--muted-foreground)' },
           ]),
         ),
         search({ top: true, createPanel: createSearchPanel }),

@@ -15,12 +15,13 @@ import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 import { editorHtml } from '../generated/editor-html';
 import { loadNote, saveNote, importImage } from './storage';
 import { validateContent } from '@opsidian/core';
+import { themes } from '@opsidian/theme';
 
 export default function App() {
   const web = useRef<WebView>(null);
   const [error, setError] = useState('');
   const dark = useColorScheme() === 'dark';
-  const backgroundColor = dark ? '#171D22' : '#FFFFFF';
+  const backgroundColor = themes[dark ? 'dark' : 'light'].background;
   useEffect(() => {
     const listener = AppState.addEventListener('change', (state) => {
       if (state !== 'active')
@@ -122,5 +123,5 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   error: { padding: 16, backgroundColor: '#382a2a' },
   errorText: { color: '#f1d2cf', lineHeight: 21 },
-  reload: { color: '#a9c9e3', paddingTop: 12 },
+  reload: { color: themes.dark.link, paddingTop: 12 },
 });

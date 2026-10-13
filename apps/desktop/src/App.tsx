@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   BookOpen,
   FileText,
@@ -28,7 +28,7 @@ import {
   type EditorCommand,
 } from '@opsidian/editor';
 import { SaveQueue, imageMarkdown, noteSuggestions, type SaveStatus } from '@opsidian/core';
-import { themes, type ThemePreference } from '@opsidian/theme';
+import type { ThemePreference } from '@opsidian/theme';
 import { browserStore } from './browser-store';
 import styles from './App.module.css';
 
@@ -63,7 +63,6 @@ export function App() {
   );
   const [systemDark, setSystemDark] = useState(matchMedia('(prefers-color-scheme: dark)').matches);
   const dark = theme === 'dark' || (theme === 'system' && systemDark);
-  const palette = themes[dark ? 'dark' : 'light'];
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)');
     const change = () => setSystemDark(media.matches);
@@ -71,7 +70,7 @@ export function App() {
     return () => media.removeEventListener('change', change);
   }, []);
   useEffect(() => {
-    document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    document.documentElement.classList.toggle('dark', dark);
     localStorage.setItem('opsidian-theme', theme);
   }, [theme, dark]);
   useEffect(() => {
@@ -147,11 +146,8 @@ export function App() {
   }
   const themeIcon =
     theme === 'system' ? <Monitor size={17} /> : dark ? <Moon size={17} /> : <Sun size={17} />;
-  const colorVars = Object.fromEntries(
-    Object.entries(palette).map(([key, value]) => [`--${key}`, value]),
-  ) as CSSProperties;
   return (
-    <div className={styles.app} style={colorVars}>
+    <div className={styles.app}>
       {sidebar && (
         <aside className={styles.sidebar}>
           <div className={styles.dragSpace}>

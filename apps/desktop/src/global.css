@@ -1,3 +1,6 @@
+@import 'tailwindcss';
+@import '@opsidian/theme/theme.css';
+
 * {
   box-sizing: border-box;
 }
@@ -25,6 +28,6 @@ button:disabled {
 }
 button:focus-visible,
 summary:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ring);
   outline-offset: 3px;
 }

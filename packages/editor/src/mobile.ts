@@ -7,7 +7,7 @@ import {
   type NoteSnapshot,
   type SaveStatus,
 } from '@opsidian/core';
-import { themes } from '@opsidian/theme';
+import '@opsidian/theme/tokens.css';
 import './style.css';
 import './mobile.css';
 
@@ -78,9 +78,7 @@ function report(status: SaveStatus) {
 }
 let dark = matchMedia('(prefers-color-scheme: dark)').matches;
 function setTheme() {
-  for (const [name, value] of Object.entries(themes[dark ? 'dark' : 'light']))
-    document.documentElement.style.setProperty(`--${name}`, value);
-  document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+  document.documentElement.classList.toggle('dark', dark);
   element('theme').textContent = dark ? 'Light' : 'Dark';
 }
 setTheme();

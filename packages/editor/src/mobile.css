@@ -5,8 +5,8 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background: var(--canvas);
-  color: var(--text);
+  background: var(--background);
+  color: var(--foreground);
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 }
 body {
@@ -16,7 +16,7 @@ body {
 }
 button,
 select {
-  color: var(--muted);
+  color: var(--muted-foreground);
   background: transparent;
   border: 0;
   font: inherit;
@@ -24,7 +24,7 @@ select {
 }
 button:focus-visible,
 select:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ring);
 }
 header {
   padding: 12px 20px;
@@ -47,7 +47,7 @@ select {
 }
 select {
   max-width: 124px;
-  background: var(--surface);
+  background: var(--card);
 }
 main {
   flex: 1;
@@ -59,7 +59,7 @@ main {
 .eyebrow {
   font-size: 10px;
   letter-spacing: 0.08em;
-  color: var(--muted);
+  color: var(--muted-foreground);
   padding-bottom: 23px;
 }
 footer {
@@ -82,8 +82,8 @@ footer {
   touch-action: manipulation;
 }
 #toolbar button:active {
-  background: var(--selection);
-  color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 #toolbar button:disabled {
   opacity: 0.35;
@@ -94,25 +94,25 @@ footer {
   padding: 5px 20px 9px;
   gap: 10px;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--muted-foreground);
   min-height: 27px;
 }
 #save-status[data-state='error'] {
-  color: #df9b96;
+  color: var(--destructive);
 }
 #retry {
-  color: var(--accent);
+  color: var(--link);
   text-decoration: underline;
 }
 #link-notice {
   padding: 12px 20px;
-  background: var(--surface);
+  background: var(--card);
   font-size: 12px;
   line-height: 1.7;
 }
 #dismiss-link {
   padding: 6px 12px;
-  color: var(--accent);
+  color: var(--link);
 }
 [hidden] {
   display: none !important;

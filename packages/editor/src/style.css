@@ -4,9 +4,9 @@
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
-  color: var(--text);
+  color: var(--foreground);
   min-height: 100%;
-  background: var(--canvas);
+  background: var(--background);
 }
 .cm-editor.cm-focused {
   outline: none;
@@ -17,13 +17,13 @@
 }
 .cm-content {
   padding: 0 0 180px;
-  caret-color: var(--accent);
+  caret-color: var(--link);
 }
 .cm-line {
   padding: 0;
 }
 .cm-cursor {
-  border-left-color: var(--accent);
+  border-left-color: var(--link);
 }
 .cm-selectionBackground,
 .cm-focused .cm-selectionBackground {
@@ -33,8 +33,8 @@
   background: var(--selection);
 }
 .cm-tooltip {
-  background: var(--surface);
-  color: var(--text);
+  background: var(--popover);
+  color: var(--popover-foreground);
   border: 1px solid var(--border);
   border-radius: 8px;
   font:
@@ -47,21 +47,21 @@
   padding: 8px 12px;
 }
 .cm-tooltip-autocomplete ul li[aria-selected] {
-  background: var(--selection);
-  color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 .cm-completionDetail {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-style: normal;
 }
 .cm-panels {
-  background: var(--surface);
-  color: var(--text);
+  background: var(--background);
+  color: var(--foreground);
 }
 .cm-textfield,
 .cm-button {
-  background: var(--surface);
-  color: var(--text);
+  background: var(--card);
+  color: var(--foreground);
   border: 1px solid var(--border);
 }
 .op-heading {
@@ -95,34 +95,34 @@
   text-decoration: line-through;
 }
 .op-quote {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-style: italic;
 }
 .op-syntax {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-weight: 400;
 }
 .op-code {
   font:
     0.9em/1.6 ui-monospace,
     monospace;
-  background: var(--surface);
+  background: var(--muted);
 }
 .cm-editor .op-wikilink,
 .cm-editor .op-link-source {
-  color: var(--accent);
-  background: var(--linkBackground);
+  color: var(--link);
+  background: none;
   border: none;
-  border-bottom: 1px solid var(--accent);
-  padding: 1px 4px;
+  padding: 0;
   font: inherit;
   cursor: pointer;
-  border-radius: 3px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .op-task {
   width: 17px;
   height: 17px;
-  accent-color: var(--accent);
+  accent-color: var(--primary);
   vertical-align: middle;
   cursor: pointer;
 }
@@ -138,7 +138,7 @@
   object-fit: contain;
 }
 .cm-placeholder {
-  color: var(--muted);
+  color: var(--muted-foreground);
 }
 @media (max-width: 600px) {
   .cm-editor {
@@ -157,8 +157,8 @@
 }
 
 .cm-editor .cm-panels {
-  background: var(--canvas);
-  color: var(--text);
+  background: var(--background);
+  color: var(--foreground);
   border: 0;
   z-index: 5;
 }
@@ -190,17 +190,17 @@
   box-sizing: border-box;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
+  background: var(--card);
+  color: var(--foreground);
   padding: 8px 10px;
   font: inherit;
   outline: none;
 }
 .cm-editor .op-find input::placeholder {
-  color: var(--muted);
+  color: var(--muted-foreground);
 }
 .cm-editor .op-find input:focus {
-  border-color: var(--accent);
+  border-color: var(--ring);
   box-shadow: 0 0 0 2px var(--selection);
 }
 .cm-editor .op-find button {
@@ -214,35 +214,35 @@
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
-  color: var(--muted);
+  color: var(--muted-foreground);
   font: inherit;
   cursor: pointer;
 }
 .cm-editor .op-find button:hover {
-  background: var(--surface);
-  color: var(--text);
+  background: var(--accent);
+  color: var(--foreground);
 }
 .cm-editor .op-find button[aria-pressed='true'],
 .cm-editor .op-find button[aria-expanded='true'] {
-  background: var(--selection);
-  color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 .cm-editor .op-find button:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ring);
   outline-offset: 1px;
 }
 .op-find-status:not(:empty) {
   display: block;
   padding: 8px 2px 0;
-  color: var(--muted);
+  color: var(--muted-foreground);
 }
 .cm-editor .cm-searchMatch {
   background: var(--selection);
-  outline: 1px solid var(--accent);
+  outline: 1px solid var(--ring);
 }
 .cm-editor .cm-searchMatch-selected {
-  background: var(--accent);
-  color: var(--onAccent);
+  background: var(--primary);
+  color: var(--primary-foreground);
 }
 @media (max-width: 600px) {
   .op-find-row {
