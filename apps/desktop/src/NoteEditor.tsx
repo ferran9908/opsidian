@@ -24,6 +24,8 @@ import {
   SaveQueue,
   headingSection,
   isVaultImage,
+  mergeText,
+  noteFolder,
   noteTitle,
   vaultImageMarkdown,
   type Backlink,
@@ -56,6 +58,8 @@ export interface NoteEditorHandle {
    * with where the note now is, or null if it is gone and nothing more should be written.
    */
   suspend(): (path: string | null) => void;
+  /** Puts an earlier version's text in the editor as an ordinary, undoable edit. */
+  restore(content: string): void;
   /** Whether there is nothing waiting to be saved. */
   settled(): boolean;
   focusTitle(): void;
@@ -113,6 +117,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
     flush: async () => saves.current?.flush(),
     reloadIfClean,
     scrollToHeading: (heading) => void editor.current?.scrollToHeading(heading),
+    restore: (content) => editor.current?.replaceAll(content),
     suspend: () => {
       let release!: () => void;
       held.current = new Promise<void>((resolve) => {
@@ -132,6 +137,20 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
     let cancelled = false;
     let counting: ReturnType<typeof setTimeout>;
     /** Saves one snapshot. A string result is what the file holds instead, after a conflict. */
+    const doc = () => editor.current?.view.state.doc.toString();
+    /**
+     * Saves whatever is in the editor into `copy` until the two match, and returns with no
+     * await after the last look, so the caller can replace the editor's text without a
+     * keystroke falling in between.
+     */
+    const keepAside = async (copy: string, holds: string) => {
+      for (let saved = holds; ;) {
+        const typed = doc();
+        if (typed === undefined || typed === saved) return;
+        const result = await bridge.save(copy, typed, (await bridge.read(copy)).revision);
+        if ('revision' in result) saved = typed;
+      }
+    };
     const write = async (content: string): Promise<void | string> => {
       await held.current;
       const path = target.current;
@@ -139,16 +158,42 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
       if (path === null) return;
       const result = await bridge.save(path, content, revision.current);
       if ('revision' in result) {
+        if (result.merged === undefined) {
+          revision.current = result.revision;
+          return;
+        }
+        // The file had moved on (another device, another program) and the two were combined.
+        // Show the result, keeping anything typed since this save began.
+        const typed = doc() ?? content;
+        let next = typed === content ? result.merged : mergeText(content, typed, result.merged);
+        if (next === undefined) {
+          // The newest keystrokes touch the very lines that changed elsewhere: keep them apart.
+          const copy = await bridge.createNote(
+            noteFolder(path),
+            `${noteTitle(path).slice(0, 150)} (my edit)`,
+          );
+          await keepAside(copy, '');
+          latest.current.onNotice(
+            `“${noteTitle(path)}” changed on another device while you were typing. Your latest text is in “${noteTitle(copy)}”.`,
+          );
+          latest.current.onChanged();
+          next = result.merged;
+        }
+        // Only now is the merged file this editor's starting point; had anything above
+        // failed, the retry would merge again from the old one.
         revision.current = result.revision;
-        return;
+        editor.current?.setContent(next);
+        // The queue takes the merged text as saved. If the editor holds more, say so, using
+        // what it holds by then rather than what it held now.
+        setTimeout(() => {
+          const now = doc();
+          if (now !== undefined && now !== result.merged) saves.current?.update(now);
+        }, 0);
+        return result.merged;
       }
       // The file changed underneath this edit. The edit is in a copy; show what is on disk.
-      const typed = editor.current?.view.state.doc.toString();
-      if (typed !== undefined && typed !== content) {
-        const copy = await bridge.read(result.conflict);
-        await bridge.save(result.conflict, typed, copy.revision);
-      }
       const disk = await bridge.read(path);
+      await keepAside(result.conflict, content);
       revision.current = disk.revision;
       editor.current?.setContent(disk.content);
       latest.current.onNotice(

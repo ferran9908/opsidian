@@ -60,6 +60,8 @@ Indexing, hashing, attachments, and sync run outside the interactive typing path
 
 ## Sync protocol direction
 
+The protocol is now designed and built: see [sync](sync.md). The points below were the brief for it.
+
 - HTTPS requests transfer saved revisions and fetch changes from a durable cursor.
 - Each operation has an idempotency identity and a base revision.
 - The host serializes accepted changes per notebook.

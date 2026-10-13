@@ -1,5 +1,5 @@
 # @opsidian/sync
 
-Platform-independent revision protocol, synchronization state machine, and conflict rules. Accept storage and transport adapters; do not import platform APIs.
+The wire protocol and the device-side engine that reconciles a notebook folder with a host. Platform-independent: storage and transport are passed in (`SyncStore`, `Transport`). The desktop app supplies a store over its vault; the iPhone app will supply its own.
 
-Package boundary reserved; implementation starts with the milestones in [build order](../../docs/build-order.md).
+See [sync](../../docs/sync.md) for the design.

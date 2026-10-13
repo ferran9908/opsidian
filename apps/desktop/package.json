@@ -21,7 +21,8 @@
     "radix-ui": "^1.8.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "tailwind-merge": "3.7.0"
+    "tailwind-merge": "3.7.0",
+    "@opsidian/sync": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",

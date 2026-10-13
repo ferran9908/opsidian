@@ -1,4 +1,15 @@
-import { lstat, mkdir, open, readFile, readdir, realpath, rename, unlink } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  rmdir,
+  unlink,
+} from 'node:fs/promises';
 import { watch, type FSWatcher } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, extname, join, sep } from 'node:path';
@@ -17,11 +28,16 @@ import {
   type SaveResult,
   type SearchResult,
   type TrashEntry,
+  mergeText,
   type VaultTree,
 } from '@opsidian/core';
+import { MAX_FILE_BYTES, type LocalFile, type SyncState, type SyncStore } from '@opsidian/sync';
 import { PENDING, atomicWrite, detectImage } from './storage';
 
 const revisionOf = (content: string) => createHash('sha256').update(content).digest('hex');
+const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+/** Hidden folder holding what this copy of the notebook knows about its host. */
+const SYNC = '.opsidian';
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
 const child = (folder: string, name: string) => (folder ? `${folder}/${name}` : name);
 const within = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`);
@@ -48,7 +64,22 @@ export class Vault {
   private readonly unreported = new Set<string>();
   private stale = false;
 
+  /** Text recently handed to or taken from the editor, by revision: the base for a merge. */
+  private readonly recent = new Map<string, string>();
+  /** Content hash of each file as of its last change, so listing does not reread them all. */
+  private readonly hashes = new Map<string, { stamp: string; hash: string }>();
+  private relocated: ((from: string, to: string) => void) | undefined;
+  private touched: (() => void) | undefined;
+
   private constructor(readonly root: string) {}
+
+  private remember(content: string): string {
+    const revision = revisionOf(content);
+    this.recent.delete(revision);
+    this.recent.set(revision, content);
+    if (this.recent.size > 40) this.recent.delete(this.recent.keys().next().value!);
+    return revision;
+  }
 
   static async open(directory: string): Promise<Vault> {
     await mkdir(directory, { recursive: true });
@@ -169,6 +200,7 @@ export class Vault {
     this.watcher = watch(this.root, { recursive: true }, (_event, filename) => {
       const name = filename?.toString() ?? '';
       if (name.split(sep).some((part) => part.startsWith('.'))) return;
+      this.touched?.();
       clearTimeout(this.timer);
       this.timer = setTimeout(() => {
         // Scans made by other operations may already have absorbed the change being reported.
@@ -208,7 +240,7 @@ export class Vault {
       validateContent(content);
       this.index.set(path, content);
       await this.stamp(path, file);
-      return { content, revision: revisionOf(content) };
+      return { content, revision: this.remember(content) };
     });
   }
 
@@ -227,6 +259,16 @@ export class Vault {
         throw error;
       });
       if (actual !== undefined && revisionOf(actual) !== revision) {
+        // Changed underneath this edit, by sync or another program. Edits to different lines
+        // are combined; only edits to the same lines need a second file.
+        const base = this.recent.get(revision);
+        const merged = base === undefined ? undefined : mergeText(base, content, actual);
+        if (merged !== undefined && merged.length <= MAX_NOTE_LENGTH) {
+          if (merged !== actual) await atomicWrite(file, merged);
+          this.index.set(path, merged);
+          await this.stamp(path, file);
+          return { revision: this.remember(merged), merged };
+        }
         const time = new Date().toISOString().slice(0, 19).replace('T', ' ').replaceAll(':', '.');
         const copy = await this.available(
           noteFolder(path),
@@ -243,7 +285,7 @@ export class Vault {
       await atomicWrite(file, content);
       this.index.set(path, content);
       await this.stamp(path, file);
-      return { revision: revisionOf(content) };
+      return { revision: this.remember(content) };
     });
   }
 
@@ -325,6 +367,7 @@ export class Vault {
     );
     const edits = this.index.relink(notes, new Map(directory ? [[path, next]] : []));
     await rename(from, to);
+    this.relocated?.(path, next);
     // The move has happened. Nothing below may fail the operation, or the caller would
     // believe it had not.
     for (const [before, after] of notes) {
@@ -393,9 +436,16 @@ export class Vault {
    */
   trash(path: string): Promise<void> {
     return this.serial(async () => {
+      const directory = (await lstat(await this.absolute(path, 'existing'))).isDirectory();
+      if (!directory) this.note(path);
+      await this.discard(path);
+    });
+  }
+  /** Moves any file or folder into the trash and records where it was. Call inside `serial`. */
+  private async discard(path: string): Promise<void> {
+    {
       const from = await this.absolute(path, 'existing');
       const directory = (await lstat(from)).isDirectory();
-      if (!directory) this.note(path);
       const bin = await this.bin();
       const taken = new Set((await readdir(bin)).map((entry) => entry.toLowerCase()));
       const extension = directory ? '' : extname(path);
@@ -416,7 +466,7 @@ export class Vault {
         this.folders = this.folders.filter((item) => !within(item, path));
         this.images = this.images.filter((item) => !within(item, path));
       }
-    });
+    }
   }
 
   /** What is in the trash, newest first. */
@@ -523,5 +573,151 @@ export class Vault {
 
   file(path: string): Promise<string> {
     return this.absolute(path, 'existing');
+  }
+
+  /** Called whenever any visible file in the notebook changes, including by this app. */
+  onActivity(listener: (() => void) | undefined): void {
+    this.touched = listener;
+  }
+  /** Called with each move the app makes, so sync can send it as a move. */
+  onRelocate(listener: ((from: string, to: string) => void) | undefined): void {
+    this.relocated = listener;
+  }
+
+  /** Creates the folders above `path` and returns its absolute location. Call inside `serial`. */
+  private async reach(path: string, respell = false): Promise<string> {
+    let folder = '';
+    for (const part of noteFolder(path).split('/').filter(Boolean)) {
+      folder = child(folder, part);
+      const directory = await this.absolute(folder, 'new');
+      if (!(await lstat(directory).catch(() => undefined))) await mkdir(directory);
+      else if (respell) {
+        // The folder may exist under different letter case. Sync means the case asked for,
+        // and a disk that ignores case would otherwise quietly keep the old one.
+        const actual = (await readdir(join(directory, '..'))).find(
+          (entry) => entry !== part && entry.toLowerCase() === part.toLowerCase(),
+        );
+        if (actual && !(await readdir(join(directory, '..'))).includes(part))
+          await rename(join(directory, '..', actual), directory);
+      }
+    }
+    return this.absolute(path, 'new');
+  }
+  /** Removes folders a moved or trashed file left empty. Call inside `serial`. */
+  private async prune(path: string): Promise<void> {
+    for (let folder = noteFolder(path); folder; folder = noteFolder(folder)) {
+      const directory = await this.absolute(folder, 'directory').catch(() => undefined);
+      if (!directory || (await readdir(directory)).some((entry) => entry !== '.DS_Store')) return;
+      await rm(join(directory, '.DS_Store'), { force: true });
+      const removed = await rmdir(directory).then(
+        () => true,
+        () => false,
+      );
+      if (!removed) return;
+    }
+  }
+
+  async syncState(): Promise<SyncState | undefined> {
+    try {
+      const state = JSON.parse(
+        await readFile(join(this.root, SYNC, 'sync.json'), 'utf8'),
+      ) as SyncState;
+      return state?.version === 1 && typeof state.files === 'object' ? state : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  /** Forgets the host. Every file stays exactly as it is. */
+  async forgetSync(): Promise<void> {
+    await rm(join(this.root, SYNC, 'sync.json'), { force: true });
+  }
+
+  /** The notebook as sync sees it: every visible file, changed only by conditional writes. */
+  syncStore(): SyncStore {
+    const current = async (file: string): Promise<string | null> =>
+      readFile(file).then(digest, (error) => {
+        if (missing(error)) return null;
+        throw error;
+      });
+    return {
+      hash: digest,
+      list: () =>
+        this.serial(async () => {
+          const files: LocalFile[] = [];
+          const seen = new Set<string>();
+          const walk = async (directory: string, relative: string): Promise<void> => {
+            for (const entry of await readdir(directory, { withFileTypes: true })) {
+              if (entry.name.startsWith('.')) continue;
+              const path = child(relative, entry.name);
+              if (entry.isDirectory()) await walk(join(directory, entry.name), path);
+              else if (entry.isFile()) {
+                const file = join(directory, entry.name);
+                const info = await lstat(file).catch(() => undefined);
+                if (!info) continue;
+                if (info.size > MAX_FILE_BYTES) {
+                  // Listed, so it is not mistaken for a deletion, but never transferred.
+                  files.push({ path, hash: '', size: info.size, skip: true });
+                  seen.add(path);
+                  continue;
+                }
+                const stamp = `${info.mtimeMs}:${info.size}`;
+                let known = this.hashes.get(path);
+                if (known?.stamp !== stamp) {
+                  const hash = await current(file);
+                  if (hash === null) continue;
+                  known = { stamp, hash };
+                  this.hashes.set(path, known);
+                }
+                seen.add(path);
+                files.push({ path, hash: known.hash, size: info.size });
+              }
+            }
+          };
+          await walk(this.root, '');
+          for (const path of this.hashes.keys()) if (!seen.has(path)) this.hashes.delete(path);
+          return files;
+        }),
+      read: (path) =>
+        this.serial(async () => new Uint8Array(await readFile(await this.absolute(path, 'file')))),
+      write: (path, bytes, expected) =>
+        this.serial(async () => {
+          const file = await this.reach(path);
+          if ((await current(file)) !== expected) return false;
+          await atomicWrite(file, bytes);
+          return true;
+        }),
+      move: (from, to) =>
+        this.serial(async () => {
+          const source = await this.absolute(from, 'file').catch(() => undefined);
+          if (!source) return false;
+          // Only a move that changes nothing but letter case may respell existing folders;
+          // anything else settles into the folders as they are already spelled here.
+          const target = await this.reach(to, from.toLowerCase() === to.toLowerCase());
+          const existing = await lstat(target).catch(() => undefined);
+          // A change of letter case alone is the same file on a disk that ignores case; on
+          // one that does not, a different file may be sitting there.
+          if (existing && existing.ino !== (await lstat(source)).ino) return false;
+          await rename(source, target);
+          await this.prune(from);
+          return true;
+        }),
+      trash: (path, expected) =>
+        this.serial(async () => {
+          const file = await this.absolute(path, 'file').catch(() => undefined);
+          if (!file) return true;
+          if ((await current(file)) !== expected) return false;
+          await this.discard(path);
+          await this.prune(path);
+          return true;
+        }),
+      save: (state) =>
+        this.serial(async () => {
+          const folder = join(this.root, SYNC);
+          await mkdir(folder, { recursive: true });
+          if ((await lstat(folder)).isSymbolicLink())
+            throw new Error('The sync folder is not usable.');
+          await atomicWrite(join(folder, 'sync.json'), JSON.stringify(state));
+        }),
+    };
   }
 }

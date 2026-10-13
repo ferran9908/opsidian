@@ -51,8 +51,7 @@ On these numbers the in-memory index is enough, so the planned SQLite index is n
 
 ## Not in this milestone
 
-- **Version history.** Planned with sync in milestone 3.
-- **"Connect to a notebook".** The screen in the Paper design depends on sync.
+- **Version history without sync.** History comes from the host, so a notebook that is not synced has none. See [sync](sync.md).
 - **Other attachment types.** PDFs and other files are not imported or previewed.
 - **Heading and block completion.** `[[Note#` does not suggest headings, and `[[Note^block]]` references are not supported.
 - **Embeds inside embeds** are shown as links, and embeds are read-only.
