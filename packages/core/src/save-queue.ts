@@ -10,7 +10,8 @@ export class SaveQueue {
 
   constructor(
     initial: string,
-    private readonly write: (content: string) => Promise<void>,
+    /** Resolving with a string means the store holds that text instead, so the queue adopts it. */
+    private readonly write: (content: string) => Promise<void | string>,
     private readonly report: (status: SaveStatus) => void,
     private readonly delay = 160,
   ) {
@@ -23,6 +24,16 @@ export class SaveQueue {
     this.report({ state: 'saving' });
     clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.flush().catch(() => {}), this.delay);
+  }
+
+  /** Nothing waiting to be written and nothing being written. */
+  get settled(): boolean {
+    return this.current === this.persisted && !this.running;
+  }
+
+  /** Takes text loaded from the store as the new saved state, dropping nothing pending. */
+  adopt(content: string): void {
+    if (this.settled) this.current = this.persisted = content;
   }
 
   flush(): Promise<void> {
@@ -39,8 +50,9 @@ export class SaveQueue {
       while (this.current !== this.persisted) {
         const snapshot = this.current;
         this.report({ state: 'saving' });
-        await this.write(snapshot);
-        this.persisted = snapshot;
+        const adopted = await this.write(snapshot);
+        if (typeof adopted === 'string') this.current = this.persisted = adopted;
+        else this.persisted = snapshot;
       }
       this.report({ state: 'saved' });
     } catch (error) {

@@ -6,7 +6,11 @@ import { createRequire } from 'node:module';
 const require = createRequire(new URL('../apps/desktop/package.json', import.meta.url));
 const electron = require('electron');
 const root = await mkdtemp(join(tmpdir(), 'opsidian-smoke-'));
-const env = { ...process.env, OPSIDIAN_VAULT_DIR: root };
+const env = {
+  ...process.env,
+  OPSIDIAN_VAULT_DIR: join(root, 'vault'),
+  OPSIDIAN_PROFILE_DIR: join(root, 'profile'),
+};
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.OPSIDIAN_RENDERER_URL;
 try {

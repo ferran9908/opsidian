@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, net, session, Menu } from 'electron';
-import { join, resolve, sep } from 'node:path';
+import { app, BrowserWindow, ipcMain, dialog, protocol, net, session, Menu, shell } from 'electron';
+import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
+import { dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { PrototypeStore } from './storage';
-import { validateContent } from '@opsidian/core';
+import { validateContent, validateName, type VaultInfo } from '@opsidian/core';
 import { themes } from '@opsidian/theme';
+import { Vault } from './vault';
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'opsidian', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -11,15 +12,57 @@ protocol.registerSchemesAsPrivileged([
 if (!app.requestSingleInstanceLock()) app.quit();
 else void start();
 
+function text(value: unknown, limit = 1000): string {
+  if (typeof value !== 'string' || value.length > limit) throw new Error('Invalid request.');
+  return value;
+}
+
 async function start() {
   await app.whenReady();
   app.setName('Opsidian');
-  const root =
-    process.env.OPSIDIAN_VAULT_DIR ?? join(app.getPath('documents'), 'Opsidian Prototype');
-  const store = new PrototypeStore(root);
+  const settingsPath = join(app.getPath('userData'), 'settings.json');
+  const defaultParent = join(app.getPath('documents'), 'Opsidian');
+  let window: BrowserWindow | null = null;
+  let mayClose = false;
+  let vault: Vault | null = null;
+
+  async function use(directory: string, remember: boolean): Promise<VaultInfo> {
+    const next = await Vault.open(directory);
+    vault?.close();
+    vault = next;
+    next.watch((paths) => window?.webContents.send('vault:changed', paths));
+    if (remember) {
+      await mkdir(dirname(settingsPath), { recursive: true });
+      await writeFile(settingsPath, JSON.stringify({ vault: next.root }));
+    }
+    return { name: next.name, location: next.root };
+  }
+  const open = (): Vault => {
+    if (!vault) throw new Error('Open a notebook first.');
+    return vault;
+  };
+  // A vault named by the environment is for development and tests; it is never remembered.
+  const forced = process.env.OPSIDIAN_VAULT_DIR;
+  const remembered = forced
+    ? undefined
+    : await readFile(settingsPath, 'utf8')
+        .then((raw) => JSON.parse(raw).vault as unknown)
+        .catch(() => undefined);
+  const initial = forced ?? (typeof remembered === 'string' ? remembered : undefined);
+  // A remembered vault that has since moved or been deleted leads back to the welcome screen.
+  if (initial) await use(initial, false).catch(() => undefined);
+
   const rendererRoot = resolve(__dirname, '../dist');
-  protocol.handle('opsidian', (request) => {
+  protocol.handle('opsidian', async (request) => {
     const url = new URL(request.url);
+    if (url.host === 'vault') {
+      try {
+        const file = await open().image(decodeURIComponent(url.pathname.slice(1)));
+        return await net.fetch(pathToFileURL(file).href);
+      } catch {
+        return new Response('Not found', { status: 404 });
+      }
+    }
     if (url.host !== 'app') return new Response('Not found', { status: 404 });
     const path = resolve(
       rendererRoot,
@@ -31,36 +74,66 @@ async function start() {
   session.defaultSession.setPermissionRequestHandler((_web, _permission, callback) =>
     callback(false),
   );
-  let window: BrowserWindow | null = null;
-  let mayClose = false;
-  const trusted = (event: Electron.IpcMainInvokeEvent) => {
-    if (
-      !window ||
-      event.sender !== window.webContents ||
-      event.senderFrame !== window.webContents.mainFrame
-    )
-      throw new Error('Untrusted request');
-  };
-  ipcMain.handle('note:load', (event) => {
-    trusted(event);
-    return store.load();
+  const handle = (channel: string, handler: (...args: unknown[]) => unknown) =>
+    ipcMain.handle(channel, (event, ...args) => {
+      if (
+        !window ||
+        event.sender !== window.webContents ||
+        event.senderFrame !== window.webContents.mainFrame
+      )
+        throw new Error('Untrusted request');
+      return handler(...args);
+    });
+
+  handle('vault:current', () => (vault ? { name: vault.name, location: vault.root } : null));
+  handle('vault:default-parent', () => defaultParent);
+  handle('vault:choose-parent', async () => {
+    const result = await dialog.showOpenDialog(window!, {
+      title: 'Where should the notebook live?',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
   });
-  ipcMain.handle('note:save', (event, content: unknown) => {
-    trusted(event);
+  handle('vault:create', async (name, parent) => {
+    validateName(name);
+    const directory = join(parent === undefined ? defaultParent : text(parent, 4000), name);
+    const existing = await readdir(directory).catch(() => []);
+    if (existing.some((entry) => !entry.startsWith('.')))
+      throw new Error(`“${name}” already exists there and is not empty. Open it instead.`);
+    return use(directory, true);
+  });
+  handle('vault:open', async () => {
+    const result = await dialog.showOpenDialog(window!, {
+      title: 'Open a folder of Markdown notes',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    return use(result.filePaths[0], true);
+  });
+  handle('vault:tree', () => open().tree());
+  handle('note:read', (path) => open().read(text(path)));
+  handle('note:save', (path, content, revision) => {
     validateContent(content);
-    return store.save(content);
+    return open().save(text(path), content, text(revision, 64));
   });
-  ipcMain.handle('note:image', async (event) => {
-    trusted(event);
+  handle('note:create', (folder, name) =>
+    open().createNote(text(folder), name === undefined ? undefined : text(name, 200)),
+  );
+  handle('folder:create', (parent, name) => open().createFolder(text(parent), text(name, 200)));
+  handle('note:rename', (path, name) => open().rename(text(path), text(name, 200)));
+  handle('note:trash', (path) => open().trash(text(path)));
+  handle('note:backlinks', (path) => open().backlinks(text(path)));
+  handle('vault:search', (query) => open().search(text(query, 200)));
+  handle('note:reveal', async (path) => shell.showItemInFolder(await open().file(text(path))));
+  handle('note:image', async () => {
     const result = await dialog.showOpenDialog(window!, {
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }],
     });
     if (result.canceled || !result.filePaths[0]) return null;
-    return store.importImage(result.filePaths[0]);
+    return open().importImage(result.filePaths[0]);
   });
-  ipcMain.handle('window:close-failed', async (event, message: unknown) => {
-    trusted(event);
+  handle('window:close-failed', async (message) => {
     const result = await dialog.showMessageBox(window!, {
       type: 'warning',
       message: 'Your latest changes could not be saved.',
@@ -77,8 +150,7 @@ async function start() {
       window?.close();
     }
   });
-  ipcMain.handle('window:close-ready', (event) => {
-    trusted(event);
+  handle('window:close-ready', () => {
     mayClose = true;
     window?.close();
   });
@@ -92,7 +164,7 @@ async function start() {
       title: 'Opsidian',
       backgroundColor: themes.dark.background,
       titleBarStyle: 'hiddenInset',
-      trafficLightPosition: { x: 24, y: 24 },
+      trafficLightPosition: { x: 18, y: 18 },
       webPreferences: {
         preload: join(__dirname, 'preload.cjs'),
         contextIsolation: true,

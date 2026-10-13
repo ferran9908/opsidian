@@ -13,6 +13,8 @@ Use Node 24 and pnpm 12.4.1, then `pnpm install`.
 
 No host, account, network service, or subscription is required to edit. The website/download flow, multi-note vault management, sync, and App Store packaging are later work.
 
+> The desktop sections below describe the milestone 1 prototype. The desktop app has since moved to a real notebook folder; see [desktop-notebook.md](desktop-notebook.md). The mobile sections and the iPhone acceptance list are current.
+
 ## What works
 
 Electron + React desktop and Expo + React Native WebView share CodeMirror 6 behavior: headings, emphasis, lists, task toggles, link suggestions, local raster images, undo/redo, Live Preview, and Source mode. Live Preview reveals syntax around the selection. Desktop includes the Paper-derived shell and light/dark/system themes. Mobile includes a keyboard toolbar and light/dark toggle.
@@ -36,7 +38,7 @@ Image data is currently loaded into memory per note; lazy attachment caching and
 - `pnpm build:mobile-editor`: creates the ignored local HTML bundle with no CDN dependencies.
 - `pnpm --filter @opsidian/mobile exec expo export --platform ios --output-dir dist`: validates the iOS JavaScript/Hermes bundle; does not compile native iOS code.
 
-Desktop smoke checks cover native typing, task toggles, Source mode, wiki suggestions, code-fence isolation, image import/rendering, a roughly 96 KB note, and close/restart persistence. Performance timing is a development smoke measurement, not a release benchmark. The local run took about 4.6 seconds to replace and save a 96 KB note through native text insertion; bulk-paste performance needs investigation before daily-use acceptance. Storage unit tests cover save ordering, undo during an in-flight save, retry after failure, empty notes, restart, external conflicts, first-write recovery, and image rejection.
+Desktop smoke checks cover native typing, task toggles, Source mode, wiki suggestions, code-fence isolation, image import/rendering, a roughly 96 KB note, and close/restart persistence. Performance timing is a development smoke measurement, not a release benchmark. An early run took about 4.6 seconds to replace a 96 KB note, but that used `webContents.insertText`; a real clipboard paste of the same note takes about 25 ms to reach the editor (`pnpm bench:desktop`). Storage unit tests cover save ordering, undo during an in-flight save, retry after failure, empty notes, restart, external conflicts, first-write recovery, and image rejection.
 
 ## Required real-iPhone acceptance
 

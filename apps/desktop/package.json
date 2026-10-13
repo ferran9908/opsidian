@@ -15,8 +15,10 @@
     "@opsidian/core": "workspace:*",
     "@opsidian/editor": "workspace:*",
     "@opsidian/theme": "workspace:*",
+    "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "^0.468.0",
+    "radix-ui": "^1.8.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "tailwind-merge": "3.7.0"

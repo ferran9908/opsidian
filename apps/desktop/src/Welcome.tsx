@@ -1,0 +1,98 @@
+import { useEffect, useState, type FormEvent } from 'react';
+import type { VaultInfo } from '@opsidian/core';
+import { bridge, message } from './bridge';
+import { Button } from '@/components/ui/button';
+
+interface Props {
+  error: string;
+  onOpened(vault: VaultInfo): void;
+  /** Present when a notebook is already open and this screen can be dismissed. */
+  onCancel?(): void;
+}
+
+export function Welcome({ error: initialError, onOpened, onCancel }: Props) {
+  const [name, setName] = useState('Personal');
+  const [parent, setParent] = useState<string>();
+  const [fallback, setFallback] = useState('');
+  const [error, setError] = useState(initialError);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void bridge.defaultParent().then(setFallback);
+  }, []);
+  const run = async (task: () => Promise<VaultInfo | null>) => {
+    setBusy(true);
+    setError('');
+    try {
+      const vault = await task();
+      if (vault) onOpened(vault);
+    } catch (reason) {
+      setError(message(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const create = (event: FormEvent) => {
+    event.preventDefault();
+    void run(() => bridge.createVault(name.trim(), parent));
+  };
+  return (
+    <div className="bg-secondary flex h-full flex-col">
+      <div className="drag h-14 shrink-0" />
+      <form onSubmit={create} className="mx-auto w-full max-w-[520px] px-6 pt-10">
+        <p className="text-muted-foreground text-xs tracking-[0.1em]">YOUR OWN LITTLE CORNER</p>
+        <h1 className="mt-4 text-[38px] leading-tight font-medium tracking-tight">
+          A place for your thoughts.
+        </h1>
+        <p className="text-muted-foreground mt-3 max-w-[400px] leading-6">
+          Start a notebook. Your notes are saved as Markdown files in a folder you choose.
+        </p>
+        <label className="mt-10 block text-[13px] font-medium" htmlFor="notebook-name">
+          Notebook name
+        </label>
+        <input
+          id="notebook-name"
+          autoFocus
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          className="border-input bg-card focus:border-ring mt-2 h-12 w-full rounded-lg border px-4 outline-none"
+        />
+        <div className="text-muted-foreground mt-4 flex items-center gap-4 text-[13px]">
+          <span className="min-w-0 flex-1 truncate" title={parent ?? fallback}>
+            {parent ?? fallback}
+            {name.trim() && ` / ${name.trim()}`}
+          </span>
+          <button
+            type="button"
+            className="text-link shrink-0"
+            onClick={() => void bridge.chooseParent().then((chosen) => chosen && setParent(chosen))}
+          >
+            Choose folder…
+          </button>
+        </div>
+        {error && (
+          <p role="alert" className="text-destructive mt-5 text-[13px] leading-5">
+            {error}
+          </p>
+        )}
+        <Button
+          type="submit"
+          size="lg"
+          disabled={busy || !name.trim()}
+          className="mt-8 h-12 w-full rounded-lg"
+        >
+          Create notebook
+        </Button>
+        <div className="text-muted-foreground mt-5 flex justify-center gap-6 text-[13px]">
+          <button type="button" disabled={busy} onClick={() => void run(() => bridge.openVault())}>
+            Already have a vault? <span className="text-link">Open an existing folder</span>
+          </button>
+          {onCancel && (
+            <button type="button" onClick={onCancel}>
+              Cancel
+            </button>
+          )}
+        </div>
+      </form>
+    </div>
+  );
+}

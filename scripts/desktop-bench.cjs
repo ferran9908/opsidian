@@ -1,8 +1,12 @@
 // Development timing for large-note edits in the production desktop build. Not a release benchmark.
 const { app, BrowserWindow, clipboard } = require('electron');
-const { readFileSync } = require('node:fs');
+const { mkdirSync, readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
-app.setPath('userData', join(process.env.OPSIDIAN_VAULT_DIR, 'profile'));
+app.setPath('userData', process.env.OPSIDIAN_PROFILE_DIR);
+// The app opens the first note of the vault, so give it one to edit.
+const file = join(process.env.OPSIDIAN_VAULT_DIR, 'Bench.md');
+mkdirSync(process.env.OPSIDIAN_VAULT_DIR, { recursive: true });
+writeFileSync(file, '');
 require('../apps/desktop/dist-electron/main.cjs');
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitFor(check, label) {
@@ -27,7 +31,6 @@ const note = (kb) =>
     () => evaluate("Boolean(document.querySelector('.cm-content'))").catch(() => false),
     'editor',
   );
-  const file = (await evaluate('window.opsidian.load()')).location;
   const length = () =>
     evaluate(
       "document.querySelector('.cm-content').cmTile?.view.state.doc.length ?? document.querySelector('.cm-content').cmView?.view.state.doc.length ?? -1",

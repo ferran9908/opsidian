@@ -1,33 +1,30 @@
 @import 'tailwindcss';
 @import '@opsidian/theme/theme.css';
 
-* {
-  box-sizing: border-box;
+@utility drag {
+  -webkit-app-region: drag;
 }
-html,
-body,
-#root {
-  margin: 0;
-  width: 100%;
-  height: 100%;
+@utility no-drag {
+  -webkit-app-region: no-drag;
 }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  -webkit-font-smoothing: antialiased;
-}
-button,
-input {
-  font: inherit;
-}
-button {
-  cursor: pointer;
-}
-button:disabled {
-  cursor: default;
-  opacity: 0.4;
-}
-button:focus-visible,
-summary:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 3px;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--selection);
+  }
 }

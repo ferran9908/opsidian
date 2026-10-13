@@ -14,7 +14,9 @@ All three have light and dark variants, with dark variants positioned below the 
 
 ## Visual direction
 
-Quiet maritime colors, generous writing space, restrained borders, a compact sidebar, and minimal chrome. Dark mode uses graphite surfaces, soft white text, and mist-blue accents. Initial semantic colors are in `packages/theme/src/index.ts`.
+Obsidian's default palette, generous writing space, restrained borders, a compact sidebar, and minimal chrome. The Paper screens were recoloured on 2026-10-13 from the CSS variables of the installed Obsidian app; the earlier maritime palette is superseded. The colours live in `packages/theme` as shadcn/ui tokens and a Tailwind theme.
+
+Only colour was matched. Type sizes and weights still follow the original Paper design, which is larger than Obsidian's defaults (16px text, bold 26px title).
 
 The first proposed typography was Instrument Sans plus Newsreader, but Paper retained System Sans-Serif. Typography is therefore still open; do not claim the custom fonts are implemented.
 

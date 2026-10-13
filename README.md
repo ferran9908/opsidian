@@ -4,7 +4,7 @@ A Markdown-first desktop notebook with free, self-hosted sync and an eventual iP
 
 ## Status
 
-Milestone 1's single-note editor prototype is implemented: runnable Electron desktop, a shared CodeMirror editor, and an Expo iPhone shell. Local saving and desktop integration tests are in place. **Real-iPhone editing acceptance is still pending.** Sync and full notebook management are not implemented.
+The desktop app opens a folder of Markdown notes: file tree, wiki links, backlinks, search, attachments and trash. See [what the desktop notebook does and does not do yet](docs/desktop-notebook.md). The iPhone shell is still the single-note editor prototype from milestone 1, and **real-iPhone editing acceptance is still pending.** Sync is not implemented.
 
 ## Get started
 
@@ -29,7 +29,7 @@ Run `pnpm check` for formatting, typechecks, and behavioral tests. Run `pnpm tes
 | `packages/core`   | Vault domain, Markdown/link semantics, platform interfaces |
 | `packages/editor` | Shared CodeMirror editing behavior                         |
 | `packages/sync`   | Revision protocol and synchronization logic                |
-| `packages/theme`  | Shared light/dark semantic colors                          |
+| `packages/theme`  | Obsidian palette as shadcn tokens and a Tailwind theme     |
 | `docs`            | Product, architecture, design, decisions, and milestones   |
 
 Workspace dependencies should use `workspace:*`. Add dependencies when their implementation begins; keep app runtime code out of shared packages.
@@ -42,4 +42,4 @@ Workspace dependencies should use `workspace:*`. Add dependencies when their imp
 - [Design reference](docs/design.md)
 - [Decision log and open questions](docs/decisions.md)
 
-Next acceptance gate: validate the shared editor on a real iPhone before expanding notebook functionality.
+Open acceptance gate: validate the shared editor on a real iPhone.

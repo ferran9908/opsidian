@@ -66,4 +66,25 @@ describe('durable acknowledgment queue', () => {
     expect(values).toEqual(['changed', 'original']);
     await queue.flush();
   });
+  it('adopts the stored text when a write reports the store kept something else', async () => {
+    const writes: string[] = [];
+    const queue = new SaveQueue(
+      '',
+      async (text) => {
+        writes.push(text);
+        return text === 'mine' ? 'theirs' : undefined;
+      },
+      () => {},
+      10000,
+    );
+    queue.update('mine');
+    await queue.flush();
+    expect(queue.settled).toBe(true);
+    // Typing the adopted text again is not a change; typing anything else is.
+    queue.update('theirs');
+    await queue.flush();
+    queue.update('mine');
+    await queue.flush();
+    expect(writes).toEqual(['mine', 'mine']);
+  });
 });

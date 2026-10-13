@@ -1,62 +1,164 @@
 // Runs inside Electron against the production app and its real preload/IPC.
 const { app, BrowserWindow, clipboard, dialog } = require('electron');
-const { readFileSync, writeFileSync } = require('node:fs');
+const { existsSync, readFileSync, readdirSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 const assert = require('node:assert/strict');
-app.setPath('userData', join(process.env.OPSIDIAN_VAULT_DIR, 'profile'));
+const vault = process.env.OPSIDIAN_VAULT_DIR;
+app.setPath('userData', process.env.OPSIDIAN_PROFILE_DIR);
 require('../apps/desktop/dist-electron/main.cjs');
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-async function waitFor(check) {
+async function waitFor(check, label) {
   for (let n = 0; n < 200; n++) {
     if (await check()) return;
     await delay(50);
   }
-  throw new Error('Timed out waiting for native editor');
+  throw new Error(`Timed out waiting for ${label}`);
 }
+const note = (name) => join(vault, `${name}.md`);
+const text = (name) => (existsSync(note(name)) ? readFileSync(note(name), 'utf8') : undefined);
 (async () => {
   await app.whenReady();
-  await waitFor(() => BrowserWindow.getAllWindows().length);
+  await waitFor(() => BrowserWindow.getAllWindows().length, 'window');
   const win = BrowserWindow.getAllWindows()[0];
   win.show();
   win.focus();
   const web = win.webContents;
   web.focus();
   const evaluate = (code) => web.executeJavaScript(code);
-  await waitFor(() =>
-    evaluate("Boolean(document.querySelector('.cm-content'))").catch(() => false),
-  );
-  const snapshot = await evaluate('window.opsidian.load()');
-  assert.match(snapshot.location, /Sunday\.md$/);
-  assert.equal(await evaluate('typeof window.require'), 'undefined');
-  if (process.env.OPSIDIAN_SMOKE_PHASE === 'read') {
-    assert.equal(snapshot.content, '# Close flush\n\nLast keystroke survives.');
-    console.log('PASS native restart restored final edit');
-    win.close();
-    return;
-  }
-  const replace = async (text) => {
+  const present = (selector) =>
+    evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)}))`);
+  const editorText = () =>
+    evaluate(
+      "(() => { const c = document.querySelector('.cm-content'); return (c?.cmTile ?? c?.cmView)?.view.state.doc.toString(); })()",
+    );
+  const title = () => evaluate('document.querySelector(\'[aria-label="Note title"]\')?.value');
+  const click = (label) =>
+    evaluate(`document.querySelector('[aria-label=${JSON.stringify(label)}]').click()`);
+  const key = (keyCode, modifiers = []) => {
+    web.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+    web.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+  };
+  const openFromSidebar = async (name) => {
+    await evaluate(
+      `[...document.querySelectorAll('nav button')].find((b) => b.textContent.trim() === ${JSON.stringify(name)}).click()`,
+    );
+    await waitFor(async () => (await title()) === name, `${name} to open`);
+    await waitFor(() => present('.cm-content'), 'editor');
+  };
+  // Waits for the editor to see the selection, as it would between two real keystrokes.
+  const selectAll = async () => {
     win.focus();
     web.focus();
     await evaluate("document.querySelector('.cm-content').focus()");
     web.selectAll();
-    await web.insertText(text);
+    await waitFor(
+      () =>
+        evaluate(
+          "(() => { const c = document.querySelector('.cm-content'); const { state } = (c.cmTile ?? c.cmView).view; return state.selection.main.from === 0 && state.selection.main.to === state.doc.length; })()",
+        ),
+      'select all',
+    );
   };
-  await replace('');
+  const replace = async (value) => {
+    await selectAll();
+    await web.insertText(value);
+  };
+  const blur = () => evaluate("document.querySelector('.cm-content').blur()");
+  const name = async (value) => {
+    await waitFor(
+      () => evaluate("document.activeElement?.getAttribute('aria-label') === 'Note title'"),
+      'title field focus',
+    );
+    await web.insertText(value);
+    key('Enter');
+    await waitFor(() => existsSync(note(value)), `${value}.md`);
+    await waitFor(
+      () => evaluate("document.activeElement?.classList.contains('cm-content')"),
+      'editor focus',
+    );
+  };
+
+  assert.equal(await evaluate('typeof window.require'), 'undefined');
+  if (process.env.OPSIDIAN_SMOKE_PHASE === 'read') {
+    await waitFor(async () => (await title()) === 'Sunday', 'last note to reopen');
+    await waitFor(async () => (await editorText()) === '# Close flush\n\nLast keystroke survives.');
+    console.log('PASS native restart reopened the last note with its final edit');
+    win.close();
+    return;
+  }
+
+  // An empty vault, a first note, and its name becoming the filename.
+  await waitFor(
+    () => evaluate("document.body.textContent.includes('No note is open')"),
+    'empty state',
+  );
+  key('N', ['meta']);
+  await waitFor(() => existsSync(note('Untitled')), 'Untitled.md');
+  await name('Weekend plans');
+  assert.equal(existsSync(note('Untitled')), false);
+  await web.insertText('Walk by the water.');
+  await waitFor(() => text('Weekend plans') === 'Walk by the water.', 'first save');
+
+  // Link completion offers real notes; links navigate and show up as backlinks.
+  await evaluate(
+    "[...document.querySelectorAll('aside button')].find((b) => b.textContent.includes('New note')).click()",
+  );
+  await waitFor(() => existsSync(note('Untitled')), 'second note');
+  await name('Sunday');
   for (const keyCode of '[[Week') {
     web.sendInputEvent({ type: 'keyDown', keyCode });
     web.sendInputEvent({ type: 'char', keyCode });
     web.sendInputEvent({ type: 'keyUp', keyCode });
     await delay(100);
   }
-  await waitFor(() => evaluate("Boolean(document.querySelector('.cm-tooltip-autocomplete'))"));
+  await waitFor(() => present('.cm-tooltip-autocomplete'), 'completion');
   await delay(150); // CodeMirror suppresses accidental acceptance just after opening.
-  web.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
-  web.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
-  await waitFor(() => readFileSync(snapshot.location, 'utf8') === '[[Weekend plans]]');
+  key('Enter');
+  await waitFor(() => text('Sunday') === '[[Weekend plans]]', 'completed link');
+  await blur();
+  await waitFor(() => present('.op-wikilink:not(.op-wikilink-unresolved)'), 'resolved link');
+  await evaluate("document.querySelector('.op-wikilink').click()");
+  await waitFor(async () => (await title()) === 'Weekend plans', 'link navigation');
+  await waitFor(
+    () =>
+      evaluate(
+        "document.querySelector('[aria-label=\"Linked from\"]')?.textContent.includes('Sunday')",
+      ),
+    'backlink',
+  );
+  await click('Back');
+  await waitFor(async () => (await title()) === 'Sunday', 'back');
+  await waitFor(() => present('.cm-content'), 'editor');
+  console.log('PASS new notes, rename by title, link completion, navigation, backlinks, back');
+
+  // A link to a note that does not exist is marked, and following it creates the note.
+  await replace('[[Brand new]]');
+  await blur();
+  await waitFor(() => present('.op-wikilink-unresolved'), 'unresolved link');
+  await evaluate("document.querySelector('.op-wikilink-unresolved').click()");
+  await waitFor(() => existsSync(note('Brand new')), 'note created from link');
+  await waitFor(async () => (await title()) === 'Brand new', 'created note to open');
+
+  // The switcher searches note text, not only names.
+  key('K', ['meta']);
+  await waitFor(() => present('[role="dialog"] input'), 'switcher');
+  await web.insertText('water');
+  await waitFor(
+    () =>
+      evaluate(
+        "document.querySelector('[role=\"dialog\"] li')?.textContent.includes('Walk by the water.')",
+      ),
+    'content match',
+  );
+  key('Enter');
+  await waitFor(async () => (await title()) === 'Weekend plans', 'switcher to open the match');
+  console.log('PASS create from unresolved link, full-text switcher');
+
+  await openFromSidebar('Sunday');
   await replace('```md\n[[Weekend plans]]\n- [ ] code only\n```');
-  await evaluate("document.querySelector('.cm-content').blur()");
+  await blur();
   assert.equal(await evaluate("document.querySelectorAll('.op-wikilink, .op-task').length"), 0);
-  const imagePath = join(process.env.OPSIDIAN_VAULT_DIR, 'test.png');
+  const imagePath = join(process.env.OPSIDIAN_PROFILE_DIR, 'test.png');
   writeFileSync(
     imagePath,
     Buffer.from(
@@ -65,41 +167,43 @@ async function waitFor(check) {
     ),
   );
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [imagePath] });
-  await replace('# Picture\n\n');
-  await evaluate('document.querySelector(\'[aria-label="Attach image"]\').click()');
-  await waitFor(() => readFileSync(snapshot.location, 'utf8').includes('attachments/'));
-  await evaluate("document.querySelector('.cm-content').blur()");
-  await waitFor(() => evaluate("Boolean(document.querySelector('.op-image img')?.naturalWidth)"));
+  await replace('Picture\n\n');
+  await click('Attach image');
+  await waitFor(() => text('Sunday').includes('](attachments/'), 'image link');
+  await blur();
+  await waitFor(
+    () => evaluate("Boolean(document.querySelector('.op-image img')?.naturalWidth)"),
+    'image served from the vault',
+  );
   // A real paste. webContents.insertText takes the slow native text-input path instead.
   clipboard.writeText(
     '# Long note\n\n' + 'A paragraph with **bold** and [[Weekend plans]].\n\n'.repeat(2000),
   );
-  await evaluate("document.querySelector('.cm-content').focus()");
-  web.selectAll();
+  await selectAll();
   const started = Date.now();
   web.paste();
-  await waitFor(() => readFileSync(snapshot.location, 'utf8').length > 90000);
+  await waitFor(() => text('Sunday').length > 90000, 'long note save');
   console.log(
-    `PASS wiki completion, fenced code, native image import; 96KB paste and save ${Date.now() - started}ms`,
+    `PASS fenced code, native image import; 96KB paste and save ${Date.now() - started}ms`,
   );
+
   await replace('# Native smoke\n\n- [ ] Try a task\n\n[[Weekend plans]]\n\n**Real Markdown**');
-  await waitFor(() => readFileSync(snapshot.location, 'utf8').startsWith('# Native smoke'));
-  await evaluate("document.querySelector('.cm-content').blur()");
-  await waitFor(() => evaluate("Boolean(document.querySelector('.op-task'))"));
+  await waitFor(() => text('Sunday').startsWith('# Native smoke'), 'save');
+  await blur();
+  await waitFor(() => present('.op-task'), 'task box');
   await evaluate("document.querySelector('.op-task').click()");
-  await waitFor(() => readFileSync(snapshot.location, 'utf8').includes('- [x]'));
+  await waitFor(() => text('Sunday').includes('- [x]'), 'task toggle');
   await evaluate(
     "Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Source').click()",
   );
-  assert.equal(await evaluate("document.querySelectorAll('.op-task').length"), 0);
+  await waitFor(async () => !(await present('.op-task')), 'source mode');
   assert.match(
     await evaluate("document.querySelector('.cm-content').textContent"),
     /\[\[Weekend plans\]\]/,
   );
   await evaluate("document.querySelector('.cm-content').focus()");
-  web.sendInputEvent({ type: 'keyDown', keyCode: 'F', modifiers: ['meta'] });
-  web.sendInputEvent({ type: 'keyUp', keyCode: 'F', modifiers: ['meta'] });
-  await waitFor(() => evaluate("Boolean(document.querySelector('.op-find'))"));
+  key('F', ['meta']);
+  await waitFor(() => present('.op-find'), 'find bar');
   await evaluate(`(() => {
     const field = document.querySelector('.op-find input');
     field.value = 'task'; field.dispatchEvent(new Event('input', { bubbles: true }));
@@ -115,21 +219,44 @@ async function waitFor(check) {
     field.value = 'check'; field.dispatchEvent(new Event('input', { bubbles: true }));
     document.querySelector('[aria-label="Replace all matches"]').click();
   })()`);
-  await waitFor(() => readFileSync(snapshot.location, 'utf8').includes('Try a check'));
+  await waitFor(() => text('Sunday').includes('Try a check'), 'replace');
   await evaluate(
     `document.querySelector('.op-find input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`,
   );
-  assert.equal(await evaluate("document.querySelector('.op-find') === null"), true);
-  console.log('PASS themed find, match navigation, replacement, Escape');
+  assert.equal(await present('.op-find'), false);
+  console.log('PASS task toggle, source mode, themed find and replace');
+
+  // Another program edits the open note: with nothing unsaved, the editor follows the file.
+  await delay(300);
+  writeFileSync(note('Sunday'), 'Edited elsewhere.');
+  await waitFor(async () => (await editorText()) === 'Edited elsewhere.', 'external reload');
+  // With an unsaved edit, the newer file wins and the edit is kept beside it.
+  await replace('My unsaved edit.');
+  writeFileSync(note('Sunday'), 'Edited elsewhere again.');
+  await waitFor(async () => (await editorText()) === 'Edited elsewhere again.', 'conflict reload');
+  const copy = readdirSync(vault).find((entry) => entry.startsWith('Sunday (conflicted copy'));
+  assert.equal(readFileSync(join(vault, copy), 'utf8'), 'My unsaved edit.');
+  assert.equal(text('Sunday'), 'Edited elsewhere again.');
+  await waitFor(
+    () =>
+      evaluate(
+        "document.querySelector('[role=\"alert\"]')?.textContent.includes('changed outside Opsidian')",
+      ),
+    'conflict notice',
+  );
+  console.log('PASS external edit reload, conflicting edit preserved');
+
+  await openFromSidebar('Brand new');
+  await click('Move note to trash');
+  await waitFor(() => existsSync(join(vault, '.trash', 'Brand new.md')), 'trash');
+  assert.equal(existsSync(note('Brand new')), false);
+  await openFromSidebar('Sunday');
   await replace('# Close flush\n\nLast keystroke survives.');
   // Close immediately, before the normal autosave debounce expires.
   win.on('closed', () => {
     try {
-      assert.equal(
-        readFileSync(snapshot.location, 'utf8'),
-        '# Close flush\n\nLast keystroke survives.',
-      );
-      console.log('PASS native typing, task toggle, source mode, close flush');
+      assert.equal(text('Sunday'), '# Close flush\n\nLast keystroke survives.');
+      console.log('PASS trash, close flush');
     } catch (error) {
       console.error(error);
       app.exit(1);
@@ -143,4 +270,4 @@ async function waitFor(check) {
 setTimeout(() => {
   console.error('Native smoke timed out');
   app.exit(1);
-}, 30000).unref();
+}, 60000).unref();

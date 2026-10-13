@@ -27,7 +27,7 @@ The build order was accepted after discussing this baseline. These choices guide
 - Node.js LTS + Fastify for the host.
 - One host per synced notebook; revision-based sync with recoverable conflicts.
 - Shared pure TypeScript logic and separate platform adapters.
-- pnpm workspace; CSS Modules and semantic theme tokens.
+- pnpm workspace; Tailwind v4 with shadcn/ui-named theme tokens.
 
 ## Superseded proposals
 
@@ -39,7 +39,7 @@ The build order was accepted after discussing this baseline. These choices guide
 
 ## Explicitly unresolved
 
-- Final note title/filename behavior and external-rename identity strategy.
+- External-rename identity strategy, and whether renaming rewrites links in other notes.
 - Supported Markdown/Obsidian syntax compatibility matrix.
 - iPhone editor acceptance after real-device testing.
 - Sync wire schema, merge implementation, journal layout, retention and rebootstrap rules.
@@ -50,6 +50,14 @@ The build order was accepted after discussing this baseline. These choices guide
 - Release distribution details, signing, and App Store requirements.
 
 These are implementation design tasks, not reasons to block the editor prototype.
+
+## Desktop notebook implementation — 2026-10-13
+
+- **Obsidian palette, Tailwind and shadcn/ui.** Requested by the user so the theme is portable. Replaces the maritime palette and CSS Modules.
+- **Filename is the title.** Follows Obsidian. Replaces the earlier "first line becomes the title" idea from the UX discussion.
+- **In-memory index for now.** Links and search are indexed in memory in the Electron main process. SQLite with FTS5 remains the plan; it was deferred, not rejected.
+- **Conflicts keep both versions.** A save that finds a changed file leaves the file alone and writes the edit as a `conflicted copy` note. This is the local rule only; sync conflict handling is still undesigned.
+- **Large paste was not slow.** The 4.6 s figure in the prototype notes measured `webContents.insertText`, the native text-input path. A real clipboard paste of the same 96 KB note reaches the editor in about 25 ms, and 1 MB in about 50 ms.
 
 ## Future AI direction
 

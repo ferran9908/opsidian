@@ -8,11 +8,18 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view';
+import { linkLabel, splitLink } from '@opsidian/core';
 
 export interface PreviewOptions {
   resolveImage(path: string): string | undefined;
-  onLink(name: string): void;
+  /** Called with a link's target note when the link is clicked. */
+  onLink(target: string): void;
+  /** Lets links to notes that do not exist yet be drawn differently. */
+  linkExists?(target: string): boolean;
 }
+
+/** Image sources the preview will load: inline raster data, or a file served from the vault. */
+const SAFE_IMAGE = /^(data:image\/(png|jpeg|gif|webp);base64,|opsidian:\/\/vault\/)/;
 
 class CheckboxWidget extends WidgetType {
   constructor(
@@ -67,20 +74,24 @@ class ImageWidget extends WidgetType {
 
 class LinkWidget extends WidgetType {
   constructor(
-    readonly name: string,
-    readonly onLink: (name: string) => void,
+    readonly inner: string,
+    readonly exists: boolean,
+    readonly onLink: (target: string) => void,
   ) {
     super();
   }
   eq(other: LinkWidget) {
-    return this.name === other.name;
+    return this.inner === other.inner && this.exists === other.exists;
   }
   toDOM() {
     const button = document.createElement('button');
-    button.className = 'op-wikilink';
-    button.textContent = this.name;
+    button.className = this.exists ? 'op-wikilink' : 'op-wikilink op-wikilink-unresolved';
+    button.textContent = linkLabel(this.inner);
     button.type = 'button';
-    button.addEventListener('click', () => this.onLink(this.name));
+    const { target } = splitLink(this.inner);
+    button.addEventListener('click', () => {
+      if (target) this.onLink(target);
+    });
     return button;
   }
   ignoreEvent() {
@@ -151,7 +162,7 @@ export function livePreview(options: PreviewOptions) {
                 const text = state.sliceDoc(from, to);
                 const match = /^!\[([^\]]*)\]\(([^\s)]+)\)$/.exec(text);
                 const url = match?.[2] ? options.resolveImage(match[2]) : undefined;
-                if (url && /^data:image\/(png|jpeg|gif|webp);base64,/.test(url)) {
+                if (url && SAFE_IMAGE.test(url)) {
                   add(
                     from,
                     to,
@@ -193,7 +204,13 @@ export function livePreview(options: PreviewOptions) {
               add(
                 from,
                 to,
-                Decoration.replace({ widget: new LinkWidget(match[1]!, options.onLink) }),
+                Decoration.replace({
+                  widget: new LinkWidget(
+                    match[1]!,
+                    options.linkExists?.(splitLink(match[1]!).target) ?? true,
+                    options.onLink,
+                  ),
+                }),
               );
           }
         }

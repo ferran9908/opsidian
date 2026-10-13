@@ -19,7 +19,7 @@
   padding: 0 0 180px;
   caret-color: var(--link);
 }
-.cm-line {
+.cm-editor .cm-line {
   padding: 0;
 }
 .cm-cursor {
@@ -118,6 +118,10 @@
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+.cm-editor .op-wikilink-unresolved {
+  opacity: 0.7;
+  text-decoration-style: dashed;
 }
 .op-task {
   width: 17px;

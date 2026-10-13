@@ -1,4 +1,4 @@
-import { Compartment, EditorState } from '@codemirror/state';
+import { Annotation, Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
 import {
   defaultKeymap,
@@ -29,20 +29,26 @@ export type EditorCommand =
 export interface EditorOptions extends PreviewOptions {
   parent: HTMLElement;
   content: string;
-  suggestions: readonly string[];
+  /** Note names offered after `[[`. A function is read each time, so the list can change. */
+  suggestions: readonly string[] | (() => readonly string[]);
+  /** Called for edits made in the editor, not for `setContent`. */
   onChange(content: string): void;
   onSave(): void;
   mode?: EditorMode;
 }
+const external = Annotation.define<boolean>();
+
 export function createEditor(options: EditorOptions) {
   const mode = new Compartment();
+  const suggestions = () =>
+    typeof options.suggestions === 'function' ? options.suggestions() : options.suggestions;
   let currentMode = options.mode ?? 'live';
   const source = (context: CompletionContext) => {
     const match = context.matchBefore(/\[\[[^\]\n]*/);
     if (!match || isCodeAt(view, match.from)) return null;
     return {
       from: match.from + 2,
-      options: options.suggestions.map((label) => ({
+      options: suggestions().map((label) => ({
         label,
         type: 'text',
         detail: 'note link',
@@ -115,7 +121,11 @@ export function createEditor(options: EditorOptions) {
           autocorrect: 'on',
         }),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) options.onChange(update.state.doc.toString());
+          if (
+            update.docChanged &&
+            !update.transactions.some((transaction) => transaction.annotation(external))
+          )
+            options.onChange(update.state.doc.toString());
         }),
         mode.of(options.mode === 'source' ? [] : livePreview(options)),
       ],
@@ -172,9 +182,20 @@ export function createEditor(options: EditorOptions) {
       currentMode = value;
       view.dispatch({ effects: mode.reconfigure(value === 'live' ? livePreview(options) : []) });
     },
-    refreshAssets() {
+    /** Redraws previews after images or the set of existing notes changed. */
+    refresh() {
       if (currentMode === 'live')
         view.dispatch({ effects: mode.reconfigure(livePreview(options)) });
+    },
+    /** Replaces the text with a version loaded from elsewhere, keeping the cursor if it fits. */
+    setContent(content: string) {
+      const { doc, selection } = view.state;
+      if (doc.toString() === content) return;
+      view.dispatch({
+        changes: { from: 0, to: doc.length, insert: content },
+        selection: { anchor: Math.min(selection.main.anchor, content.length) },
+        annotations: external.of(true),
+      });
     },
     destroy() {
       view.destroy();

@@ -1,5 +1,8 @@
 export { SaveQueue, type SaveStatus } from './save-queue';
 export { initialMarkdown, noteSuggestions } from './sample';
+export * from './links';
+export { NoteIndex, type Backlink, type SearchResult } from './note-index';
+export * from './vault';
 
 export const MAX_NOTE_LENGTH = 2_000_000;
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -28,4 +31,8 @@ export function imageMarkdown(path: string): string {
     throw new Error('Invalid attachment path');
   }
   return `\n![Attached image](${path})\n`;
+}
+/** Markdown for an image already stored inside the vault. */
+export function vaultImageMarkdown(path: string): string {
+  return `\n![](${encodeURI(path)})\n`;
 }
