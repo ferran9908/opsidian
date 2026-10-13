@@ -16,7 +16,7 @@ All three have light and dark variants, with dark variants positioned below the 
 
 Obsidian's default palette, generous writing space, restrained borders, a compact sidebar, and minimal chrome. The Paper screens were recoloured on 2026-10-13 from the CSS variables of the installed Obsidian app; the earlier maritime palette is superseded. The colours live in `packages/theme` as shadcn/ui tokens and a Tailwind theme.
 
-Only colour was matched. Type sizes and weights still follow the original Paper design, which is larger than Obsidian's defaults (16px text, bold 26px title).
+Note typography was matched the same day, from the same CSS: 16px text at line height 1.5, a bold 1.618em (about 26px) title, headings from 1.618em down to 1em with weights 700 to 600 and line heights 1.2 to 1.5, bold 200 heavier than its surroundings, 0.875em code, and a 700px writing column. The values are in `packages/editor/src/style.css` and the title in `apps/desktop/src/NoteEditor.tsx`; the editor artboards in Paper use the same sizes. Blockquotes keep their muted colour and have no accent bar yet, and the setup screens keep their own larger headings.
 
 The first proposed typography was Instrument Sans plus Newsreader, but Paper retained System Sans-Serif. Typography is therefore still open; do not claim the custom fonts are implemented.
 

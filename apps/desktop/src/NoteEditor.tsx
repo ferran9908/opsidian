@@ -243,7 +243,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
           <ImagePlus size={17} />
         </button>
       </div>
-      <div className="flex-1 overflow-auto px-[max(40px,calc((100%-720px)/2))] pt-6 max-[650px]:px-6">
+      <div className="flex-1 overflow-auto px-[max(32px,calc((100%-700px)/2))] pt-6 max-[650px]:px-6">
         {error ? (
           <p role="alert" className="text-destructive text-sm">
             {error}
@@ -254,7 +254,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
             value={title}
             aria-label="Note title"
             spellCheck={false}
-            className="mb-3 w-full bg-transparent text-[38px] leading-[1.35] font-medium tracking-[-0.025em] outline-none"
+            className="mb-[0.5em] w-full bg-transparent text-[25.888px] leading-[1.2] font-bold tracking-[-0.015em] outline-none"
             onChange={(event) => setTitle(event.target.value)}
             onBlur={() => void rename()}
             onKeyDown={(event) => {

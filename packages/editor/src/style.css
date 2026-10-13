@@ -1,9 +1,11 @@
 .cm-editor {
+  /* Obsidian's default theme: 16px text at 1.5, headings in em of that. */
   font:
-    19px/1.75 -apple-system,
+    16px/1.5 -apple-system,
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
+  --op-weight: 400;
   color: var(--foreground);
   min-height: 100%;
   background: var(--background);
@@ -65,28 +67,45 @@
   border: 1px solid var(--border);
 }
 .op-heading {
-  font-weight: 500;
-  letter-spacing: -0.025em;
-  padding-top: 10px;
+  font-weight: var(--op-weight);
+  padding-top: 16px;
 }
 .op-h1 {
-  font-size: 38px;
-  line-height: 1.35;
-  padding-top: 0;
-  padding-bottom: 10px;
+  --op-weight: 700;
+  font-size: 1.618em;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
 }
 .op-h2 {
-  font-size: 26px;
-  line-height: 1.6;
+  --op-weight: 680;
+  font-size: 1.462em;
+  line-height: 1.2;
+  letter-spacing: -0.011em;
 }
-.op-h3,
-.op-h4,
-.op-h5,
+.op-h3 {
+  --op-weight: 660;
+  font-size: 1.318em;
+  line-height: 1.3;
+  letter-spacing: -0.008em;
+}
+.op-h4 {
+  --op-weight: 640;
+  font-size: 1.188em;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+}
+.op-h5 {
+  --op-weight: 620;
+  font-size: 1.076em;
+  letter-spacing: -0.002em;
+}
 .op-h6 {
-  font-size: 22px;
+  --op-weight: 600;
+  font-size: 1em;
 }
+/* Bold is 200 heavier than the text around it, so it still shows inside a heading. */
 .op-strong {
-  font-weight: 650;
+  font-weight: calc(var(--op-weight) + 200);
 }
 .op-emphasis {
   font-style: italic;
@@ -96,16 +115,14 @@
 }
 .op-quote {
   color: var(--muted-foreground);
-  font-style: italic;
 }
 .op-syntax {
   color: var(--muted-foreground);
   font-weight: 400;
 }
 .op-code {
-  font:
-    0.9em/1.6 ui-monospace,
-    monospace;
+  font-family: ui-monospace, monospace;
+  font-size: 0.875em;
   background: var(--muted);
 }
 .cm-editor .op-wikilink,
@@ -145,16 +162,6 @@
   color: var(--muted-foreground);
 }
 @media (max-width: 600px) {
-  .cm-editor {
-    font-size: 17px;
-    line-height: 1.75;
-  }
-  .op-h1 {
-    font-size: 30px;
-  }
-  .op-h2 {
-    font-size: 23px;
-  }
   .cm-content {
     padding-bottom: 90px;
   }

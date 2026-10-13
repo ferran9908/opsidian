@@ -73,7 +73,7 @@ export function createEditor(options: EditorOptions) {
         closeBrackets(),
         syntaxHighlighting(
           HighlightStyle.define([
-            { tag: tags.strong, fontWeight: '650' },
+            { tag: tags.strong, fontWeight: 'calc(var(--op-weight) + 200)' },
             { tag: tags.emphasis, fontStyle: 'italic' },
             { tag: tags.strikethrough, textDecoration: 'line-through' },
             { tag: tags.monospace, fontFamily: 'ui-monospace, monospace' },
