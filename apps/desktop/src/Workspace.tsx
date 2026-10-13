@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -11,11 +11,20 @@ import {
   X,
 } from 'lucide-react';
 import type { EditorMode } from '@opsidian/editor';
-import { noteFolder, noteTitle, resolveLink, type VaultInfo, type VaultTree } from '@opsidian/core';
+import {
+  linkResolver,
+  noteFolder,
+  noteTitle,
+  type MoveResult,
+  type VaultInfo,
+  type VaultTree,
+} from '@opsidian/core';
 import { bridge, message } from './bridge';
 import type { useTheme } from './theme';
 import { NoteEditor, type NoteEditorHandle } from './NoteEditor';
+import { FolderPicker } from './FolderPicker';
 import { QuickSwitcher } from './QuickSwitcher';
+import { TrashDialog } from './TrashDialog';
 import { Sidebar } from './Sidebar';
 import { cn } from '@/lib/utils';
 
@@ -31,11 +40,13 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
   const storageKey = `opsidian-session:${vault.location}`;
   const [tree, setTree] = useState<VaultTree>();
   // `visit` counts openings, so the editor remounts on a new note but not on a rename.
-  const [open, setOpen] = useState<{ path: string; visit: number } | null>(null);
+  const [open, setOpen] = useState<{ path: string; visit: number; heading?: string } | null>(null);
   const [trail, setTrail] = useState<{ paths: string[]; at: number }>({ paths: [], at: -1 });
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [sidebar, setSidebar] = useState(true);
   const [finding, setFinding] = useState(false);
+  const [moving, setMoving] = useState<string | null>(null);
+  const [trashOpen, setTrashOpen] = useState(false);
   const [mode, setMode] = useState<EditorMode>('live');
   const [notice, setNotice] = useState('');
   const [version, setVersion] = useState(0);
@@ -52,11 +63,11 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
   const fail = (reason: unknown) => setNotice(message(reason));
 
   /** Shows a note once the current one is safely saved. `record` adds it to back/forward. */
-  const show = useCallback(async (path: string, record = true) => {
+  const show = useCallback(async (path: string, record = true, heading?: string) => {
     const current = state.current;
     if (current.open?.path === path) return;
     await editor.current?.flush();
-    setOpen({ path, visit: (current.open?.visit ?? 0) + 1 });
+    setOpen({ path, visit: (current.open?.visit ?? 0) + 1, ...(heading ? { heading } : {}) });
     if (record) {
       const paths = [...current.trail.paths.slice(0, current.trail.at + 1), path];
       setTrail({ paths, at: paths.length - 1 });
@@ -90,11 +101,27 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
     },
     [refresh, show],
   );
-  const follow = (target: string) => {
-    const path = resolveLink(target, tree?.notes ?? []);
-    if (path) void show(path).catch(fail);
+  const resolve = useMemo(() => linkResolver(tree?.notes ?? []), [tree]);
+  const locateImage = useMemo(() => {
+    const images = tree?.images ?? [];
+    const exact = new Set(images);
+    const named = new Map<string, string>();
+    const depth = (path: string) => path.split('/').length;
+    for (const path of [...images].sort((a, b) => depth(a) - depth(b))) {
+      const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase();
+      if (!named.has(name)) named.set(name, path);
+    }
+    return (path: string) =>
+      exact.has(path)
+        ? path
+        : (named.get(path.slice(path.lastIndexOf('/') + 1).toLowerCase()) ?? path);
+  }, [tree]);
+  const follow = (target: string, heading?: string) => {
+    const path = target ? resolve(target) : open?.path;
     // Like Obsidian, following a link to a note that does not exist creates it.
-    else void create('', target.slice(target.lastIndexOf('/') + 1));
+    if (!path) void create('', target.slice(target.lastIndexOf('/') + 1));
+    else if (path !== open?.path) void show(path, true, heading).catch(fail);
+    else if (heading) editor.current?.scrollToHeading(heading);
   };
 
   useEffect(() => {
@@ -155,27 +182,75 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
     return () => window.removeEventListener('keydown', keys);
   });
 
-  async function trash() {
-    if (!open) return;
+  async function trash(path: string) {
+    const gone = (other: string) => other === path || other.startsWith(`${path}/`);
+    const affected = Boolean(open && gone(open.path));
     try {
       await editor.current?.flush();
-      await bridge.trash(open.path);
-      const paths = trail.paths.filter((path) => path !== open.path);
-      setTrail({ paths, at: paths.length - 1 });
-      setOpen(null);
-      setNotice(`“${noteTitle(open.path)}” was moved to the notebook's .trash folder.`);
+      // An edit made while the note is on its way to the trash must not bring it back.
+      const resume = affected ? editor.current?.suspend() : undefined;
+      try {
+        await bridge.trash(path);
+        resume?.(null);
+      } catch (reason) {
+        resume?.(open!.path);
+        throw reason;
+      }
+      setTrail((before) => {
+        const paths = before.paths.filter((other) => !gone(other));
+        const current = before.paths[before.at];
+        const at = current && !gone(current) ? paths.indexOf(current) : paths.length - 1;
+        return { paths, at };
+      });
+      if (affected) setOpen(null);
+      const name = /\.md$/i.test(path) ? noteTitle(path) : path.slice(path.lastIndexOf('/') + 1);
+      setNotice(`“${name}” was moved to the trash. Restore it from Trash in the sidebar.`);
       await refresh();
     } catch (reason) {
       fail(reason);
     }
   }
-  function renamed(from: string, to: string) {
-    setOpen((current) => (current?.path === from ? { ...current, path: to } : current));
-    setTrail((current) => ({
-      ...current,
-      paths: current.paths.map((path) => (path === from ? to : path)),
-    }));
-    void refresh().catch(fail);
+  /** Renames or moves a note or folder, then follows it wherever it is open or remembered. */
+  async function relocate(path: string, action: () => Promise<MoveResult>): Promise<boolean> {
+    const before = state.current.open?.path;
+    try {
+      await editor.current?.flush();
+      // Typing goes on during the move; saving waits, then goes to wherever the note now is.
+      const resume = editor.current?.suspend();
+      let result: MoveResult;
+      try {
+        result = await action();
+      } catch (reason) {
+        resume?.(before!);
+        throw reason;
+      }
+      const shift = (other: string) =>
+        other === path
+          ? result.path
+          : other.startsWith(`${path}/`)
+            ? result.path + other.slice(path.length)
+            : other;
+      const current = before && shift(before);
+      // Links inside the open note may have been rewritten on disk. Take that text before
+      // saving resumes, so the next save starts from it.
+      if (current && result.rewritten.includes(current))
+        await editor.current?.reloadIfClean(current).catch(fail);
+      resume?.(current!);
+      setOpen((open) => (open ? { ...open, path: shift(open.path) } : open));
+      setTrail((trail) => ({ ...trail, paths: trail.paths.map(shift) }));
+      setExpanded((folders) => new Set([...folders].map(shift)));
+      await refresh();
+      if (result.missed.length)
+        setNotice(
+          `Done, but links in ${result.missed.length === 1 ? 'one note' : `${result.missed.length} notes`} could not be updated: ${result.missed.map(noteTitle).join(', ')}.`,
+        );
+      return true;
+    } catch (reason) {
+      // The notebook may have changed even though the move reported a failure.
+      void refresh().catch(() => {});
+      fail(reason);
+      return false;
+    }
   }
 
   if (!tree) return null;
@@ -197,12 +272,18 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
           }
           onOpen={(path) => void show(path).catch(fail)}
           onNewNote={(folder) => void create(folder)}
-          onNewFolder={(name) =>
+          onNewFolder={(parent, name) =>
             void bridge
-              .createFolder('', name)
+              .createFolder(parent, name)
               .then(() => refresh())
               .catch(fail)
           }
+          onRename={(path, name) => void relocate(path, () => bridge.rename(path, name))}
+          onMove={(path, folder) => void relocate(path, () => bridge.move(path, folder))}
+          onChooseFolder={setMoving}
+          onTrash={(path) => void trash(path)}
+          onReveal={(path) => void bridge.reveal(path).catch(fail)}
+          onShowTrash={() => setTrashOpen(true)}
           onFind={() => setFinding(true)}
           onSwitch={onSwitch}
         />
@@ -284,7 +365,7 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
                 aria-label="Move note to trash"
                 title="Move note to trash"
                 className={icon}
-                onClick={() => void trash()}
+                onClick={() => void trash(open.path)}
               >
                 <Trash2 size={17} />
               </button>
@@ -313,11 +394,15 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
             ref={editor}
             path={open.path}
             notes={tree.notes}
+            heading={open.heading}
+            resolve={resolve}
+            locateImage={locateImage}
             mode={mode}
             version={version}
             onOpenLink={follow}
             onOpen={(path) => void show(path).catch(fail)}
-            onRenamed={renamed}
+            onRename={(name) => relocate(open.path, () => bridge.rename(open.path, name))}
+            onChanged={() => void refresh().catch(fail)}
             onNotice={setNotice}
           />
         ) : (
@@ -347,6 +432,29 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
             void create('', name);
           }}
           onClose={() => setFinding(false)}
+        />
+      )}
+      {moving && (
+        <FolderPicker
+          path={moving}
+          folders={tree.folders}
+          onChoose={(folder) => {
+            setMoving(null);
+            void relocate(moving, () => bridge.move(moving, folder));
+          }}
+          onClose={() => setMoving(null)}
+        />
+      )}
+      {trashOpen && (
+        <TrashDialog
+          onRestored={(path) =>
+            void refresh()
+              .then(() => {
+                if (/\.md$/i.test(path)) return show(path);
+              })
+              .catch(fail)
+          }
+          onClose={() => setTrashOpen(false)}
         />
       )}
     </div>

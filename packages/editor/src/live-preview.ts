@@ -8,15 +8,23 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view';
-import { linkLabel, splitLink } from '@opsidian/core';
+import { encodeDestination, linkLabel, splitLink } from '@opsidian/core';
 
 export interface PreviewOptions {
   resolveImage(path: string): string | undefined;
-  /** Called with a link's target note when the link is clicked. */
-  onLink(target: string): void;
+  /** Called when a link is clicked. `target` is empty for a `[[#Heading]]` in the same note. */
+  onLink(target: string, heading?: string): void;
   /** Lets links to notes that do not exist yet be drawn differently. */
   linkExists?(target: string): boolean;
+  /** Text an `![[embed]]` shows, or undefined when there is no such note or heading. */
+  loadEmbed?(target: string, heading?: string): Promise<string | undefined>;
+  /** Changes whenever embedded notes may have changed, so embeds are drawn again. */
+  embedStamp?(): number;
+  /** Supplied by the editor: draws Markdown read-only and returns how to remove it. */
+  renderEmbed?(parent: HTMLElement, content: string): () => void;
 }
+
+const IMAGE_NAME = /\.(png|jpe?g|gif|webp)$/i;
 
 /** Image sources the preview will load: inline raster data, or a file served from the vault. */
 const SAFE_IMAGE = /^(data:image\/(png|jpeg|gif|webp);base64,|opsidian:\/\/vault\/)/;
@@ -76,7 +84,7 @@ class LinkWidget extends WidgetType {
   constructor(
     readonly inner: string,
     readonly exists: boolean,
-    readonly onLink: (target: string) => void,
+    readonly onLink: PreviewOptions['onLink'],
   ) {
     super();
   }
@@ -84,15 +92,83 @@ class LinkWidget extends WidgetType {
     return this.inner === other.inner && this.exists === other.exists;
   }
   toDOM() {
-    const button = document.createElement('button');
-    button.className = this.exists ? 'op-wikilink' : 'op-wikilink op-wikilink-unresolved';
-    button.textContent = linkLabel(this.inner);
-    button.type = 'button';
-    const { target } = splitLink(this.inner);
-    button.addEventListener('click', () => {
-      if (target) this.onLink(target);
+    // A span, not a button, so a long link wraps with the sentence around it.
+    const link = document.createElement('span');
+    link.className = this.exists ? 'op-wikilink' : 'op-wikilink op-wikilink-unresolved';
+    link.textContent = linkLabel(this.inner);
+    link.setAttribute('role', 'link');
+    const { target, heading } = splitLink(this.inner);
+    link.addEventListener('mousedown', (event) => event.preventDefault());
+    link.addEventListener('click', () => {
+      if (target || heading) this.onLink(target, heading);
     });
-    return button;
+    return link;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
+
+class BulletWidget extends WidgetType {
+  eq() {
+    return true;
+  }
+  toDOM() {
+    const bullet = document.createElement('span');
+    bullet.className = 'op-bullet';
+    bullet.setAttribute('aria-hidden', 'true');
+    return bullet;
+  }
+}
+
+/**
+ * How to take down the note drawn inside each embed, or null once the embed is gone.
+ * Kept by element, not on the widget: the editor reuses the element under an equal widget.
+ */
+const embedded = new WeakMap<HTMLElement, (() => void) | null>();
+
+class EmbedWidget extends WidgetType {
+  constructor(
+    readonly inner: string,
+    readonly stamp: number,
+    readonly options: PreviewOptions,
+  ) {
+    super();
+  }
+  eq(other: EmbedWidget) {
+    return this.inner === other.inner && this.stamp === other.stamp;
+  }
+  toDOM(view: EditorView) {
+    const { target, heading } = splitLink(this.inner);
+    const box = document.createElement('span');
+    box.className = 'op-embed';
+    const title = document.createElement('span');
+    title.className = 'op-embed-title';
+    title.textContent = linkLabel(this.inner.split('|')[0]!);
+    title.setAttribute('role', 'link');
+    title.addEventListener('mousedown', (event) => event.preventDefault());
+    title.addEventListener('click', () => this.options.onLink(target, heading));
+    const body = document.createElement('span');
+    body.className = 'op-embed-body';
+    box.append(title, body);
+    void this.options.loadEmbed?.(target, heading).then(
+      (content) => {
+        if (embedded.get(box) === null) return;
+        if (content === undefined) {
+          box.classList.add('op-embed-missing');
+          body.textContent = 'Nothing to show yet. Click the name to create or open it.';
+        } else embedded.set(box, this.options.renderEmbed?.(body, content.trimEnd()) ?? null);
+        view.requestMeasure();
+      },
+      () => {
+        body.textContent = 'This note could not be read.';
+      },
+    );
+    return box;
+  }
+  destroy(box: HTMLElement) {
+    embedded.get(box)?.();
+    embedded.set(box, null);
   }
   ignoreEvent() {
     return true;
@@ -133,6 +209,7 @@ export function livePreview(options: PreviewOptions) {
         const add = (from: number, to: number, decoration: Decoration) =>
           ranges.push({ from, to, decoration });
         const markedLines = new Set<number>();
+        const quoteLines = new Set<number>();
         for (const visible of view.visibleRanges) {
           syntaxTree(state).iterate({
             from: visible.from,
@@ -157,7 +234,25 @@ export function livePreview(options: PreviewOptions) {
               if (name === 'StrongEmphasis') add(from, to, Decoration.mark({ class: 'op-strong' }));
               if (name === 'Emphasis') add(from, to, Decoration.mark({ class: 'op-emphasis' }));
               if (name === 'Strikethrough') add(from, to, Decoration.mark({ class: 'op-strike' }));
-              if (name === 'Blockquote') add(from, to, Decoration.mark({ class: 'op-quote' }));
+              if (name === 'Blockquote') {
+                for (let at = from; at <= to;) {
+                  const line = state.doc.lineAt(at);
+                  if (!quoteLines.has(line.from)) {
+                    add(line.from, line.from, Decoration.line({ class: 'op-quote' }));
+                    quoteLines.add(line.from);
+                  }
+                  at = line.to + 1;
+                }
+              }
+              if (name === 'ListMark' && !active(from, to)) {
+                // A checklist shows only its box; an ordered list keeps its number.
+                if (/^[ \t]\[[ xX]\][ \t]/.test(state.sliceDoc(to, to + 5)))
+                  add(from, to + 1, Decoration.replace({}));
+                else if (node.node.parent?.parent?.name === 'BulletList')
+                  add(from, to, Decoration.replace({ widget: new BulletWidget() }));
+                else add(from, to, Decoration.mark({ class: 'op-list-number' }));
+                return false;
+              }
               if (name === 'Image' && !active(from, to)) {
                 const text = state.sliceDoc(from, to);
                 const match = /^!\[([^\]]*)\]\(([^\s)]+)\)$/.exec(text);
@@ -195,23 +290,42 @@ export function livePreview(options: PreviewOptions) {
             },
           });
           const text = state.sliceDoc(visible.from, visible.to);
-          for (const match of text.matchAll(/\[\[([^\]\n]+)\]\]/g)) {
+          for (const match of text.matchAll(/!?\[\[([^\]\n]+)\]\]/g)) {
             const from = visible.from + match.index,
               to = from + match[0].length;
+            const inner = match[1]!;
+            const { target } = splitLink(inner);
             if (isCodeAt(view, from)) continue;
             if (active(from, to)) add(from, to, Decoration.mark({ class: 'op-link-source' }));
-            else
+            else if (match[0].startsWith('!') && IMAGE_NAME.test(target)) {
+              // Image sources are link destinations, so a name is passed in that form.
+              const url = options.resolveImage(encodeDestination(target));
+              if (url && SAFE_IMAGE.test(url))
+                add(from, to, Decoration.replace({ widget: new ImageWidget(url, target) }));
+              else add(from, to, Decoration.mark({ class: 'op-link-source' }));
+            } else if (match[0].startsWith('!') && options.loadEmbed && options.renderEmbed)
               add(
                 from,
                 to,
                 Decoration.replace({
+                  widget: new EmbedWidget(inner, options.embedStamp?.() ?? 0, options),
+                }),
+              );
+            else {
+              // Without embed support (or inside an embed) an embed reads as a plain link.
+              const start = match[0].startsWith('!') ? from + 1 : from;
+              add(
+                start,
+                to,
+                Decoration.replace({
                   widget: new LinkWidget(
-                    match[1]!,
-                    options.linkExists?.(splitLink(match[1]!).target) ?? true,
+                    inner,
+                    !target || (options.linkExists?.(target) ?? true),
                     options.onLink,
                   ),
                 }),
               );
+            }
           }
         }
         const builder = new RangeSetBuilder<Decoration>();

@@ -1,8 +1,15 @@
 import { open, rename, lstat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
+/** Ending of the hidden temporary files below; distinctive enough to delete after a crash. */
+export const PENDING = '.opsidian-pending';
+
+/**
+ * Replaces a file in one step, so a crash leaves either the old content or the new.
+ * The temporary file is hidden: other programs, the watcher and the note list skip it.
+ */
 export async function atomicWrite(path: string, content: string | Uint8Array): Promise<void> {
-  const temporary = `${path}.pending`;
+  const temporary = join(dirname(path), `.${basename(path)}${PENDING}`);
   // Never follow a pre-existing temporary symlink.
   try {
     if ((await lstat(temporary)).isSymbolicLink()) throw new Error('Unsafe temporary file');
@@ -17,7 +24,7 @@ export async function atomicWrite(path: string, content: string | Uint8Array): P
     await file.close();
   }
   await rename(temporary, path);
-  const directory = await open(join(path, '..'), 'r');
+  const directory = await open(dirname(path), 'r');
   try {
     await directory.sync();
   } finally {

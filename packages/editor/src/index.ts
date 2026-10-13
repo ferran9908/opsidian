@@ -20,6 +20,7 @@ import {
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
+import { headingOffset } from '@opsidian/core';
 import { createSearchPanel } from './search-panel';
 import { livePreview, isCodeAt, type PreviewOptions } from './live-preview';
 
@@ -37,9 +38,42 @@ export interface EditorOptions extends PreviewOptions {
   mode?: EditorMode;
 }
 const external = Annotation.define<boolean>();
+const highlighting = syntaxHighlighting(
+  HighlightStyle.define([
+    { tag: tags.strong, fontWeight: 'calc(var(--op-weight) + 200)' },
+    { tag: tags.emphasis, fontStyle: 'italic' },
+    { tag: tags.strikethrough, textDecoration: 'line-through' },
+    { tag: tags.monospace, fontFamily: 'ui-monospace, monospace' },
+    { tag: tags.processingInstruction, color: 'var(--muted-foreground)' },
+  ]),
+);
+
+/** Draws Markdown the way the editor does, but fixed. Embeds inside it read as links. */
+function renderMarkdown(parent: HTMLElement, content: string, options: PreviewOptions) {
+  const { loadEmbed: _load, renderEmbed: _render, ...plain } = options;
+  const view = new EditorView({
+    parent,
+    state: EditorState.create({
+      doc: content,
+      extensions: [
+        markdown({ extensions: [GFM] }),
+        highlighting,
+        EditorView.lineWrapping,
+        EditorView.editable.of(false),
+        EditorState.readOnly.of(true),
+        livePreview(plain),
+      ],
+    }),
+  });
+  return () => view.destroy();
+}
 
 export function createEditor(options: EditorOptions) {
   const mode = new Compartment();
+  const preview: PreviewOptions = {
+    ...options,
+    renderEmbed: (parent, content) => renderMarkdown(parent, content, options),
+  };
   const suggestions = () =>
     typeof options.suggestions === 'function' ? options.suggestions() : options.suggestions;
   let currentMode = options.mode ?? 'live';
@@ -71,15 +105,7 @@ export function createEditor(options: EditorOptions) {
         history(),
         markdown({ extensions: [GFM] }),
         closeBrackets(),
-        syntaxHighlighting(
-          HighlightStyle.define([
-            { tag: tags.strong, fontWeight: 'calc(var(--op-weight) + 200)' },
-            { tag: tags.emphasis, fontStyle: 'italic' },
-            { tag: tags.strikethrough, textDecoration: 'line-through' },
-            { tag: tags.monospace, fontFamily: 'ui-monospace, monospace' },
-            { tag: tags.processingInstruction, color: 'var(--muted-foreground)' },
-          ]),
-        ),
+        highlighting,
         search({ top: true, createPanel: createSearchPanel }),
         highlightSelectionMatches(),
         autocompletion({ override: [source], activateOnTyping: true }),
@@ -127,7 +153,7 @@ export function createEditor(options: EditorOptions) {
           )
             options.onChange(update.state.doc.toString());
         }),
-        mode.of(options.mode === 'source' ? [] : livePreview(options)),
+        mode.of(options.mode === 'source' ? [] : livePreview(preview)),
       ],
     }),
   });
@@ -180,12 +206,12 @@ export function createEditor(options: EditorOptions) {
     command,
     setMode(value: EditorMode) {
       currentMode = value;
-      view.dispatch({ effects: mode.reconfigure(value === 'live' ? livePreview(options) : []) });
+      view.dispatch({ effects: mode.reconfigure(value === 'live' ? livePreview(preview) : []) });
     },
     /** Redraws previews after images or the set of existing notes changed. */
     refresh() {
       if (currentMode === 'live')
-        view.dispatch({ effects: mode.reconfigure(livePreview(options)) });
+        view.dispatch({ effects: mode.reconfigure(livePreview(preview)) });
     },
     /** Replaces the text with a version loaded from elsewhere, keeping the cursor if it fits. */
     setContent(content: string) {
@@ -196,6 +222,16 @@ export function createEditor(options: EditorOptions) {
         selection: { anchor: Math.min(selection.main.anchor, content.length) },
         annotations: external.of(true),
       });
+    },
+    /** Puts a heading at the top of the view. False when the note has no such heading. */
+    scrollToHeading(heading: string): boolean {
+      const at = headingOffset(view.state.doc.toString(), heading);
+      if (at === undefined) return false;
+      view.dispatch({
+        selection: { anchor: view.state.doc.lineAt(at).to },
+        effects: EditorView.scrollIntoView(at, { y: 'start', yMargin: 24 }),
+      });
+      return true;
     },
     destroy() {
       view.destroy();

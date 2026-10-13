@@ -3,6 +3,7 @@ import {
   initialMarkdown,
   noteFolder,
   validateName,
+  type MoveResult,
   type VaultBridge,
 } from '@opsidian/core';
 
@@ -28,13 +29,38 @@ function put(path: string, content: string) {
   persist();
 }
 
+const trash = new Map<string, string>();
+const inside = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`);
+function relocate(path: string, next: string): MoveResult {
+  if (next === path) return { path, rewritten: [], missed: [] };
+  if (notes.has(next) || folders.has(next)) throw new Error('That name is already taken there.');
+  const shift = (other: string) => next + other.slice(path.length);
+  const moved = new Map(
+    [...notes.keys()].filter((note) => inside(note, path)).map((note) => [note, shift(note)]),
+  );
+  const edits = index.relink(moved, new Map(folders.has(path) ? [[path, next]] : []));
+  for (const [before, after] of moved) {
+    notes.set(after, notes.get(before) ?? '');
+    notes.delete(before);
+    index.move(before, after);
+  }
+  for (const folder of [...folders])
+    if (inside(folder, path)) {
+      folders.delete(folder);
+      folders.add(shift(folder));
+    }
+  for (const [note, content] of edits) put(note, content);
+  persist();
+  return { path: next, rewritten: [...edits.keys()], missed: [] };
+}
+
 export const previewVault: VaultBridge = {
   current: async () => info,
   defaultParent: async () => 'Browser preview',
   chooseParent: async () => null,
   createVault: async () => info,
   openVault: async () => info,
-  tree: async () => ({ notes: index.paths(), folders: [...folders].sort() }),
+  tree: async () => ({ notes: index.paths(), folders: [...folders].sort(), images: [] }),
   async read(path) {
     const content = notes.get(path);
     if (content === undefined) throw new Error(`“${path}” is no longer in this notebook.`);
@@ -58,19 +84,31 @@ export const previewVault: VaultBridge = {
   },
   async rename(path, name) {
     validateName(name);
-    const next = join(noteFolder(path), `${name}.md`);
-    if (next === path) return path;
-    if (notes.has(next)) throw new Error(`“${name}” already exists in this folder.`);
-    const content = notes.get(path) ?? '';
-    notes.delete(path);
-    index.delete(path);
-    put(next, content);
-    return next;
+    return relocate(path, join(noteFolder(path), /\.md$/i.test(path) ? `${name}.md` : name));
   },
+  move: async (path, folder) => relocate(path, join(folder, path.slice(path.lastIndexOf('/') + 1))),
   async trash(path) {
-    notes.delete(path);
-    index.delete(path);
+    for (const note of [...notes.keys()].filter((note) => inside(note, path))) {
+      trash.set(note, notes.get(note) ?? '');
+      notes.delete(note);
+      index.delete(note);
+    }
+    for (const folder of [...folders]) if (inside(folder, path)) folders.delete(folder);
     persist();
+  },
+  trashed: async () =>
+    [...trash.keys()].map((name) => ({ name, from: name, folder: false, at: Date.now() })),
+  async restore(name) {
+    put(name, trash.get(name) ?? '');
+    trash.delete(name);
+    return name;
+  },
+  async emptyTrash() {
+    trash.clear();
+    return true;
+  },
+  saveImage: async () => {
+    throw new Error('Images need the desktop app.');
   },
   backlinks: async (path) => index.backlinks(path),
   search: async (query) => index.search(query),

@@ -59,6 +59,15 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Conflicts keep both versions.** A save that finds a changed file leaves the file alone and writes the edit as a `conflicted copy` note. This is the local rule only; sync conflict handling is still undesigned.
 - **Large paste was not slow.** The 4.6 s figure in the prototype notes measured `webContents.insertText`, the native text-input path. A real clipboard paste of the same 96 KB note reaches the editor in about 25 ms, and 1 MB in about 50 ms.
 
+## Desktop notebook completion — 2026-10-13
+
+- **The in-memory index stays.** Measured on 5,000 notes: 290 ms to open, 3 ms to search. SQLite with FTS5 is no longer planned for the local notebook; revisit it if sync needs a durable store or notebooks grow far beyond this.
+- **Links are rewritten only when they would break.** After a rename or move, a link is changed only if it would no longer reach the same note, and then to the shortest text that does: the note's name, or its path when the name is shared.
+- **Trash stays Obsidian's `.trash`,** flat, with a hidden manifest recording where each item came from so it can be put back. Emptying it moves the contents to the Mac's Trash rather than deleting them.
+- **An edit waits at most a second.** The crash test showed that uninterrupted typing was never saved until a pause, because each keystroke restarted the 160 ms timer. The save queue now also writes at least once a second.
+- **Temporary save files are hidden,** so Obsidian, the file watcher and the note list never see them.
+- **Images up to 25 MB on desktop.** They are served from disk, so the 5 MB limit that suits the phone's in-memory images does not apply.
+
 ## Future AI direction
 
 Potential features: organize a messy thought, answer questions over notes with citations, and suggest related notes. A machine-hosted agent and supported Codex/ChatGPT sign-in were explored. No AI integration is committed for the initial milestones; re-check product access and integration documentation when that work begins.

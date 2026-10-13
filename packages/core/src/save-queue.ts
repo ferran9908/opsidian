@@ -7,6 +7,8 @@ export class SaveQueue {
   private persisted: string;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running: Promise<void> | undefined;
+  /** When the oldest edit not yet handed to `write` was made. */
+  private waitingSince: number | undefined;
 
   constructor(
     initial: string,
@@ -14,6 +16,8 @@ export class SaveQueue {
     private readonly write: (content: string) => Promise<void | string>,
     private readonly report: (status: SaveStatus) => void,
     private readonly delay = 160,
+    /** Longest an edit waits while typing continues, so a crash loses at most this much. */
+    private readonly longest = 1000,
   ) {
     this.current = this.persisted = initial;
   }
@@ -23,7 +27,9 @@ export class SaveQueue {
     if (content === this.persisted && !this.running) return;
     this.report({ state: 'saving' });
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => void this.flush().catch(() => {}), this.delay);
+    this.waitingSince ??= Date.now();
+    const wait = Math.min(this.delay, this.waitingSince + this.longest - Date.now());
+    this.timer = setTimeout(() => void this.flush().catch(() => {}), Math.max(wait, 0));
   }
 
   /** Nothing waiting to be written and nothing being written. */
@@ -49,6 +55,7 @@ export class SaveQueue {
     try {
       while (this.current !== this.persisted) {
         const snapshot = this.current;
+        this.waitingSince = undefined;
         this.report({ state: 'saving' });
         const adopted = await this.write(snapshot);
         if (typeof adopted === 'string') this.current = this.persisted = adopted;

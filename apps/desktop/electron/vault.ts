@@ -1,10 +1,10 @@
-import { lstat, mkdir, open, readFile, readdir, realpath, rename } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, unlink } from 'node:fs/promises';
 import { watch, type FSWatcher } from 'node:fs';
-import { createHash, randomUUID } from 'node:crypto';
-import { basename, join, sep } from 'node:path';
+import { createHash } from 'node:crypto';
+import { basename, extname, join, sep } from 'node:path';
 import {
-  MAX_IMAGE_BYTES,
   MAX_NOTE_LENGTH,
+  MAX_VAULT_IMAGE_BYTES,
   NoteIndex,
   isVaultImage,
   noteFolder,
@@ -12,16 +12,24 @@ import {
   validateContent,
   validateName,
   type Backlink,
+  type MoveResult,
   type NoteDocument,
   type SaveResult,
   type SearchResult,
+  type TrashEntry,
   type VaultTree,
 } from '@opsidian/core';
-import { atomicWrite, detectImage } from './storage';
+import { PENDING, atomicWrite, detectImage } from './storage';
 
 const revisionOf = (content: string) => createHash('sha256').update(content).digest('hex');
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
 const child = (folder: string, name: string) => (folder ? `${folder}/${name}` : name);
+const within = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`);
+const sorted = (paths: Iterable<string>) => [...paths].sort((a, b) => a.localeCompare(b));
+const isNote = (path: string) => /\.md$/i.test(path);
+/** Where each trashed item came from. Hidden, so other programs leave it alone. */
+const ORIGINS = '.opsidian-origins.json';
+type Origins = Record<string, { from: string; at: number }>;
 
 /**
  * A folder of Markdown notes. Paths are vault-relative and use `/`. Hidden entries and
@@ -32,16 +40,20 @@ export class Vault {
   /** mtime and size of each indexed note, so a rescan only rereads what changed. */
   private readonly stamps = new Map<string, string>();
   private folders: string[] = [];
+  private images: string[] = [];
   private work: Promise<unknown> = Promise.resolve();
   private watcher: FSWatcher | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
+  /** External changes a scan has absorbed but the watcher has not yet passed on. */
+  private readonly unreported = new Set<string>();
+  private stale = false;
 
   private constructor(readonly root: string) {}
 
   static async open(directory: string): Promise<Vault> {
     await mkdir(directory, { recursive: true });
     const vault = new Vault(await realpath(directory));
-    await vault.scan();
+    await vault.scan(true);
     return vault;
   }
 
@@ -56,7 +68,10 @@ export class Vault {
     return result;
   }
 
-  private async absolute(path: unknown, kind: 'file' | 'directory' | 'new'): Promise<string> {
+  private async absolute(
+    path: unknown,
+    kind: 'file' | 'directory' | 'existing' | 'new',
+  ): Promise<string> {
     if (typeof path !== 'string' || !path || path.length > 1000 || /[\\\u0000]/.test(path))
       throw new Error('Invalid path.');
     const parts = path.split('/');
@@ -77,11 +92,13 @@ export class Vault {
       if (!last && !info.isDirectory()) throw new Error('Invalid path.');
       if (last && kind === 'file' && !info.isFile()) throw new Error('Invalid path.');
       if (last && kind === 'directory' && !info.isDirectory()) throw new Error('Invalid path.');
+      if (last && kind === 'existing' && !info.isFile() && !info.isDirectory())
+        throw new Error('Invalid path.');
     }
     return current;
   }
   private note(path: unknown): asserts path is string {
-    if (typeof path !== 'string' || !/\.md$/i.test(path)) throw new Error('Not a note.');
+    if (typeof path !== 'string' || !isNote(path)) throw new Error('Not a note.');
   }
   private async folder(path: unknown): Promise<string> {
     if (path === '') return this.root;
@@ -92,19 +109,27 @@ export class Vault {
     this.stamps.set(path, `${info.mtimeMs}:${info.size}`);
   }
 
-  /** Brings the index in line with the disk. Returns the notes whose content changed. */
-  private async scan(): Promise<{ changed: string[]; dirty: boolean }> {
+  /**
+   * Brings the index in line with the disk. Returns the notes whose content changed.
+   * `tidy` also removes temporary files a crash left half-written.
+   */
+  private async scan(tidy = false): Promise<{ changed: string[]; dirty: boolean }> {
     const seen = new Set<string>();
     const folders: string[] = [];
+    const images: string[] = [];
     const changed: string[] = [];
     const walk = async (directory: string, relative: string): Promise<void> => {
       for (const entry of await readdir(directory, { withFileTypes: true })) {
-        if (entry.name.startsWith('.')) continue;
+        if (entry.name.startsWith('.')) {
+          if (tidy && entry.isFile() && entry.name.endsWith(PENDING))
+            await unlink(join(directory, entry.name)).catch(() => {});
+          continue;
+        }
         const path = child(relative, entry.name);
         if (entry.isDirectory()) {
           folders.push(path);
           await walk(join(directory, entry.name), path);
-        } else if (entry.isFile() && /\.md$/i.test(entry.name)) {
+        } else if (entry.isFile() && isNote(entry.name)) {
           const file = join(directory, entry.name);
           const info = await lstat(file).catch(() => undefined);
           if (!info) continue;
@@ -116,7 +141,7 @@ export class Vault {
           if (this.index.content(path) !== content) changed.push(path);
           this.index.set(path, content);
           this.stamps.set(path, stamp);
-        }
+        } else if (entry.isFile() && isVaultImage(path)) images.push(path);
       }
     };
     await walk(this.root, '');
@@ -127,11 +152,15 @@ export class Vault {
       this.stamps.delete(path);
       dirty = true;
     }
-    folders.sort((a, b) => a.localeCompare(b));
-    dirty ||=
-      folders.length !== this.folders.length ||
-      folders.some((folder, position) => folder !== this.folders[position]);
-    this.folders = folders;
+    const same = (a: string[], b: string[]) =>
+      a.length === b.length && a.every((path, position) => path === b[position]);
+    const nextFolders = sorted(folders);
+    const nextImages = sorted(images);
+    dirty ||= !same(nextFolders, this.folders) || !same(nextImages, this.images);
+    this.folders = nextFolders;
+    this.images = nextImages;
+    for (const path of changed) this.unreported.add(path);
+    this.stale ||= dirty;
     return { changed, dirty };
   }
 
@@ -139,12 +168,17 @@ export class Vault {
   watch(notify: (paths: string[]) => void): void {
     this.watcher = watch(this.root, { recursive: true }, (_event, filename) => {
       const name = filename?.toString() ?? '';
-      if (name.split(sep).some((part) => part.startsWith('.')) || name.endsWith('.pending')) return;
+      if (name.split(sep).some((part) => part.startsWith('.'))) return;
       clearTimeout(this.timer);
       this.timer = setTimeout(() => {
+        // Scans made by other operations may already have absorbed the change being reported.
         void this.serial(() => this.scan())
-          .then(({ changed, dirty }) => {
-            if (dirty) notify(changed);
+          .then(() => {
+            if (!this.stale) return;
+            const changed = [...this.unreported];
+            this.unreported.clear();
+            this.stale = false;
+            notify(changed);
           })
           .catch(() => {});
       }, 150);
@@ -157,7 +191,7 @@ export class Vault {
   }
 
   tree(): VaultTree {
-    return { notes: this.index.paths(), folders: [...this.folders] };
+    return { notes: this.index.paths(), folders: [...this.folders], images: [...this.images] };
   }
   backlinks(path: string): Backlink[] {
     return this.index.backlinks(path);
@@ -214,12 +248,12 @@ export class Vault {
   }
 
   /** First free `name.md`, `name 1.md`, … in a folder. Call inside `serial`. */
-  private async available(folder: string, name: string): Promise<string> {
+  private async available(folder: string, name: string, extension = '.md'): Promise<string> {
     const taken = new Set(
       (await readdir(await this.folder(folder))).map((entry) => entry.toLowerCase()),
     );
     for (let count = 0; ; count++) {
-      const candidate = `${count ? `${name} ${count}` : name}.md`;
+      const candidate = `${count ? `${name} ${count}` : name}${extension}`;
       if (!taken.has(candidate.toLowerCase())) return child(folder, candidate);
     }
   }
@@ -241,73 +275,253 @@ export class Vault {
       validateName(name);
       await this.folder(parent);
       const path = child(parent, name);
-      await mkdir(await this.absolute(path, 'new'));
-      this.folders = [...this.folders, path].sort((a, b) => a.localeCompare(b));
+      const directory = await this.absolute(path, 'new');
+      if (await lstat(directory).catch(() => undefined))
+        throw new Error(`“${name}” already exists here.`);
+      await mkdir(directory);
+      this.folders = sorted([...this.folders, path]);
       return path;
     });
   }
 
-  /** Renames a note in place. Links to it in other notes are not rewritten. */
-  rename(path: string, name: string): Promise<string> {
+  /** Renames a note or folder in place. Links to it in other notes follow. */
+  rename(path: string, name: string): Promise<MoveResult> {
     return this.serial(async () => {
-      this.note(path);
       validateName(name);
-      const from = await this.absolute(path, 'file');
-      const next = child(noteFolder(path), `${name}.md`);
-      if (next === path) return path;
-      const to = await this.absolute(next, 'new');
-      // A change of letter case alone is the same file on a case-insensitive disk.
-      if (next.toLowerCase() !== path.toLowerCase() && (await lstat(to).catch(() => undefined)))
-        throw new Error(`“${name}” already exists in this folder.`);
-      await rename(from, to);
-      this.index.move(path, next);
-      this.stamps.delete(path);
-      await this.stamp(next, to);
-      return next;
+      const directory = (await lstat(await this.absolute(path, 'existing'))).isDirectory();
+      return this.relocate(path, child(noteFolder(path), directory ? name : `${name}.md`));
     });
   }
 
-  /** Moves a note into the vault's `.trash` folder, where it stays recoverable. */
+  /** Moves a note or folder into `folder`; `''` is the top level. */
+  move(path: string, folder: string): Promise<MoveResult> {
+    return this.serial(async () => {
+      await this.folder(folder);
+      return this.relocate(path, child(folder, path.slice(path.lastIndexOf('/') + 1)));
+    });
+  }
+
+  /** Moves a note or folder and rewrites what pointed at it. Call inside `serial`. */
+  private async relocate(path: string, next: string): Promise<MoveResult> {
+    const from = await this.absolute(path, 'existing');
+    const directory = (await lstat(from)).isDirectory();
+    if (!directory) this.note(path);
+    if (next === path) return { path, rewritten: [], missed: [] };
+    if (directory && within(next, path)) throw new Error('A folder cannot be moved into itself.');
+    const to = await this.absolute(next, 'new');
+    // A change of letter case alone is the same file on a case-insensitive disk.
+    if (next.toLowerCase() !== path.toLowerCase() && (await lstat(to).catch(() => undefined)))
+      throw new Error(`“${next.slice(next.lastIndexOf('/') + 1)}” already exists there.`);
+    // The index has to match the disk before it decides which links to rewrite.
+    await this.scan();
+    const shift = (inside: string) => next + inside.slice(path.length);
+    const notes = new Map<string, string>(
+      directory
+        ? this.index
+            .paths()
+            .filter((note) => within(note, path))
+            .map((note) => [note, shift(note)])
+        : [[path, next]],
+    );
+    const edits = this.index.relink(notes, new Map(directory ? [[path, next]] : []));
+    await rename(from, to);
+    // The move has happened. Nothing below may fail the operation, or the caller would
+    // believe it had not.
+    for (const [before, after] of notes) {
+      this.index.move(before, after);
+      this.stamps.delete(before);
+      await this.stamp(after, join(this.root, ...after.split('/'))).catch(() => {});
+    }
+    if (directory) {
+      this.folders = sorted(this.folders.map((item) => (within(item, path) ? shift(item) : item)));
+      this.images = sorted(this.images.map((item) => (within(item, path) ? shift(item) : item)));
+    }
+    const rewritten: string[] = [];
+    const missed: string[] = [];
+    for (const [note, content] of edits) {
+      try {
+        const file = await this.absolute(note, 'file');
+        // Only a file that still holds exactly the indexed text is rewritten. That leaves
+        // alone a note changed a moment ago, and one that is not valid UTF-8, whose bytes
+        // the index could not represent and a rewrite would damage.
+        const indexed = this.index.content(note);
+        if (indexed === undefined || !(await readFile(file)).equals(Buffer.from(indexed)))
+          throw new Error('changed');
+        await atomicWrite(file, content);
+        this.index.set(note, content);
+        await this.stamp(note, file);
+        rewritten.push(note);
+      } catch {
+        missed.push(note);
+      }
+    }
+    return { path: next, rewritten: sorted(rewritten), missed: sorted(missed) };
+  }
+
+  private async bin(): Promise<string> {
+    const bin = join(this.root, '.trash');
+    await mkdir(bin, { recursive: true });
+    if ((await lstat(bin)).isSymbolicLink()) throw new Error('The trash folder is not usable.');
+    return bin;
+  }
+  private async origins(bin: string): Promise<Origins> {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(join(bin, ORIGINS), 'utf8'));
+      return Object.assign(
+        Object.create(null) as Origins,
+        parsed && typeof parsed === 'object' ? parsed : {},
+      );
+    } catch {
+      return Object.create(null) as Origins;
+    }
+  }
+
+  /** Hands everything in the trash to `discard`, which is expected to keep it recoverable. */
+  emptyTrash(discard: (file: string) => Promise<void>): Promise<void> {
+    return this.serial(async () => {
+      const bin = await this.bin();
+      for (const entry of await readdir(bin, { withFileTypes: true }))
+        if (!entry.name.startsWith('.') && (entry.isFile() || entry.isDirectory()))
+          await discard(join(bin, entry.name));
+      await atomicWrite(join(bin, ORIGINS), '{}');
+    });
+  }
+
+  /**
+   * Moves a note, or a folder with everything in it, into the vault's `.trash` folder,
+   * where it stays recoverable.
+   */
   trash(path: string): Promise<void> {
     return this.serial(async () => {
-      this.note(path);
-      const from = await this.absolute(path, 'file');
-      const bin = join(this.root, '.trash');
-      await mkdir(bin, { recursive: true });
-      if ((await lstat(bin)).isSymbolicLink()) throw new Error('The trash folder is not usable.');
-      const taken = new Set(await readdir(bin));
-      let target = basename(path);
-      for (let count = 1; taken.has(target); count++) target = `${noteTitle(path)} ${count}.md`;
+      const from = await this.absolute(path, 'existing');
+      const directory = (await lstat(from)).isDirectory();
+      if (!directory) this.note(path);
+      const bin = await this.bin();
+      const taken = new Set((await readdir(bin)).map((entry) => entry.toLowerCase()));
+      const extension = directory ? '' : extname(path);
+      const name = basename(path, extension);
+      let target = name + extension;
+      for (let count = 1; taken.has(target.toLowerCase()); count++)
+        target = `${name} ${count}${extension}`;
       await rename(from, join(bin, target));
-      this.index.delete(path);
-      this.stamps.delete(path);
+      const origins = await this.origins(bin);
+      origins[target] = { from: path, at: Date.now() };
+      await atomicWrite(join(bin, ORIGINS), JSON.stringify(origins));
+      for (const note of this.index.paths())
+        if (within(note, path)) {
+          this.index.delete(note);
+          this.stamps.delete(note);
+        }
+      if (directory) {
+        this.folders = this.folders.filter((item) => !within(item, path));
+        this.images = this.images.filter((item) => !within(item, path));
+      }
+    });
+  }
+
+  /** What is in the trash, newest first. */
+  trashed(): Promise<TrashEntry[]> {
+    return this.serial(async () => {
+      const bin = await this.bin();
+      const origins = await this.origins(bin);
+      const entries: TrashEntry[] = [];
+      for (const entry of await readdir(bin, { withFileTypes: true })) {
+        if (entry.name.startsWith('.') || (!entry.isDirectory() && !entry.isFile())) continue;
+        const origin = origins[entry.name];
+        const from = typeof origin?.from === 'string' ? origin.from : undefined;
+        entries.push({
+          name: entry.name,
+          ...(from ? { from } : {}),
+          folder: entry.isDirectory(),
+          at:
+            typeof origin?.at === 'number'
+              ? origin.at
+              : (await lstat(join(bin, entry.name))).mtimeMs,
+        });
+      }
+      return entries.sort((a, b) => b.at - a.at || a.name.localeCompare(b.name));
+    });
+  }
+
+  /** Puts a trashed item back where it was, under a free name if that one is now taken. */
+  restore(name: string): Promise<string> {
+    return this.serial(async () => {
+      if (typeof name !== 'string' || !name || name.startsWith('.') || /[/\\\u0000]/.test(name))
+        throw new Error('Invalid path.');
+      const bin = await this.bin();
+      const source = join(bin, name);
+      const info = await lstat(source).catch(() => undefined);
+      if (!info || (!info.isFile() && !info.isDirectory()))
+        throw new Error(`“${name}” is no longer in the trash.`);
+      const origins = await this.origins(bin);
+      const recorded = origins[name]?.from;
+      const from =
+        typeof recorded === 'string' &&
+        !recorded.split('/').some((part) => !part || part[0] === '.')
+          ? recorded
+          : name;
+      // Recreate the folder it lived in; if that is not possible, it comes back at the top.
+      let folder = '';
+      for (const part of noteFolder(from).split('/').filter(Boolean)) {
+        const next = child(folder, part);
+        const directory = await this.absolute(next, 'new').catch(() => undefined);
+        if (!directory) break;
+        const existing = await lstat(directory).catch(() => undefined);
+        if (existing && !existing.isDirectory()) break;
+        if (!existing) await mkdir(directory);
+        folder = next;
+      }
+      const extension = info.isDirectory() ? '' : extname(from);
+      const path = await this.available(
+        folder,
+        basename(from.slice(from.lastIndexOf('/') + 1), extension),
+        extension,
+      );
+      await rename(source, await this.absolute(path, 'new'));
+      delete origins[name];
+      await atomicWrite(join(bin, ORIGINS), JSON.stringify(origins));
+      await this.scan();
+      return path;
+    });
+  }
+
+  /** Stores image bytes under `attachments/` and returns the vault-relative path. */
+  saveImage(bytes: Uint8Array, name = 'Pasted image'): Promise<string> {
+    if (bytes.byteLength > MAX_VAULT_IMAGE_BYTES)
+      throw new Error('Choose an image smaller than 25 MB.');
+    const type = detectImage(bytes);
+    if (!type) throw new Error('Supported images: PNG, JPEG, GIF, and WebP.');
+    return this.serial(async () => {
+      await mkdir(join(this.root, 'attachments'), { recursive: true });
+      const path = await this.available('attachments', name, `.${type === 'jpeg' ? 'jpg' : type}`);
+      await atomicWrite(await this.absolute(path, 'new'), bytes);
+      this.images = sorted([...this.images, path]);
+      return path;
     });
   }
 
   async importImage(source: string): Promise<string> {
     const info = await lstat(source);
-    if (!info.isFile() || info.size > MAX_IMAGE_BYTES)
-      throw new Error('Choose an image smaller than 5 MB.');
-    const bytes = await readFile(source);
-    const type = detectImage(bytes);
-    if (!type) throw new Error('Supported images: PNG, JPEG, GIF, and WebP.');
-    const path = `attachments/${randomUUID()}.${type === 'jpeg' ? 'jpg' : type}`;
-    return this.serial(async () => {
-      await mkdir(join(this.root, 'attachments'), { recursive: true });
-      await atomicWrite(await this.absolute(path, 'new'), bytes);
-      return path;
-    });
+    if (!info.isFile() || info.size > MAX_VAULT_IMAGE_BYTES)
+      throw new Error('Choose an image smaller than 25 MB.');
+    let name = basename(source, extname(source));
+    try {
+      validateName(name);
+    } catch {
+      name = 'Image';
+    }
+    return this.saveImage(await readFile(source), name);
   }
 
   /** Absolute path of a raster image inside the vault, for the image protocol. */
   async image(path: string): Promise<string> {
     if (!isVaultImage(path)) throw new Error('Not an image.');
     const file = await this.absolute(path, 'file');
-    if ((await lstat(file)).size > MAX_IMAGE_BYTES) throw new Error('Image is too large.');
+    if ((await lstat(file)).size > MAX_VAULT_IMAGE_BYTES) throw new Error('Image is too large.');
     return file;
   }
 
   file(path: string): Promise<string> {
-    return this.absolute(path, 'file');
+    return this.absolute(path, 'existing');
   }
 }

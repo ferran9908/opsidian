@@ -113,8 +113,51 @@
 .op-strike {
   text-decoration: line-through;
 }
-.op-quote {
+/* Obsidian draws a quote as normal text behind an accent rule. */
+.cm-editor .cm-line.op-quote {
+  border-left: 2px solid var(--primary);
+  padding-left: 1em;
+}
+.op-bullet {
+  display: inline-block;
+  width: 1ch;
+  text-align: center;
+}
+.op-bullet::before {
+  content: '•';
+  color: var(--faint);
+}
+.op-list-number {
+  color: var(--faint);
+}
+/* Inline-block, so the editor's zero-width cursor anchors beside it do not add blank lines. */
+.op-embed {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 100%;
+  vertical-align: top;
+  margin: 4px 0;
+  padding: 2px 0 2px 1em;
+  border-left: 2px solid var(--primary);
+}
+.op-embed-title {
+  display: block;
+  color: var(--link);
+  font-weight: 600;
+  cursor: pointer;
+}
+.op-embed-body {
+  display: block;
+}
+.op-embed-missing .op-embed-body {
   color: var(--muted-foreground);
+}
+.op-embed .cm-editor {
+  min-height: 0;
+  background: none;
+}
+.op-embed .cm-content {
+  padding: 0;
 }
 .op-syntax {
   color: var(--muted-foreground);
@@ -133,6 +176,7 @@
   padding: 0;
   font: inherit;
   cursor: pointer;
+  overflow-wrap: anywhere;
   text-decoration: underline;
   text-underline-offset: 3px;
 }

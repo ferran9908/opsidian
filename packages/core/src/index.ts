@@ -1,11 +1,14 @@
 export { SaveQueue, type SaveStatus } from './save-queue';
 export { initialMarkdown, noteSuggestions } from './sample';
 export * from './links';
+import { encodeDestination } from './links';
 export { NoteIndex, type Backlink, type SearchResult } from './note-index';
 export * from './vault';
 
 export const MAX_NOTE_LENGTH = 2_000_000;
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/** Desktop images are served from disk, never held in memory, so they can be larger. */
+export const MAX_VAULT_IMAGE_BYTES = 25 * 1024 * 1024;
 export interface NoteSnapshot {
   content: string;
   location: string;
@@ -34,5 +37,5 @@ export function imageMarkdown(path: string): string {
 }
 /** Markdown for an image already stored inside the vault. */
 export function vaultImageMarkdown(path: string): string {
-  return `\n![](${encodeURI(path)})\n`;
+  return `\n![](${encodeDestination(path)})\n`;
 }

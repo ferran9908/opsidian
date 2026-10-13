@@ -1,4 +1,12 @@
-import { noteTitle, parseLinks, resolveLink, type WikiLink } from './links';
+import {
+  linkResolver,
+  linkTarget,
+  noteTitle,
+  parseLinks,
+  retargetFiles,
+  retargetLinks,
+  type WikiLink,
+} from './links';
 
 export interface Backlink {
   path: string;
@@ -24,18 +32,22 @@ function excerptAround(content: string, from: number, to: number): string {
 /** Rebuildable in-memory index of a vault's notes: link graph and text search. */
 export class NoteIndex {
   private readonly notes = new Map<string, { content: string; lower: string; links: WikiLink[] }>();
+  /** Rebuilt lazily whenever the set of note paths changes. */
+  private resolver: ((target: string) => string | undefined) | undefined;
 
   set(path: string, content: string): void {
+    if (!this.notes.has(path)) this.resolver = undefined;
     this.notes.set(path, { content, lower: content.toLowerCase(), links: parseLinks(content) });
   }
   delete(path: string): void {
-    this.notes.delete(path);
+    if (this.notes.delete(path)) this.resolver = undefined;
   }
   move(from: string, to: string): void {
     const note = this.notes.get(from);
     if (!note) return;
     this.notes.delete(from);
     this.notes.set(to, note);
+    this.resolver = undefined;
   }
   has(path: string): boolean {
     return this.notes.has(path);
@@ -47,7 +59,42 @@ export class NoteIndex {
     return [...this.notes.keys()].sort((a, b) => a.localeCompare(b));
   }
   resolve(target: string): string | undefined {
-    return resolveLink(target, this.notes.keys());
+    this.resolver ??= linkResolver(this.notes.keys());
+    return this.resolver(target);
+  }
+
+  /**
+   * The edits that keep every link pointing at the same note after notes move.
+   * `notes` maps old note paths to new ones; `folders` maps old folder paths to new ones, for
+   * images and files linked by path. Returns new text keyed by each note's path after the move.
+   */
+  relink(
+    notes: ReadonlyMap<string, string>,
+    folders: ReadonlyMap<string, string>,
+  ): Map<string, string> {
+    const after = linkResolver([...this.notes.keys()].map((path) => notes.get(path) ?? path));
+    const moved = (path: string) => {
+      const note = notes.get(path);
+      if (note) return note;
+      for (const [from, to] of folders)
+        if (path.startsWith(`${from}/`)) return to + path.slice(from.length);
+      return undefined;
+    };
+    const edits = new Map<string, string>();
+    for (const [path, note] of this.notes) {
+      let content = note.content;
+      if (note.links.length)
+        content = retargetLinks(content, (target) => {
+          const before = this.resolve(target);
+          // Not a note: an image or file embedded by its path follows its folder.
+          if (!before) return moved(target);
+          const destination = notes.get(before) ?? before;
+          return after(target) === destination ? undefined : linkTarget(destination, after);
+        });
+      if (content.includes('](')) content = retargetFiles(content, moved);
+      if (content !== note.content) edits.set(notes.get(path) ?? path, content);
+    }
+    return edits;
   }
 
   /** Notes that link to `path`, one entry per linking note. */

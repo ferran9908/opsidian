@@ -121,7 +121,27 @@ async function start() {
   );
   handle('folder:create', (parent, name) => open().createFolder(text(parent), text(name, 200)));
   handle('note:rename', (path, name) => open().rename(text(path), text(name, 200)));
+  handle('note:move', (path, folder) => open().move(text(path), text(folder)));
   handle('note:trash', (path) => open().trash(text(path)));
+  handle('trash:list', () => open().trashed());
+  handle('trash:restore', (name) => open().restore(text(name, 300)));
+  handle('trash:empty', async () => {
+    const result = await dialog.showMessageBox(window!, {
+      type: 'warning',
+      message: 'Empty this notebook’s trash?',
+      detail: 'Everything in it moves to the Mac’s Trash, where it can still be recovered.',
+      buttons: ['Cancel', 'Empty trash'],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (result.response !== 1) return false;
+    await open().emptyTrash((file) => shell.trashItem(file));
+    return true;
+  });
+  handle('note:image-data', (bytes) => {
+    if (!(bytes instanceof Uint8Array)) throw new Error('Invalid request.');
+    return open().saveImage(bytes);
+  });
   handle('note:backlinks', (path) => open().backlinks(text(path)));
   handle('vault:search', (query) => open().search(text(query, 200)));
   handle('note:reveal', async (path) => shell.showItemInFolder(await open().file(text(path))));

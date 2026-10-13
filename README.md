@@ -4,7 +4,7 @@ A Markdown-first desktop notebook with free, self-hosted sync and an eventual iP
 
 ## Status
 
-The desktop app opens a folder of Markdown notes: file tree, wiki links, backlinks, search, attachments and trash. See [what the desktop notebook does and does not do yet](docs/desktop-notebook.md). The iPhone shell is still the single-note editor prototype from milestone 1, and **real-iPhone editing acceptance is still pending.** Sync is not implemented.
+The desktop app is a local notebook over a folder of Markdown notes: notes and folders, wiki links that survive renames, embeds, backlinks, search, pasted images, and a trash you can restore from. See [what the desktop notebook does](docs/desktop-notebook.md). The iPhone shell is still the single-note editor prototype from milestone 1, and **real-iPhone editing acceptance is still pending.** Sync is not implemented.
 
 ## Get started
 
@@ -17,7 +17,7 @@ pnpm dev:desktop
 
 `pnpm dev:preview` opens a browser development preview. `pnpm dev:mobile` starts Expo after bundling the shared editor. See [prototype setup, storage, and device checks](docs/editor-prototype.md).
 
-Run `pnpm check` for formatting, typechecks, and behavioral tests. Run `pnpm test:desktop` for a real Electron save/restart smoke test. `pnpm format` formats the repository.
+Run `pnpm check` for formatting, typechecks, and behavioral tests. Run `pnpm test:desktop` to drive the real Electron app end to end and then kill it mid-save to check nothing is lost. `pnpm format` formats the repository.
 
 ## Workspace
 
