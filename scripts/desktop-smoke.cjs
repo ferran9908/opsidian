@@ -1,5 +1,5 @@
 // Runs inside Electron against the production app and its real preload/IPC.
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, clipboard, dialog } = require('electron');
 const { readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 const assert = require('node:assert/strict');
@@ -70,13 +70,17 @@ async function waitFor(check) {
   await waitFor(() => readFileSync(snapshot.location, 'utf8').includes('attachments/'));
   await evaluate("document.querySelector('.cm-content').blur()");
   await waitFor(() => evaluate("Boolean(document.querySelector('.op-image img')?.naturalWidth)"));
-  const started = Date.now();
-  await replace(
+  // A real paste. webContents.insertText takes the slow native text-input path instead.
+  clipboard.writeText(
     '# Long note\n\n' + 'A paragraph with **bold** and [[Weekend plans]].\n\n'.repeat(2000),
   );
+  await evaluate("document.querySelector('.cm-content').focus()");
+  web.selectAll();
+  const started = Date.now();
+  web.paste();
   await waitFor(() => readFileSync(snapshot.location, 'utf8').length > 90000);
   console.log(
-    `PASS wiki completion, fenced code, native image import; 96KB note insert/save ${Date.now() - started}ms`,
+    `PASS wiki completion, fenced code, native image import; 96KB paste and save ${Date.now() - started}ms`,
   );
   await replace('# Native smoke\n\n- [ ] Try a task\n\n[[Weekend plans]]\n\n**Real Markdown**');
   await waitFor(() => readFileSync(snapshot.location, 'utf8').startsWith('# Native smoke'));
