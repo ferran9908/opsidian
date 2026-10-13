@@ -79,15 +79,28 @@ async function start() {
   session.defaultSession.setPermissionRequestHandler((_web, _permission, callback) =>
     callback(false),
   );
+  // macOS refuses Documents, Desktop and Downloads to an app that was never granted them.
+  const denied = (reason: unknown) => {
+    const { code, path } = reason as NodeJS.ErrnoException;
+    if (code !== 'EPERM' && code !== 'EACCES') return undefined;
+    return new Error(
+      `macOS is not letting Opsidian use ${path ? `“${path}”` : 'that folder'}. ` +
+        'Allow it in System Settings → Privacy & Security → Files and Folders, or choose another folder.',
+    );
+  };
   const handle = (channel: string, handler: (...args: unknown[]) => unknown) =>
-    ipcMain.handle(channel, (event, ...args) => {
+    ipcMain.handle(channel, async (event, ...args) => {
       if (
         !window ||
         event.sender !== window.webContents ||
         event.senderFrame !== window.webContents.mainFrame
       )
         throw new Error('Untrusted request');
-      return handler(...args);
+      try {
+        return await handler(...args);
+      } catch (reason) {
+        throw denied(reason) ?? reason;
+      }
     });
 
   handle('vault:current', () => (vault ? { name: vault.name, location: vault.root } : null));
@@ -102,7 +115,10 @@ async function start() {
   handle('vault:create', async (name, parent) => {
     validateName(name);
     const directory = join(parent === undefined ? defaultParent : text(parent, 4000), name);
-    const existing = await readdir(directory).catch(() => []);
+    const existing = await readdir(directory).catch((reason) => {
+      if ((reason as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw reason;
+    });
     if (existing.some((entry) => !entry.startsWith('.')))
       throw new Error(`“${name}” already exists there and is not empty. Open it instead.`);
     return use(directory, true);
