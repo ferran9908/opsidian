@@ -1,10 +1,12 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
+import { Worker } from 'node:worker_threads';
 import qrcode from 'qrcode-generator';
 import type { BackupInfo, HostingInfo, Invitation } from '@opsidian/core';
 import type { SyncService, Vault } from '@opsidian/notebook';
-import { Host, listBackups, restoreBackup } from '../../host/src/host';
+import { listBackups, type Host } from '../../host/src/host';
+import type { HostReply, HostRequest } from './host-worker';
 
 interface Saved {
   enabled: boolean;
@@ -13,6 +15,11 @@ interface Saved {
   backup: { folder?: string; hour?: number; keep: number };
   /** The devices this Mac itself was paired as, one per notebook it hosts and has open. */
   own?: string[];
+  /**
+   * Which host notebook each notebook folder on this Mac is, by the folder's path. Two
+   * folders can share a name; they must never share a host notebook.
+   */
+  folders?: Record<string, string>;
   failed?: { at: number; message: string };
 }
 const fresh = (): Saved => ({
@@ -43,13 +50,70 @@ function addresses(port: number): HostingInfo['addresses'] {
   return found.sort((a, b) => Number(b.kind === 'tailscale') - Number(a.kind === 'tailscale'));
 }
 
+class Failure extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
+
+/** The host's thread, seen from the app: each call is a message there and back. */
+class HostThread {
+  private readonly worker = new Worker(join(__dirname, 'host-worker.cjs'));
+  private readonly waiting = new Map<number, (reply: HostReply) => void>();
+  private next = 0;
+  private ended = false;
+
+  constructor(onLost: (reason: string) => void) {
+    this.worker.on('message', (reply: HostReply) => {
+      this.waiting.get(reply.id)?.(reply);
+      this.waiting.delete(reply.id);
+    });
+    const lost = (reason: string) => {
+      if (this.ended) return;
+      this.ended = true;
+      for (const answer of this.waiting.values())
+        answer({ id: -1, ok: false, message: 'Hosting stopped unexpectedly.' });
+      this.waiting.clear();
+      onLost(reason);
+    };
+    this.worker.on('error', (error) => lost(error.message));
+    this.worker.on('exit', (code) => lost(`Hosting stopped unexpectedly (${code}).`));
+  }
+
+  call<T = void>(request: HostRequest): Promise<T> {
+    if (this.ended) return Promise.reject(new Failure('Hosting stopped unexpectedly.'));
+    const id = this.next++;
+    return new Promise<T>((resolve, reject) => {
+      this.waiting.set(id, (reply) =>
+        reply.ok ? resolve(reply.value as T) : reject(new Failure(reply.message, reply.code)),
+      );
+      this.worker.postMessage({ id, request });
+    });
+  }
+  async end(): Promise<void> {
+    if (this.ended) return;
+    await this.call({ op: 'close' }).catch(() => {});
+    this.ended = true;
+    await this.worker.terminate();
+  }
+}
+
+interface Snapshot {
+  notebooks: ReturnType<Host['notebooks']>;
+  devices: ReturnType<Host['devices']>;
+  invitations: ReturnType<Host['invitations']>;
+}
+
 /**
  * Runs a host inside the Mac app, so one Mac can serve a notebook to the others without
  * anything to install. The host's data lives in the app's own folder, apart from every
  * notebook folder.
  */
 export class Hosting {
-  private host: Host | undefined;
+  private host: HostThread | undefined;
   private saved = fresh();
   private error: string | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -77,8 +141,8 @@ export class Hosting {
     this.work = result.catch(() => {});
     return result;
   }
-  private tell(): HostingInfo {
-    const info = this.info();
+  private async tell(): Promise<HostingInfo> {
+    const info = await this.info();
     this.notify(info);
     return info;
   }
@@ -102,15 +166,19 @@ export class Hosting {
   }
   private async open(): Promise<void> {
     if (this.host) return;
-    let host: Host | undefined;
+    const host: HostThread = new HostThread((reason) => {
+      if (this.host !== host) return;
+      this.host = undefined;
+      this.error = reason;
+      void this.tell();
+    });
     try {
       // Opening the host's data can fail too, for example when its disk is full.
-      host = new Host({ dataDir: this.data });
-      await host.listen(this.saved.port, '0.0.0.0');
+      await host.call({ op: 'open', dataDir: this.data, port: this.saved.port });
       this.host = host;
       this.error = undefined;
     } catch (reason) {
-      await host?.close().catch(() => {});
+      await host.end().catch(() => {});
       this.error =
         (reason as NodeJS.ErrnoException).code === 'EADDRINUSE'
           ? `Something else on this Mac is already using port ${this.saved.port}. If the host is running in a terminal, stop it there first.`
@@ -121,23 +189,25 @@ export class Hosting {
   async close(): Promise<void> {
     clearInterval(this.timer);
     await this.serial(async () => {
-      await this.host?.close();
+      const host = this.host;
       this.host = undefined;
+      await host?.end();
     });
   }
 
-  info(): HostingInfo {
+  async info(): Promise<HostingInfo> {
     const own = new Set([...(this.saved.own ?? []), this.sync.deviceId]);
+    const seen = await this.host?.call<Snapshot>({ op: 'snapshot' }).catch(() => undefined);
     return {
       hosting: Boolean(this.host),
       ...(this.error ? { error: this.error } : {}),
       port: this.saved.port,
       addresses: addresses(this.saved.port),
-      notebooks: this.host?.notebooks() ?? [],
-      devices: (this.host?.devices() ?? [])
+      notebooks: seen?.notebooks ?? [],
+      devices: (seen?.devices ?? [])
         .filter((device) => !device.revoked)
         .map(({ revoked: _revoked, ...device }) => ({ ...device, self: own.has(device.id) })),
-      invitations: this.host?.invitations() ?? [],
+      invitations: seen?.invitations ?? [],
       keepRunning: this.saved.keepRunning,
     };
   }
@@ -149,26 +219,51 @@ export class Hosting {
       if (!this.host) throw new Error(this.error ?? 'Hosting could not start.');
       this.saved.enabled = true;
       await this.save();
+      const address = `http://127.0.0.1:${this.saved.port}`;
       try {
-        if (!this.sync.info().connected) {
-          const address = `http://127.0.0.1:${this.saved.port}`;
-          const { code } = this.host.invite(vault.name);
+        const now = this.sync.info();
+        if (!now.connected) {
+          const notebook = await this.notebookFor(vault);
+          const { code } = await this.host.call<{ code: string }>({ op: 'invite', notebook });
           const pairing = await this.sync.invite(address, code);
           this.saved.own = [...(this.saved.own ?? []), pairing.device.id];
+          this.saved.folders = { ...this.saved.folders, [vault.root]: notebook };
           await this.save();
           await this.sync.adopt(vault, address, pairing);
+        } else if (now.host === address && now.notebook && !this.saved.folders?.[vault.root]) {
+          // Hosted before folders were remembered: remember this one now.
+          this.saved.folders = { ...this.saved.folders, [vault.root]: now.notebook };
+          await this.save();
         }
       } finally {
-        this.tell();
+        await this.tell();
       }
       return this.info();
     });
   }
+  /**
+   * The host notebook a folder on this Mac is. A folder hosted before keeps its notebook;
+   * a new one never joins another folder's notebook just because the names match.
+   */
+  private async notebookFor(vault: Vault): Promise<string> {
+    const known = this.saved.folders?.[vault.root];
+    if (known) return known;
+    const { notebooks } = await this.host!.call<Snapshot>({ op: 'snapshot' });
+    const taken = new Set([
+      ...notebooks.map((notebook) => notebook.name.toLowerCase()),
+      ...Object.values(this.saved.folders ?? {}).map((name) => name.toLowerCase()),
+    ]);
+    let name = vault.name;
+    for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${vault.name} ${n}`;
+    return name;
+  }
+
   /** Stops serving. Everything the host holds stays on disk, ready to be started again. */
   stop(): Promise<HostingInfo> {
     return this.serial(async () => {
-      await this.host?.close();
+      const host = this.host;
       this.host = undefined;
+      await host?.end();
       this.saved.enabled = false;
       await this.save();
       return this.tell();
@@ -180,9 +275,12 @@ export class Hosting {
     return this.tell();
   }
 
-  invite(notebook: string): Invitation {
+  async invite(notebook: string): Promise<Invitation> {
     if (!this.host) throw new Error('This Mac is not hosting.');
-    const { code, expires } = this.host.invite(notebook);
+    const { code, expires } = await this.host.call<{ code: string; expires: number }>({
+      op: 'invite',
+      notebook,
+    });
     const address = addresses(this.saved.port)[0]?.address ?? `127.0.0.1:${this.saved.port}`;
     const link = `opsidian://connect?host=${encodeURIComponent(address)}&code=${encodeURIComponent(code)}`;
     const drawn = qrcode(0, 'M');
@@ -192,17 +290,17 @@ export class Hosting {
     const qr = Array.from({ length: size }, (_row, y) =>
       Array.from({ length: size }, (_cell, x) => (drawn.isDark(y, x) ? '1' : '0')).join(''),
     );
-    this.tell();
+    void this.tell();
     return { notebook, code, expires, address, link, qr };
   }
-  cancelInvitation(id: string): HostingInfo {
-    this.host?.cancelInvitation(id);
+  async cancelInvitation(id: string): Promise<HostingInfo> {
+    await this.host?.call({ op: 'cancelInvitation', id });
     return this.tell();
   }
-  removeDevice(id: string): HostingInfo {
+  async removeDevice(id: string): Promise<HostingInfo> {
     if (id === this.sync.deviceId || this.saved.own?.includes(id))
       throw new Error('This Mac is the host. Stop hosting instead of removing it.');
-    this.host?.revoke(id);
+    await this.host?.call({ op: 'revoke', id });
     return this.tell();
   }
 
@@ -234,7 +332,7 @@ export class Hosting {
       if (!folder) throw new Error('Choose where backups are saved first.');
       if (!this.host) throw new Error('This Mac is not hosting, so there is nothing to back up.');
       try {
-        await this.host.backup(folder, keep);
+        await this.host.call({ op: 'backup', folder, keep });
         delete this.saved.failed;
       } catch (reason) {
         this.saved.failed = {
@@ -271,14 +369,17 @@ export class Hosting {
       if (!folder) throw new Error('Choose where backups are saved first.');
       if (!this.host) throw new Error('This Mac is not hosting.');
       // One more than usual is kept, so the safety copy cannot push out the one being restored.
-      await this.host.backup(folder, keep + 1);
-      await this.host.close();
-      this.host = undefined;
+      await this.host.call({ op: 'backup', folder, keep: keep + 1 });
+      // The restore itself runs on the host's thread too, once the host has let go of its data.
+      const host = this.host;
+      await host.call({ op: 'close' });
       try {
-        await restoreBackup(this.data, folder, name);
+        await host.call({ op: 'restore', dataDir: this.data, folder, name });
       } finally {
+        this.host = undefined;
+        await host.end();
         await this.open();
-        this.tell();
+        await this.tell();
       }
       this.sync.kick();
       return this.backups();

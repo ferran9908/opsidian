@@ -18,6 +18,10 @@ To sync away from home, install Tailscale on the Mac and on each device and sign
 
 The host's data is kept in the app's own folder (`~/Library/Application Support/Opsidian/host`), separate from every notebook folder.
 
+The host runs on a thread of its own, so serving devices, backing up and restoring never hold up the app's windows.
+
+Each notebook folder on this Mac is its own notebook on the host, even when two folders have the same name. The second one to be hosted is named with a number, such as "Personal 2", and invitations use that name.
+
 ## On a server
 
 Use this for a host that is always on. The server needs Docker and Tailscale.

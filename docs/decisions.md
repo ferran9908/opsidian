@@ -35,7 +35,7 @@ The build order was accepted after discussing this baseline. These choices guide
 - **App-managed content database with Markdown export:** replaced by actual Markdown vaults.
 - **Web-first notes client:** corrected to a desktop-first product; the website is a download/setup entry point.
 - **Agent-first product:** explicitly rejected. Optional assistance may follow the core notebook.
-- **Third-party cloud storage as the default sync transport:** replaced by a user-chosen Writer host.
+- **Third-party cloud storage as the default sync transport:** replaced by a user-chosen Opsidian host.
 
 ## Explicitly unresolved
 
@@ -47,7 +47,7 @@ The build order was accepted after discussing this baseline. These choices guide
 - Certificate and onboarding experience for public versus Tailscale hosts.
 - Attachment caching, size policies, and history/backup retention.
 - Final typography, mobile designs, and conflict/history UI.
-- Release distribution details, signing, and App Store requirements.
+- Release distribution details and signing.
 
 These are implementation design tasks, not reasons to block the editor prototype.
 
@@ -106,3 +106,12 @@ Potential features: organize a messy thought, answer questions over notes with c
 ## Prototype implementation — 2026-09-28
 
 Milestone 1 uses a fixed single-note directory to isolate editor validation from vault management. Desktop writes Markdown atomically through Electron IPC. Mobile uses a SQLite latest-content recovery journal before materializing its app-owned Markdown file; this is prototype recovery state, not a replacement for the planned file-based vault or a sync journal. Native iPhone keyboard acceptance remains unresolved.
+
+## Release — 2026-10-14
+
+- **The name is Opsidian everywhere.** The earlier working label "Writer" is retired, including the download page, which becomes `ferran.sh/opsidian`.
+- **TestFlight only for the iPhone.** An App Store release is not planned for now. The plain `http` allowance therefore does not need an App Store review justification yet.
+- **Permissive licences.** Code is `MIT OR Apache-2.0`, at the user's choice; Apache adds an explicit patent grant. Documentation and design, including the logo, are CC0 1.0. CC0 does not cover trademarks, so the name and logo still identify the project. See `LICENSE`.
+- **The Mac app's host runs on a worker thread,** not on the app's main thread. Its database work is synchronous, and a backup copies the whole database in one step; on the main thread that stalled every window for as long as it took (310 ms for a 300 MB host in the test). A thread costs far less memory than a separate process, which matters for an app that stays in the menu bar.
+- **A host notebook belongs to one folder.** The app remembers which folder each hosted notebook is, by path. A second folder with the same name becomes "Name 2" instead of merging into the first.
+- **The Apple Developer Program membership is in place,** so Mac signing, notarisation and TestFlight are not blocked on it.
