@@ -23,7 +23,8 @@
     "host": "pnpm --silent --filter @opsidian/host start",
     "build:host": "pnpm --filter @opsidian/host build",
     "test:sync": "pnpm build:desktop && pnpm build:host && node scripts/test-sync.mjs",
-    "ios": "pnpm build:mobile-editor && pnpm --filter @opsidian/mobile exec expo run:ios --device --configuration Release"
+    "ios": "pnpm build:mobile-editor && pnpm --filter @opsidian/mobile exec expo run:ios --device --configuration Release",
+    "test:hosting": "pnpm build:desktop && node scripts/test-hosting.mjs"
   },
   "devDependencies": {
     "prettier": "3.9.9",

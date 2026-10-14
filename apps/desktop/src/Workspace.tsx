@@ -10,6 +10,7 @@ import {
   Sun,
   Trash2,
   X,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import type { EditorMode } from '@opsidian/editor';
 import {
@@ -28,6 +29,7 @@ import { FolderPicker } from './FolderPicker';
 import { QuickSwitcher } from './QuickSwitcher';
 import { TrashDialog } from './TrashDialog';
 import { SyncDialog } from './SyncDialog';
+import { Settings, type SettingsSection } from './Settings';
 import { HistoryDialog } from './HistoryDialog';
 import { Sidebar } from './Sidebar';
 import { cn } from '@/lib/utils';
@@ -53,6 +55,7 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
   const [trashOpen, setTrashOpen] = useState(false);
   const [sync, setSync] = useState<SyncInfo>({ connected: false });
   const [syncOpen, setSyncOpen] = useState(false);
+  const [settings, setSettings] = useState<SettingsSection>();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [mode, setMode] = useState<EditorMode>('live');
   const [notice, setNotice] = useState('');
@@ -187,6 +190,9 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
       } else if (key === 'k' || key === 'o' || key === 'p') {
         event.preventDefault();
         setFinding(true);
+      } else if (key === ',') {
+        event.preventDefault();
+        setSettings((open) => open ?? 'sync');
       }
     };
     window.addEventListener('keydown', keys);
@@ -402,6 +408,14 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
           >
             <ThemeIcon size={17} />
           </button>
+          <button
+            aria-label="Settings"
+            title="Settings (⌘,)"
+            className={icon}
+            onClick={() => setSettings('sync')}
+          >
+            <SettingsIcon size={17} />
+          </button>
         </header>
         {notice && (
           <div role="alert" className="bg-secondary flex items-center gap-4 px-8 py-3 text-[13px]">
@@ -466,6 +480,20 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
             void relocate(moving, () => bridge.move(moving, folder));
           }}
           onClose={() => setMoving(null)}
+        />
+      )}
+      {settings && (
+        <Settings
+          section={settings}
+          notebook={vault.name}
+          sync={sync}
+          theme={theme}
+          onSection={setSettings}
+          onConnect={() => {
+            setSettings(undefined);
+            setSyncOpen(true);
+          }}
+          onClose={() => setSettings(undefined)}
         />
       )}
       {syncOpen && <SyncDialog info={sync} onClose={() => setSyncOpen(false)} />}

@@ -47,6 +47,16 @@ export interface Changes {
   changes: RemoteFile[];
   /** Cursor to ask from next time. */
   head: number;
+  /**
+   * Changes whenever the host's history is replaced, as when it is restored from a backup.
+   * A device that sees a new one forgets what it had agreed and meets the host afresh.
+   */
+  generation?: string;
+  /**
+   * The last change the host still had when it was restored. What a device agreed up to
+   * here still holds; what it agreed after is gone from the host.
+   */
+  floor?: number;
 }
 
 export interface Pairing {

@@ -5,12 +5,12 @@ import { StatusBar } from 'expo-status-bar';
 import { noteTitle } from '@opsidian/core';
 import { connect, open, refresh, store } from './notebook';
 import { phonePlatform } from './platform';
-import { NavigationContext, type Navigation, type Route } from './nav';
+import { NavigationContext, parseInvitation, type Navigation, type Route } from './nav';
 import { Button, Screen, message, useColors, useStore } from './ui';
 import { Folder, Home, Search, Trash } from './screens/browse';
 import { Note } from './screens/note';
 import { Connect, Downloading, HeldDeletions, Welcome } from './screens/start';
-import { History, Sync, Version } from './screens/sync';
+import { Check, History, Sync, Version } from './screens/sync';
 
 /** Handles for driving a development build from the debugger. */
 export const dev: Record<string, unknown> = {};
@@ -77,20 +77,17 @@ function Stack() {
       }
     };
     const route = (address: string | null) => {
-      const match = address?.match(/^opsidian:\/\/(connect|note)\/?\?(.*)$/);
-      if (!match) return;
-      const query = new Map(
-        match[2]!.split('&').map((pair) => {
-          const [name = '', value = ''] = pair.split('=');
-          return [name, decodeURIComponent(value)] as const;
-        }),
-      );
-      if (match[1] === 'connect') {
-        setInvitation({ host: query.get('host') ?? '', code: query.get('code') ?? '' });
+      if (!address) return;
+      const invited = parseInvitation(address);
+      if (invited) {
+        setInvitation(invited);
         if (store.notebook) setRoutes((stack) => [...stack, { name: 'connect' }]);
         else setWelcoming('connect');
-      } else if (store.tree.notes.includes(query.get('path') ?? ''))
-        setRoutes((stack) => [...stack, { name: 'note', path: query.get('path')! }]);
+        return;
+      }
+      const note = address.match(/^opsidian:\/\/note\/?\?path=([^&]*)/);
+      const path = note ? decodeURIComponent(note[1]!) : '';
+      if (store.tree.notes.includes(path)) setRoutes((stack) => [...stack, { name: 'note', path }]);
     };
     void Linking.getInitialURL().then(follow, () => {});
     const listener = Linking.addEventListener('url', (event) => follow(event.url));
@@ -142,6 +139,8 @@ function Stack() {
               setArriving(true);
             }}
           />
+        ) : top.name === 'check' ? (
+          <Check />
         ) : top.name === 'history' ? (
           <History path={top.path} />
         ) : (

@@ -1,4 +1,17 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, net, session, Menu, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  dialog,
+  protocol,
+  nativeImage,
+  net,
+  session,
+  Menu,
+  shell,
+  Tray,
+} from 'electron';
+import { Hosting } from './hosting';
 import { lstat, readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -30,6 +43,36 @@ async function start() {
   const sync = desktopSync(app.getPath('userData'), (info) =>
     window?.webContents.send('sync:info', info),
   );
+  let tray: Tray | undefined;
+  /** While this Mac hosts for other devices, it stays in the menu bar with no window open. */
+  const showTray = () => {
+    const wanted = hosting.keepRunning;
+    if (wanted && !tray) {
+      tray = new Tray(nativeImage.createEmpty());
+      tray.setTitle('Opsidian');
+      tray.setToolTip('Opsidian is hosting your notebooks');
+      tray.setContextMenu(
+        Menu.buildFromTemplate([
+          { label: 'Hosting notebooks for your devices', enabled: false },
+          { type: 'separator' },
+          { label: 'Open Opsidian', click: () => app.emit('activate') },
+          { label: 'Quit Opsidian', role: 'quit' },
+        ]),
+      );
+    } else if (!wanted && tray) {
+      tray.destroy();
+      tray = undefined;
+    }
+    // Only an installed app can sensibly start itself at login.
+    if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: wanted });
+  };
+  const hosting: Hosting = new Hosting(app.getPath('userData'), sync, (info) => {
+    window?.webContents.send('hosting:info', info);
+    showTray();
+  });
+  // Whatever goes wrong with hosting, the notebook itself must still open.
+  await hosting.load().catch(() => {});
+  showTray();
   async function use(directory: string, remember: boolean): Promise<VaultInfo> {
     const next = await Vault.open(directory);
     vault?.close();
@@ -184,6 +227,34 @@ async function start() {
   handle('sync:confirm-deletions', () => sync.confirmDeletions());
   handle('sync:history', (path) => sync.history(text(path)));
   handle('sync:version', (hash) => sync.versionText(text(hash, 64)));
+  handle('sync:check', () => sync.check('this Mac', async () => net.isOnline()));
+  handle('sync:open-tailscale', async () => {
+    await shell.openPath('/Applications/Tailscale.app');
+  });
+  handle('hosting:info', () => hosting.info());
+  handle('hosting:start', () => hosting.start(open()));
+  handle('hosting:stop', () => hosting.stop());
+  handle('hosting:keep-running', (value) => hosting.setKeepRunning(value === true));
+  handle('hosting:invite', (notebook) => hosting.invite(text(notebook, 200)));
+  handle('hosting:cancel-invitation', (id) => hosting.cancelInvitation(text(id, 100)));
+  handle('hosting:remove-device', (id) => hosting.removeDevice(text(id, 100)));
+  handle('backup:info', () => hosting.backups());
+  handle('backup:choose-folder', async () => {
+    const result = await dialog.showOpenDialog(window!, {
+      title: 'Where should backups be saved?',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    const folder = result.canceled ? undefined : result.filePaths[0];
+    return folder ? hosting.setBackup({ folder }) : null;
+  });
+  handle('backup:schedule', (hour, keep) =>
+    hosting.setBackup({
+      hour: typeof hour === 'number' && hour >= 0 && hour < 24 ? Math.floor(hour) : null,
+      keep: typeof keep === 'number' && keep >= 1 && keep <= 365 ? Math.floor(keep) : 14,
+    }),
+  );
+  handle('backup:now', () => hosting.backUpNow());
+  handle('backup:restore', (name) => hosting.restore(text(name, 100)));
   handle('vault:join', async (host, code, parent) => {
     const address = hostAddress(text(host, 500));
     const root = parent === undefined ? defaultParent : text(parent, 4000);
@@ -289,5 +360,18 @@ async function start() {
     window?.show();
     window?.focus();
   });
-  app.on('window-all-closed', () => app.quit());
+  // Hosting keeps the app alive in the menu bar; otherwise closing the window quits.
+  app.on('window-all-closed', () => {
+    if (!hosting.keepRunning) app.quit();
+  });
+  let closing = false;
+  // Only once quitting is certain: every window has agreed to close by now, so a quit the
+  // user cancels to keep editing leaves hosting running.
+  app.on('will-quit', (event) => {
+    if (closing) return;
+    // The host's database is closed properly before the process goes.
+    event.preventDefault();
+    closing = true;
+    void hosting.close().finally(() => app.exit(0));
+  });
 }

@@ -128,4 +128,31 @@ export const previewVault: VaultBridge = {
   history: async () => [],
   versionText: async () => '',
   onSync: () => () => {},
+  checkConnection: async () => [],
+  openTailscale: async () => {},
+  hosting: async () => notHosting,
+  startHosting: async () => notHosting,
+  stopHosting: async () => notHosting,
+  setKeepRunning: async () => notHosting,
+  invite: async () => {
+    throw new Error('Hosting needs the Mac app.');
+  },
+  cancelInvitation: async () => notHosting,
+  removeDevice: async () => notHosting,
+  backups: async () => ({ keep: 14, backups: [] }),
+  chooseBackupFolder: async () => null,
+  setBackupSchedule: async () => ({ keep: 14, backups: [] }),
+  backUpNow: async () => ({ keep: 14, backups: [] }),
+  restoreBackup: async () => ({ keep: 14, backups: [] }),
+  onHosting: () => () => {},
+};
+
+const notHosting = {
+  hosting: false,
+  port: 4810,
+  addresses: [],
+  notebooks: [],
+  devices: [],
+  invitations: [],
+  keepRunning: true,
 };

@@ -8,12 +8,13 @@ import {
   stat,
   truncate,
   writeFile,
+  copyFile,
 } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Host } from '../apps/host/src/host';
+import { Host, listBackups, restoreBackup } from '../apps/host/src/host';
 import { Vault } from '../apps/desktop/electron/vault';
 import {
   SyncEngine,
@@ -733,7 +734,7 @@ describe('the host', () => {
     const expired = server.host.invite('Notes', -1);
     await expect(pair(server.url, expired.code, 'Mac B')).rejects.toThrow('not valid');
     const transport = httpTransport(server.url, paired.token);
-    expect(await transport.changes(0, 0)).toEqual({ changes: [], head: 0 });
+    expect(await transport.changes(0, 0)).toMatchObject({ changes: [], head: 0 });
     await expect(httpTransport(server.url, 'guess').changes(0, 0)).rejects.toBeInstanceOf(
       Unauthorized,
     );
@@ -786,5 +787,184 @@ describe('the host', () => {
     expect(a.engine.status).toMatchObject({ state: 'error' });
     expect(a.engine.status.message).toContain('no longer connected');
     expect(await a.read('Note.md')).toBe('still mine');
+  });
+});
+
+describe('backing up and restoring the host', () => {
+  it('reports each device, pending invitations and how much a notebook holds', async () => {
+    const server = await startHost();
+    const a = await device(server, 'Mac');
+    await a.write('Note.md', 'one');
+    await a.write('pic.png', new Uint8Array([1, 2, 3, 4]));
+    await settle(a);
+    await a.write('Note.md', 'two');
+    await settle(a);
+    const invitation = server.host.invite('Notes');
+    expect(server.host.notebooks()).toEqual([
+      { name: 'Notes', head: 3, files: 2, versions: 3, bytes: 10 },
+    ]);
+    const [mac] = server.host.devices();
+    expect(mac).toMatchObject({ name: 'Mac', notebook: 'Notes', revoked: false });
+    expect(Date.now() - mac!.seen!).toBeLessThan(5000);
+    const pending = server.host.invitations();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ notebook: 'Notes', expires: invitation.expires });
+    // An invitation is listed without the code that would let someone use it.
+    expect(JSON.stringify(pending)).not.toContain(invitation.code.replaceAll('-', ''));
+    expect(server.host.cancelInvitation(pending[0]!.id)).toBe(true);
+    await expect(pair(server.url, invitation.code, 'Late')).rejects.toThrow('not valid');
+    const who = await fetch(`${server.url}/v1/whoami`, {
+      headers: { authorization: `Bearer ${a.token}` },
+    });
+    expect(await who.json()).toEqual({ device: 'Mac', notebook: 'Notes' });
+    expect((await fetch(`${server.url}/v1/whoami`)).status).toBe(401);
+  });
+
+  it('keeps the newest backups and adds only content the folder lacks', async () => {
+    const server = await startHost();
+    const a = await device(server, 'Mac');
+    const target = await folder();
+    await a.write('Note.md', 'one');
+    await settle(a);
+    const first = await server.host.backup(target, 2);
+    expect(first.notebooks).toMatchObject([{ name: 'Notes', files: 1 }]);
+    for (const text of ['two', 'three']) {
+      await pause(5);
+      await a.write('Note.md', text);
+      await settle(a);
+      await server.host.backup(target, 2);
+    }
+    const kept = await listBackups(target);
+    expect(kept).toHaveLength(2);
+    expect(kept.map((backup) => backup.name)).not.toContain(first.name);
+    expect(kept[0]!.at).toBeGreaterThan(kept[1]!.at);
+    // Content from the pruned backup is still there, so older snapshots stay restorable.
+    const stored = Object.keys(await tree(join(target, 'blobs')));
+    expect(stored).toHaveLength(3);
+    await expect(restoreBackup(await folder(), target, '../escape')).rejects.toThrow(
+      'not a backup',
+    );
+  });
+
+  it('restores a host, and devices keep what they wrote since without duplicates', async () => {
+    const data = await folder();
+    let host = new Host({ dataDir: data, maxWait: 1 });
+    const url = await host.listen(0, '127.0.0.1');
+    cleanup.push(() => host.close());
+    const server = { host, url };
+    const a = await device(server, 'Mac');
+    const b = await device(server, 'Phone');
+    await a.write('Kept.md', 'unchanged');
+    await a.write('Edited.md', 'before\n');
+    await a.write('Renamed.md', 'moves later');
+    await a.write('Trashed.md', 'goes later');
+    await settle(a, b);
+    const target = await folder();
+    const backup = await host.backup(target);
+
+    // Life goes on after the backup.
+    await b.write('Edited.md', 'before\nand after\n');
+    await a.write('New.md', 'made since');
+    await a.move('Renamed.md', 'Folder/Renamed again.md');
+    await settle(a, b);
+    await b.remove('Trashed.md');
+    await settle(a, b);
+    const late = await device(server, 'Latecomer');
+    await settle(a, b, late);
+
+    await host.close();
+    await restoreBackup(data, target, backup.name);
+    host = new Host({ dataDir: data, maxWait: 1 });
+    await host.listen(Number(new URL(url).port), '127.0.0.1');
+    server.host = host;
+
+    const files = await settle(a, b);
+    // Everything written since the backup is back on the host, once, under its latest name.
+    expect(files).toEqual({
+      'Kept.md': 'unchanged',
+      'Edited.md': 'before\nand after\n',
+      'Folder/Renamed again.md': 'moves later',
+      'New.md': 'made since',
+      // Deleted after the backup: the backup still has it, so it returns. Nothing is lost.
+      'Trashed.md': 'goes later',
+    });
+    expect(host.notebooks()[0]).toMatchObject({ files: 5 });
+    // A device that joined after the backup is unknown to the restored host.
+    await expect(late.engine.sync()).rejects.toThrow('no longer connected');
+    // Sync carries on as usual afterwards.
+    await a.write('After.md', 'business as usual');
+    expect((await settle(a, b))['After.md']).toBe('business as usual');
+  });
+
+  it('does not let a device that was behind the backup undo newer work', async () => {
+    const data = await folder();
+    let host = new Host({ dataDir: data, maxWait: 1 });
+    const url = await host.listen(0, '127.0.0.1');
+    cleanup.push(() => host.close());
+    const server = { host, url };
+    const mac = await device(server, 'Mac');
+    const phone = await device(server, 'Phone');
+    await mac.write('Note.md', 'monday\n');
+    await mac.write('Old name.md', 'renamed on tuesday');
+    await mac.write('Gone.md', 'deleted on tuesday');
+    await settle(mac, phone);
+    // The phone stays in a pocket while the Mac carries on.
+    await mac.write('Note.md', 'monday\ntuesday\n');
+    await mac.move('Old name.md', 'New name.md');
+    await mac.remove('Gone.md');
+    await settle(mac);
+    const lost = await device(server, 'Lost phone');
+    await settle(mac, lost);
+    const target = await folder();
+    const backup = await host.backup(target);
+    // After the backup: one more edit, and the lost phone is removed.
+    await mac.write('Later.md', 'wednesday');
+    await settle(mac);
+    host.revoke(host.devices().find((each) => each.name === 'Lost phone')!.id);
+
+    await host.close();
+    await restoreBackup(data, target, backup.name);
+    host = new Host({ dataDir: data, maxWait: 1 });
+    await host.listen(Number(new URL(url).port), '127.0.0.1');
+    server.host = host;
+
+    // The phone, a day behind the backup, is the first to meet the restored host.
+    await phone.engine.sync();
+    expect(await settle(phone, mac)).toEqual({
+      'Note.md': 'monday\ntuesday\n',
+      'New name.md': 'renamed on tuesday',
+      'Later.md': 'wednesday',
+    });
+    // Going back in time does not give a removed device its access back.
+    await expect(lost.engine.sync()).rejects.toThrow('no longer connected');
+    expect(host.devices().find((each) => each.name === 'Lost phone')).toMatchObject({
+      revoked: true,
+    });
+  });
+
+  it('recovers when a host is put back in time without saying so', async () => {
+    const data = await folder();
+    let host = new Host({ dataDir: data, maxWait: 1 });
+    const url = await host.listen(0, '127.0.0.1');
+    cleanup.push(() => host.close());
+    const server = { host, url };
+    const mac = await device(server, 'Mac');
+    await mac.write('Kept.md', 'early');
+    await settle(mac);
+    const target = await folder();
+    const backup = await host.backup(target);
+    await mac.write('Kept.md', 'early\nlater');
+    await mac.write('Added.md', 'new since');
+    await settle(mac);
+    await host.close();
+    // As a disk snapshot would: the old database comes back, with nothing rewritten in it.
+    for (const ending of ['', '-wal', '-shm'])
+      await rm(join(data, `host.sqlite${ending}`), { force: true });
+    await copyFile(join(target, 'snapshots', `${backup.name}.sqlite`), join(data, 'host.sqlite'));
+    host = new Host({ dataDir: data, maxWait: 1 });
+    await host.listen(Number(new URL(url).port), '127.0.0.1');
+    server.host = host;
+    expect(await settle(mac)).toEqual({ 'Kept.md': 'early\nlater', 'Added.md': 'new since' });
+    expect(host.notebooks()[0]).toMatchObject({ files: 2 });
   });
 });

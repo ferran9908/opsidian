@@ -98,17 +98,18 @@ All paths begin `/v1`. Everything except `pair` needs `Authorization: Bearer <cr
 | `POST /ops` `{ops}`                 | Propose changes. Each answer is `accepted`, `stale`, `path-taken`, `missing-blob` or `invalid`. |
 | `HEAD` / `GET` / `PUT /blobs/:hash` | File content, addressed by sha256. An upload that does not match its hash is refused.           |
 | `GET /files/:id/history`            | Every version of a file, newest first.                                                          |
+| `GET /whoami`                       | The device's and notebook's names, for the connection check.                                    |
 
 ## Not built
 
 - **Pruning history.** The host keeps every version forever. That is what lets a device return after any absence without bringing old data back, and it means the host's disk only grows.
 - **Encrypted transport and public-host setup.** See above.
-- **A packaged background host.** The host is a command you run; packaging it as a Mac service is milestone 5.
+- **A signed, installable host.** The Mac app can host from its settings and a server can run the Docker image ([hosting](hosting.md)), but neither is a signed download yet.
 - **A browsable copy on the host.** The host stores versions by content hash, not as a folder of Markdown files. To read a notebook on the host machine, connect a device to it.
 - **Empty folders.** Folders exist on other devices only once they contain a file.
 - **Files over 100 MB** are not synced.
 - **Sync while the iPhone app is closed.** The phone uses the same engine and syncs whenever the app is open. See [the iPhone app](iphone.md).
-- **Rotating a device credential,** and moving a notebook to another host.
+- **Rotating a device credential.** Moving to another host is done by restoring a backup there; see [hosting](hosting.md).
 
 ## Checks
 

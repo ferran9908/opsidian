@@ -1,6 +1,6 @@
 import { networkInterfaces, homedir } from 'node:os';
 import { join } from 'node:path';
-import { Host } from './host';
+import { Host, listBackups, restoreBackup } from './host';
 
 const [command = 'help', ...rest] = process.argv.slice(2);
 const flags = new Map<string, string>();
@@ -58,6 +58,24 @@ try {
     } else if (command === 'notebooks') {
       for (const notebook of host.notebooks())
         console.log(`${notebook.name}: ${notebook.files} files, ${notebook.head} changes`);
+    } else if (command === 'backup') {
+      const folder = words[0];
+      if (!folder) throw new Error('Say where: opsidian-host backup FOLDER');
+      const backup = await host.backup(folder, Number(flags.get('keep') ?? 14));
+      console.log(`Backed up ${backup.notebooks.length} notebook(s) as ${backup.name}.`);
+    } else if (command === 'backups') {
+      for (const backup of await listBackups(words[0] ?? ''))
+        console.log(
+          `${backup.name}  ${backup.notebooks.map((n) => `${n.name}: ${n.files} files`).join(', ')}`,
+        );
+    } else if (command === 'restore') {
+      const [folder, name] = words;
+      if (!folder || !name) throw new Error('Say which: opsidian-host restore FOLDER BACKUP-NAME');
+      // The data is replaced underneath, so nothing may have it open. Stop `serve` first.
+      await host.close();
+      await restoreBackup(dataDir, folder, name);
+      console.log('Restored. Start the host again; devices will catch up by themselves.');
+      process.exit(0);
     } else
       console.log(
         [
@@ -66,6 +84,9 @@ try {
           'opsidian-host devices',
           'opsidian-host revoke DEVICE-ID',
           'opsidian-host notebooks',
+          'opsidian-host backup FOLDER [--keep 14]',
+          'opsidian-host backups FOLDER',
+          'opsidian-host restore FOLDER BACKUP-NAME   (with the host stopped)',
         ].join('\n'),
       );
     await host.close();

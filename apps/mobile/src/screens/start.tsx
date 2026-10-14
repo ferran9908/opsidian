@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { parseInvitation } from '../nav';
 import { connect, open, store } from '../notebook';
 import {
   AboveKeyboard,
@@ -11,6 +13,7 @@ import {
   styles,
   useColors,
   useStore,
+  Page,
 } from '../ui';
 
 /** First launch: nothing on this iPhone yet. */
@@ -89,6 +92,7 @@ export function Connect(props: {
   }, [props.invitation]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const submit = async () => {
     if (!host.trim() || !code.trim() || busy) return;
     setBusy(true);
@@ -129,12 +133,14 @@ export function Connect(props: {
               Connect to a notebook
             </Text>
             <Text style={{ fontSize: 16, lineHeight: 24, color: colors.mutedForeground }}>
-              On the Mac that hosts it, run{' '}
-              <Text style={{ fontFamily: 'Menlo', fontSize: 14, color: colors.foreground }}>
-                pnpm host invite
-              </Text>{' '}
-              and type what it prints.
+              On the Mac that hosts it, open Settings, then Devices, and choose Invite a device.
             </Text>
+          </View>
+          <Button label="Scan the invitation" onPress={() => setScanning(true)} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
+            <Text style={{ fontSize: 13, color: colors.mutedForeground }}>or type it</Text>
+            <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
           </View>
           {error ? (
             <View
@@ -196,6 +202,17 @@ export function Connect(props: {
           </Muted>
         </ScrollView>
       </AboveKeyboard>
+      <Scanner
+        open={scanning}
+        onClose={() => setScanning(false)}
+        onRead={(invitation) => {
+          // Filled in, never sent: connecting is still the user's own tap.
+          setHost(invitation.host);
+          setCode(invitation.code);
+          setError('');
+          setScanning(false);
+        }}
+      />
     </Screen>
   );
 }
@@ -278,5 +295,86 @@ export function HeldDeletions(props: { onLater: () => void }) {
         </Muted>
       </View>
     </Screen>
+  );
+}
+
+/** Reads an invitation from the code the hosting Mac shows. */
+function Scanner(props: {
+  open: boolean;
+  onClose: () => void;
+  onRead: (invitation: { host: string; code: string }) => void;
+}) {
+  const colors = useColors();
+  const [permission, request] = useCameraPermissions();
+  const [other, setOther] = useState(false);
+  useEffect(() => {
+    if (props.open) {
+      setOther(false);
+      if (permission && !permission.granted && permission.canAskAgain) void request();
+    }
+  }, [props.open, permission?.status]);
+  return (
+    <Page open={props.open} onClose={props.onClose}>
+      <Screen>
+        <Nav back="Cancel" onBack={props.onClose} />
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: '#1e1e1e',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {props.open && permission?.granted ? (
+            <CameraView
+              style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={({ data }) => {
+                const invitation = parseInvitation(data);
+                if (invitation) props.onRead(invitation);
+                else setOther(true);
+              }}
+            />
+          ) : (
+            <Text
+              style={{
+                color: '#dadada',
+                fontSize: 15,
+                lineHeight: 22,
+                textAlign: 'center',
+                paddingHorizontal: 40,
+              }}
+            >
+              {permission && !permission.granted
+                ? 'Opsidian needs the camera to scan. Allow it in Settings, or type the invitation instead.'
+                : 'Starting the camera…'}
+            </Text>
+          )}
+          <View
+            style={{
+              width: 250,
+              height: 250,
+              borderRadius: 22,
+              borderWidth: 3,
+              borderColor: '#ffffff',
+            }}
+          />
+        </View>
+        <View style={{ paddingHorizontal: 24, paddingTop: 22, paddingBottom: 14, gap: 8 }}>
+          <Text style={{ fontSize: 22, fontWeight: '700', color: colors.foreground }}>
+            {other ? 'That is not an Opsidian invitation' : 'Point at the code on the Mac'}
+          </Text>
+          <Muted style={{ fontSize: 15, lineHeight: 22 }}>
+            It fills in the address and the invitation. You still confirm before anything connects.
+          </Muted>
+          <Pressable hitSlop={8} onPress={props.onClose}>
+            <Text style={{ fontSize: 16, fontWeight: '600', color: colors.ring, paddingTop: 8 }}>
+              Type it instead
+            </Text>
+          </Pressable>
+        </View>
+      </Screen>
+    </Page>
   );
 }

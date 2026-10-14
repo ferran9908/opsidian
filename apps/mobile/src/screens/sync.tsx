@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import * as Network from 'expo-network';
+import type { Check as Step } from '@opsidian/sync';
 import { noteTitle, type NoteVersion } from '@opsidian/core';
 import { refresh, store } from '../notebook';
 import { rejected, syncLine, useNavigation } from '../nav';
@@ -141,8 +143,12 @@ export function Sync() {
               onPress={() => navigation.push({ name: 'connect' })}
             />
           ) : null}
-          {sync.connected && sync.state === 'offline' ? (
-            <Button kind="secondary" label="Try now" onPress={() => store.notebook?.sync.kick()} />
+          {sync.connected && !out && sync.state !== 'synced' ? (
+            <Button
+              kind="secondary"
+              label="See what is in the way"
+              onPress={() => navigation.push({ name: 'check' })}
+            />
           ) : null}
           {sync.held ? (
             <Button
@@ -325,6 +331,131 @@ export function Version({ path, version }: { path: string; version: NoteVersion 
         />
         <Muted style={{ fontSize: 13, lineHeight: 19, textAlign: 'center' }}>
           Today’s text is not lost. Restoring adds a new version on top, on every device.
+        </Muted>
+      </View>
+    </Screen>
+  );
+}
+
+/** Why this iPhone and its host are not talking, one step at a time. */
+export function Check() {
+  const colors = useColors();
+  const navigation = useNavigation();
+  const { sync } = useStore();
+  const [steps, setSteps] = useState<Step[]>();
+  const run = () => {
+    setSteps(undefined);
+    store.notebook?.sync.kick();
+    void store.notebook?.sync
+      .check(
+        'this iPhone',
+        async () => (await Network.getNetworkStateAsync()).isConnected !== false,
+      )
+      .then(setSteps, (reason) =>
+        setSteps([
+          {
+            id: 'online',
+            state: 'failed',
+            title: 'The check itself could not run',
+            detail: message(reason),
+          },
+        ]),
+      );
+  };
+  useEffect(run, []);
+  const failed = steps?.find((step) => step.state === 'failed');
+  return (
+    <Screen>
+      <Nav back={navigation.back} onBack={navigation.pop} />
+      <View style={{ paddingHorizontal: 24, paddingTop: 14, paddingBottom: 22, gap: 8 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View
+            style={{
+              width: 14,
+              height: 14,
+              borderRadius: 7,
+              backgroundColor: !steps ? colors.faint : failed ? colors.destructive : colors.success,
+            }}
+          />
+          <Text
+            style={{
+              flex: 1,
+              fontSize: 30,
+              lineHeight: 36,
+              fontWeight: '700',
+              letterSpacing: -0.9,
+              color: colors.foreground,
+            }}
+          >
+            {!steps ? 'Checking…' : failed ? 'Cannot sync right now' : 'Everything is connected'}
+          </Text>
+        </View>
+        <Text style={{ fontSize: 16, lineHeight: 24, color: colors.mutedForeground }}>
+          {failed
+            ? `${sync.waiting ? `${sync.waiting} ${sync.waiting === 1 ? 'change is' : 'changes are'} saved on this iPhone and waiting. ` : 'What you write is saved on this iPhone. '}Here is what is in the way.`
+            : steps
+              ? 'This iPhone reaches its host, and the host accepts it.'
+              : 'Trying each step in turn.'}
+        </Text>
+      </View>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 24 }}>
+        {steps?.map((step) => (
+          <View
+            key={step.id}
+            style={{
+              flexDirection: 'row',
+              gap: 14,
+              paddingVertical: 14,
+              borderTopWidth: 0.5,
+              borderTopColor: colors.border,
+            }}
+          >
+            <Text
+              style={{
+                width: 20,
+                fontSize: 16,
+                fontWeight: '700',
+                color:
+                  step.state === 'ok'
+                    ? colors.success
+                    : step.state === 'failed'
+                      ? colors.destructive
+                      : colors.faint,
+              }}
+            >
+              {step.state === 'ok' ? '✓' : step.state === 'failed' ? '✕' : '–'}
+            </Text>
+            <View style={{ flex: 1, gap: 5 }}>
+              <Text
+                style={{
+                  fontSize: 16,
+                  fontWeight: step.state === 'failed' ? '600' : '400',
+                  color: step.state === 'skipped' ? colors.faint : colors.foreground,
+                }}
+              >
+                {step.title}
+              </Text>
+              {step.detail ? <Muted style={{ lineHeight: 20 }}>{step.detail}</Muted> : null}
+              {step.tailscale ? (
+                <Pressable
+                  hitSlop={8}
+                  onPress={() => void Linking.openURL('tailscale://').catch(() => {})}
+                >
+                  <Text
+                    style={{ fontSize: 15, fontWeight: '600', color: colors.ring, paddingTop: 4 }}
+                  >
+                    Open Tailscale
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+      <View style={{ paddingHorizontal: 20, paddingBottom: 10, gap: 10 }}>
+        <Button label="Check again" onPress={run} />
+        <Muted style={{ fontSize: 13, textAlign: 'center' }}>
+          Opsidian keeps trying by itself. You can keep writing.
         </Muted>
       </View>
     </Screen>

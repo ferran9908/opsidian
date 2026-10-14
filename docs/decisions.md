@@ -89,6 +89,16 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Pairing is typed.** An `opsidian://connect` link fills the form but never connects by itself, so a link cannot attach a notebook to someone else's host.
 - **No navigation library and no icon library.** The app has a dozen screens and a plain stack is enough.
 
+## Setup — 2026-10-14
+
+- **The Mac app can be the host.** Hosting is a switch in Settings that runs the same host inside the app and keeps it alive from the menu bar. There is no second program to install. A server runs the same host from a Docker image.
+- **Encryption is left to Tailscale.** The host is published on a home network or a Tailscale address, never the open internet, so no certificates are managed.
+- **Backups are snapshots in a folder the user chooses,** with content stored once and shared between snapshots. History is still never pruned.
+- **A restore changes the host's `generation`.** Devices that see a new one keep their files, take the restored host's version of each as the agreed starting point, and send their differences up as ordinary changes. This avoids conflicted copies after a restore; the cost is that deletions made after the backup are undone.
+- **An invitation is also a link,** `opsidian://connect`, shown as a QR code. Scanning or opening it only fills in the form.
+- **The connection check never sends a device's credential to an address** until that address has answered as an Opsidian host.
+- **Not built:** signed and packaged apps, automatic updates (milestone 6); pruning old history; backing up from a Mac that is not the host.
+
 ## Future AI direction
 
 Potential features: organize a messy thought, answer questions over notes with citations, and suggest related notes. A machine-hosted agent and supported Codex/ChatGPT sign-in were explored. No AI integration is committed for the initial milestones; re-check product access and integration documentation when that work begins.

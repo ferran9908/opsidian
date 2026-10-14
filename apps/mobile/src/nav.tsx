@@ -11,6 +11,7 @@ export type Route =
   | { name: 'trash' }
   | { name: 'sync' }
   | { name: 'connect' }
+  | { name: 'check' }
   | { name: 'history'; path: string }
   | { name: 'version'; path: string; version: NoteVersion };
 
@@ -29,6 +30,25 @@ export const NavigationContext = createContext<Navigation>({
   back: '‹ Back',
 });
 export const useNavigation = () => useContext(NavigationContext);
+
+/** Reads an `opsidian://connect?host=…&code=…` link, as a QR code or a tapped link carries. */
+export function parseInvitation(link: string): { host: string; code: string } | undefined {
+  const match = link.trim().match(/^opsidian:\/\/connect\/?\?(.*)$/);
+  if (!match) return undefined;
+  try {
+    const query = new Map(
+      match[1]!.split('&').map((pair) => {
+        const [name = '', value = ''] = pair.split('=');
+        return [name, decodeURIComponent(value)] as const;
+      }),
+    );
+    const host = query.get('host') ?? '';
+    const code = query.get('code') ?? '';
+    return host && code && host.length < 300 && code.length < 60 ? { host, code } : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** The one-line summary of sync shown under the notebook's name. */
 export function syncLine(info: SyncInfo, colors: Colors): { color: string; text: string } {

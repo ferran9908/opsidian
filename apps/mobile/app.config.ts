@@ -17,7 +17,9 @@ const config: ExpoConfig = {
     ...(appleTeamId ? { appleTeamId } : {}),
     infoPlist: {
       // The host is reached over Tailscale or the home network, which carry plain http.
-      NSAppTransportSecurity: { NSAllowsArbitraryLoads: true, NSAllowsLocalNetworking: true },
+      // NSAllowsLocalNetworking must not be added: iOS then ignores NSAllowsArbitraryLoads,
+      // and Tailscale's 100.x addresses do not count as local, so they are refused.
+      NSAppTransportSecurity: { NSAllowsArbitraryLoads: true },
       NSLocalNetworkUsageDescription:
         'Opsidian connects to the host that keeps your notebook in step, on your own network.',
       ITSAppUsesNonExemptEncryption: false,
@@ -27,10 +29,20 @@ const config: ExpoConfig = {
     'expo-document-picker',
     'expo-secure-store',
     [
+      'expo-camera',
+      {
+        cameraPermission:
+          'Opsidian uses the camera to scan an invitation and to add photos to notes.',
+        microphonePermission: false,
+        recordAudioAndroid: false,
+      },
+    ],
+    [
       'expo-image-picker',
       {
         photosPermission: 'Opsidian adds the photos you choose to your notes.',
-        cameraPermission: 'Opsidian uses the camera to add a photo to a note.',
+        cameraPermission:
+          'Opsidian uses the camera to scan an invitation and to add photos to notes.',
         microphonePermission: false,
       },
     ],
