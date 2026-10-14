@@ -1,22 +1,37 @@
 {
-  "name": "@opsidian/host",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@triadlabs/opsidian",
+  "version": "0.1.0",
+  "description": "Host your own Opsidian notebooks: every device syncs through it.",
   "license": "MIT OR Apache-2.0",
+  "homepage": "https://ferran.sh/opsidian",
   "type": "module",
-  "dependencies": {
-    "fastify": "^5.12.5",
-    "@opsidian/sync": "workspace:*"
-  },
   "bin": {
-    "opsidian-host": "dist/opsidian-host.mjs"
+    "opsidian": "bin/opsidian.mjs"
+  },
+  "files": [
+    "bin",
+    "dist/opsidian.mjs",
+    "LICENSE",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "start": "node scripts/build.mjs && node dist/opsidian-host.mjs",
+    "start": "node scripts/build.mjs && node bin/opsidian.mjs",
+    "prepack": "node scripts/build.mjs && cp ../../LICENSE ../../LICENSE-MIT ../../LICENSE-APACHE .",
+    "postpack": "rm -f LICENSE LICENSE-MIT LICENSE-APACHE",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0"
+    "@opsidian/sync": "workspace:*",
+    "@types/node": "^24.0.0",
+    "fastify": "^5.12.5",
+    "qrcode-generator": "^2.0.4"
   }
 }

@@ -9,7 +9,7 @@ import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 const require = createRequire(new URL('../apps/desktop/package.json', import.meta.url));
 const electron = require('electron');
-const hostProgram = 'apps/host/dist/opsidian-host.mjs';
+const hostProgram = 'apps/host/bin/opsidian.mjs';
 const root = await mkdtemp(join(tmpdir(), 'opsidian-synctest-'));
 const data = join(root, 'host');
 const port = 4900 + Math.floor(Math.random() * 500);
@@ -25,18 +25,18 @@ const until = async (check, label) => {
   throw new Error(`Timed out waiting for ${label}`);
 };
 const invite = () =>
-  /: ([A-Z0-9-]{14})/.exec(
-    execFileSync('node', [hostProgram, 'invite', 'Notes', '--data', data, '--port', String(port)], {
-      encoding: 'utf8',
-    }),
+  /Code +([A-Z0-9-]{14})/.exec(
+    execFileSync(
+      'node',
+      [hostProgram, 'host', 'invite', 'Notes', '--data', data, '--port', String(port)],
+      { encoding: 'utf8', env: { ...process.env, OPSIDIAN_HOME: root } },
+    ),
   )[1];
 
 const host = spawn(
   'node',
-  [hostProgram, 'serve', '--data', data, '--port', String(port), '--address', '127.0.0.1'],
-  {
-    stdio: 'ignore',
-  },
+  [hostProgram, 'host', 'run', '--data', data, '--port', String(port), '--address', '127.0.0.1'],
+  { stdio: 'ignore', env: { ...process.env, OPSIDIAN_HOME: root } },
 );
 const launch = (extra) => {
   const env = {
