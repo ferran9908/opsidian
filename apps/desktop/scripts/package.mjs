@@ -33,11 +33,43 @@ if (signed) {
   console.log(`Signing and notarising with ${key}`);
 }
 
+const gh = (...args) => execFileSync('gh', args, { encoding: 'utf8' }).trim();
+const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
+const tag = `v${version}`;
+
 if (publish) {
   if (!signed)
     throw new Error('A release must be signed and notarised: set APPLE_API_KEY in .env.local.');
   // electron-builder uploads with this; the GitHub CLI's own login is enough.
-  process.env.GH_TOKEN ??= execFileSync('gh', ['auth', 'token'], { encoding: 'utf8' }).trim();
+  process.env.GH_TOKEN ??= gh('auth', 'token');
+  // The release is tagged at this commit, so it must already be on GitHub.
+  const commit = git('rev-parse', 'HEAD');
+  if (!git('branch', '-r', '--contains', commit))
+    throw new Error('Push this commit first: the release is tagged at it.');
+  let existing;
+  try {
+    existing = JSON.parse(gh('release', 'view', tag, '--json', 'isDraft'));
+  } catch {
+    existing = undefined;
+  }
+  if (existing && !existing.isDraft)
+    throw new Error(`${tag} is already published. Raise "version" in apps/desktop/package.json.`);
+  // Made first, as a draft only you can see. electron-builder uploads every file into it at once;
+  // left to create the release itself, its parallel uploads race each other and all but one fail.
+  if (!existing)
+    gh(
+      'release',
+      'create',
+      tag,
+      '--draft',
+      '--target',
+      commit,
+      '--title',
+      `Opsidian ${version}`,
+      '--notes',
+      'Download Opsidian-arm64.dmg for Apple silicon, or Opsidian-x64.dmg for Intel.',
+    );
 }
 if (!signed) {
   console.warn('No signing credentials: building an unsigned app, for this Mac only.');
@@ -48,3 +80,9 @@ await build({
   publish: publish ? 'always' : 'never',
   config: signed ? undefined : { mac: { notarize: false } },
 });
+
+// Only now, with every file uploaded, does the release become public and the newest.
+if (publish) {
+  gh('release', 'edit', tag, '--draft=false', '--latest');
+  console.log(`Published https://github.com/ferran9908/opsidian/releases/tag/${tag}`);
+}

@@ -36,4 +36,5 @@ publish:
   provider: github
   owner: ferran9908
   repo: opsidian
-  releaseType: release
+  # The release script makes a draft first and publishes it once every file is up.
+  releaseType: draft
