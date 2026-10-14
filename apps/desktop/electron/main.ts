@@ -44,6 +44,15 @@ async function start() {
   const defaultParent = join(app.getPath('documents'), 'Opsidian');
   let window: BrowserWindow | null = null;
   let mayClose = false;
+  /**
+   * Set by Cmd+Q, the menu bar icon's Quit, or an update restart. The window holds its close
+   * until the open note is saved, and holding it cancels the quit, so the quit is finished once
+   * the window has gone.
+   */
+  let quitting = false;
+  app.on('before-quit', () => {
+    quitting = true;
+  });
   let vault: Vault | null = null;
 
   const sync = desktopSync(app.getPath('userData'), (info) =>
@@ -335,7 +344,7 @@ async function start() {
     if (result.response === 1) {
       mayClose = true;
       window?.close();
-    }
+    } else quitting = false;
   });
   handle('window:close-ready', () => {
     mayClose = true;
@@ -392,9 +401,10 @@ async function start() {
     window?.show();
     window?.focus();
   });
-  // Hosting keeps the app alive in the menu bar; otherwise closing the window quits.
+  // Hosting keeps the app alive in the menu bar when its window is closed; asking to quit, or
+  // closing the window when not hosting, quits.
   app.on('window-all-closed', () => {
-    if (!hosting.keepRunning) app.quit();
+    if (quitting || !hosting.keepRunning) app.quit();
   });
   let closing = false;
   // Only once quitting is certain: every window has agreed to close by now, so a quit the
