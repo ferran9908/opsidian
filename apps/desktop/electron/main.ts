@@ -26,6 +26,9 @@ protocol.registerSchemesAsPrivileged([
 if (!app.requestSingleInstanceLock()) app.quit();
 else void start();
 
+/** Icons drawn from design/logo by `pnpm icons`. */
+const resources = join(__dirname, '../resources');
+
 function text(value: unknown, limit = 1000): string {
   if (typeof value !== 'string' || value.length > limit) throw new Error('Invalid request.');
   return value;
@@ -34,6 +37,8 @@ function text(value: unknown, limit = 1000): string {
 async function start() {
   await app.whenReady();
   app.setName('Opsidian');
+  // An installed app takes its icon from the bundle; a development run has to be told.
+  if (!app.isPackaged) app.dock?.setIcon(join(resources, 'icon.png'));
   const settingsPath = join(app.getPath('userData'), 'settings.json');
   const defaultParent = join(app.getPath('documents'), 'Opsidian');
   let window: BrowserWindow | null = null;
@@ -48,8 +53,8 @@ async function start() {
   const showTray = () => {
     const wanted = hosting.keepRunning;
     if (wanted && !tray) {
-      tray = new Tray(nativeImage.createEmpty());
-      tray.setTitle('Opsidian');
+      // A template image: macOS draws it in the menu bar's own colour, light or dark.
+      tray = new Tray(nativeImage.createFromPath(join(resources, 'trayTemplate.png')));
       tray.setToolTip('Opsidian is hosting your notebooks');
       tray.setContextMenu(
         Menu.buildFromTemplate([

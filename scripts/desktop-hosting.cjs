@@ -194,7 +194,7 @@ app.on('will-quit', () => {
     async () => (await whoami(paired.token)).status === 401,
     'the device to be refused',
   );
-  assert.equal(await shows('Test iPhone'), false);
+  await waitFor(async () => !(await shows('Test iPhone')), 'the device to leave the list');
   pass('a removed device is refused at once');
 
   await button('Sync');
@@ -218,6 +218,70 @@ app.on('will-quit', () => {
   assert.equal((await hosting()).devices.filter((device) => device.self).length, 1);
   assert.equal((await hosting()).notebooks[0].files, 2);
   pass('hosting turns back on with everything it held, and no second copy of this Mac');
+
+  // A big host makes a slow backup. It must not hold up the app: the window keeps answering.
+  {
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(join(process.env.OPSIDIAN_PROFILE_DIR, 'host', 'host.sqlite'));
+    const filler = 'x'.repeat(2000);
+    db.exec('begin');
+    const insert = db.prepare("insert into ops (notebook, id, result) values ('filler', ?, ?)");
+    for (let n = 0; n < 150_000; n++) insert.run(`op-${n}`, filler);
+    db.exec('commit');
+    db.close();
+  }
+  const snapshots = () =>
+    readdirSync(join(backups, 'snapshots')).filter((n) => n.endsWith('.sqlite')).length;
+  const had = snapshots();
+  let worst = 0;
+  let last = Date.now();
+  const beat = setInterval(() => {
+    worst = Math.max(worst, Date.now() - last);
+    last = Date.now();
+  }, 10);
+  const startedBackup = Date.now();
+  const made = evaluate('window.opsidian.backUpNow()');
+  let answers = 0;
+  while (snapshots() === had || Date.now() - startedBackup < 300) {
+    await evaluate('1');
+    answers++;
+    await delay(20);
+  }
+  await made;
+  clearInterval(beat);
+  const took = Date.now() - startedBackup;
+  assert.ok(worst < 200, `the app stalled for ${worst} ms during the backup`);
+  assert.ok(answers > 5, `the window answered ${answers} times during the backup`);
+  pass(`a ${took} ms backup of a large host never held up the app (longest pause ${worst} ms)`);
+
+  // Two notebook folders with the same name are two notebooks on the host, never one.
+  const twin = join(
+    require('node:path').dirname(vault),
+    'elsewhere',
+    require('node:path').basename(vault),
+  );
+  mkdirSync(twin, { recursive: true });
+  writeFileSync(join(twin, 'Twin.md'), 'a different notebook with the same name\n');
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [twin] });
+  await evaluate('window.opsidian.openVault()');
+  await evaluate('window.opsidian.startHosting()');
+  const name = require('node:path').basename(vault);
+  await waitFor(
+    async () => (await hosting()).notebooks.find((n) => n.name === `${name} 2`)?.files === 1,
+    'the second folder as its own notebook',
+  );
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [vault] });
+  await evaluate('window.opsidian.openVault()');
+  await evaluate('window.opsidian.startHosting()');
+  const both = (await hosting()).notebooks.filter((n) => n.name !== 'filler');
+  assert.deepEqual(
+    both.map((n) => [n.name, n.files]),
+    [
+      [name, 2],
+      [`${name} 2`, 1],
+    ],
+  );
+  pass('two folders with the same name became two notebooks, and each kept its own');
   finished = true;
   app.exit(0);
 })().catch((error) => {

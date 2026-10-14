@@ -10,6 +10,8 @@ const config: ExpoConfig = {
   version: '0.1.0',
   scheme: 'opsidian',
   orientation: 'default',
+  // Drawn from design/logo by `pnpm icons`.
+  icon: './assets/icon.png',
   userInterfaceStyle: 'automatic',
   ios: {
     supportsTablet: true,

@@ -2,7 +2,7 @@ import { build } from 'esbuild';
 import { build as viteBuild } from 'vite';
 export async function buildElectron() {
   await build({
-    entryPoints: ['electron/main.ts', 'electron/preload.ts'],
+    entryPoints: ['electron/main.ts', 'electron/preload.ts', 'electron/host-worker.ts'],
     bundle: true,
     platform: 'node',
     format: 'cjs',

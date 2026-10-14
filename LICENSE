@@ -1,0 +1,27 @@
+Opsidian is free to use, change and share, for any purpose.
+
+Code
+  Everything that is code (apps/, packages/, scripts/, tests/ and the build
+  files) is available under your choice of either licence:
+
+    - the MIT License          (LICENSE-MIT)
+    - the Apache License 2.0   (LICENSE-APACHE)
+
+  SPDX-License-Identifier: MIT OR Apache-2.0
+
+Documentation and design
+  Everything in docs/ and design/, including the logo artwork, is dedicated to
+  the public domain under CC0 1.0 Universal (LICENSE-CC0).
+
+  SPDX-License-Identifier: CC0-1.0
+
+  CC0 does not cover trademarks. The name "Opsidian" and its logo may be used to
+  refer to this project, but not to suggest that another product is Opsidian or
+  is endorsed by it.
+
+Contributions
+  Unless you say otherwise, anything you contribute is offered under the same
+  terms: code under MIT OR Apache-2.0, documentation and design under CC0 1.0.
+
+Third-party software
+  Dependencies keep their own licences.

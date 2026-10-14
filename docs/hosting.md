@@ -18,39 +18,49 @@ To sync away from home, install Tailscale on the Mac and on each device and sign
 
 The host's data is kept in the app's own folder (`~/Library/Application Support/Opsidian/host`), separate from every notebook folder.
 
-## On a server
+The host runs on a thread of its own, so serving devices, backing up and restoring never hold up the app's windows.
 
-Use this for a host that is always on. The server needs Docker and Tailscale.
+Each notebook folder on this Mac is its own notebook on the host, even when two folders have the same name. The second one to be hosted is named with a number, such as "Personal 2", and invitations use that name.
 
-1. Install Tailscale on the server and note its Tailscale address (`tailscale ip -4`).
-2. Build and start the host, published only on the Tailscale address:
+## Without the app: a Mac or a server
 
-   ```sh
-   docker build -t opsidian-host .
-   docker run -d --name opsidian-host --restart unless-stopped \
-     -p 100.x.y.z:4810:4810 -v opsidian-data:/data opsidian-host
-   ```
+Use this for a host that is always on, with no window: a Mac mini at home, or a Linux server. It needs Node 24 or later and, for anything but the home network, Tailscale.
 
-3. Make an invitation and enter it on each device, with `100.x.y.z:4810` as the address:
+```sh
+npx opsidian host start
+npx opsidian host invite "Personal"
+```
 
-   ```sh
-   docker exec opsidian-host opsidian-host invite "Personal"
-   ```
+`start` returns at once and the host keeps running. launchd (on a Mac) or systemd (on Linux) runs it, starts it at login or boot, and starts it again if it stops. `invite` prints a QR code to scan with the iPhone app, plus the address and code to type. `host status` shows whether it is running, its address, notebooks, devices and backups. `host stop` stops it, and stops it starting by itself.
 
-Publishing on the Tailscale address, rather than on every address, is what keeps the host off the public internet. Other commands work the same way: `devices`, `revoke DEVICE-ID`, `notebooks`.
+It listens only on the machine's Tailscale address. Without Tailscale, a Mac uses the home network and says so. A Linux server refuses to start, because its address is usually public; `--address` chooses one anyway. Settings, data and the log are in `~/.opsidian`.
 
-Without Docker, `pnpm build:host` produces one file, `apps/host/dist/opsidian-host.mjs`, that runs with Node 24 alone.
+On Linux, a user that is not root may be asked to run `sudo loginctl enable-linger USER` once. Without it, systemd stops the user's services at logout and does not start them at boot. As root, the host is a system service and this does not apply.
+
+The Mac app and a headless host cannot both use port 4810 on one Mac. `start` says so if the app is already hosting; turn hosting off in the app, or use `--port`.
+
+### With Docker
+
+```sh
+docker build -t opsidian-host .
+docker run -d --name opsidian-host --restart unless-stopped \
+  -p 100.x.y.z:4810:4810 -e OPSIDIAN_ADDRESS=100.x.y.z:4810 \
+  -v opsidian-data:/data opsidian-host
+docker exec opsidian-host opsidian host invite "Personal"
+```
+
+`100.x.y.z` is the server's Tailscale address (`tailscale ip -4`). Publishing only on it keeps the host off the public internet. `OPSIDIAN_ADDRESS` tells the host the address to put in invitations, which it cannot see from inside the container.
 
 ## Devices
 
-On a hosting Mac, **Settings → Devices** lists every device, when it was last seen, and invitations not yet used. Removing a device stops it syncing at once; the notes on it stay there. On a server, use `opsidian-host devices` and `opsidian-host revoke`.
+On a hosting Mac, **Settings → Devices** lists every device, when it was last seen, and invitations not yet used. Removing a device stops it syncing at once; the notes on it stay there. Without the app, use `host devices` and `host revoke`.
 
 ## Backups
 
 A backup is a snapshot of the host: every notebook with its full history.
 
 - **On a Mac:** in **Settings → Backups**, choose a folder, how often, and how many to keep. Failed backups are shown there with the reason.
-- **On a server:** run `opsidian-host backup FOLDER` from cron, for example nightly. `--keep 14` sets how many snapshots stay.
+- **Without the app:** `host backup FOLDER` backs up every night at 3 and once now, or `host start --backup FOLDER`. `--keep 14` sets how many stay; `--hour` moves the time. The host runs the schedule itself, so no cron is needed, and `host status` shows the last backup and any failure. `host backup now` backs up at once; `host backup off` stops.
 
 The folder holds `snapshots/` (one database per backup) and `blobs/` (note and file content, stored once and only ever added to). Because content is shared, each backup after the first is small and quick. Put the folder on a different disk from the host.
 
@@ -59,7 +69,7 @@ The folder holds `snapshots/` (one database per backup) and `blobs/` (note and f
 Restoring puts the host back to a backup.
 
 - **On a Mac:** in **Settings → Backups**, choose **Restore…** beside a backup.
-- **On a server:** stop the host, run `opsidian-host restore FOLDER BACKUP-NAME`, and start it again. `opsidian-host backups FOLDER` lists the names.
+- **Without the app:** `host restore BACKUP-NAME`. It stops the host, backs up what it holds first, restores, and starts it again. `host backups` lists the names.
 
 What happens next is automatic:
 

@@ -22,7 +22,7 @@ The initial scaffold pins Node 24 and pnpm. Framework versions will be selected 
 
 ```mermaid
 flowchart LR
-  D[Mac app: local vault and index] <-->|Sync| H[Writer host: vault and revisions]
+  D[Mac app: local vault and index] <-->|Sync| H[Opsidian host: vault and revisions]
   M[iPhone app: local vault and index] <-->|Sync| H
   H --- P[Current Mac, VPS, or Tailscale device]
 ```
@@ -40,13 +40,13 @@ Personal/
     Japan.md
   attachments/
     bookshop.jpg
-  .writer/
+  .opsidian/
     ...
 ```
 
 Markdown and attachments are the portable content. Rebuildable SQLite indexes track search, links, and derived metadata. Durable state tracks file identities, pending operations, revision ancestry, deletion records, and history. These are different lifecycles even if an implementation uses SQLite for both.
 
-The exact `.writer` layout is not finalized. Do not sync live database files, credentials, or per-device configuration as ordinary vault content. Back up both portable content and durable history/state.
+The exact `.opsidian` layout is not finalized. Do not sync live database files, credentials, or per-device configuration as ordinary vault content. Back up both portable content and durable history/state.
 
 File IDs should survive app-managed renames. External renames and duplicate files need an explicit identity strategy; path alone is insufficient and mandatory frontmatter IDs have not been selected.
 
@@ -77,7 +77,7 @@ This is revision-based personal-device sync. A CRDT and simultaneous multiplayer
 
 ## Security and pairing
 
-Use short-lived single-use invitations to enroll a device, then issue revocable device credentials scoped to a notebook. Keep credentials in OS-protected storage where available. Tailscale provides connectivity; Writer authentication is still required.
+Use short-lived single-use invitations to enroll a device, then issue revocable device credentials scoped to a notebook. Keep credentials in OS-protected storage where available. Tailscale provides connectivity; Opsidian authentication is still required.
 
 Use HTTPS for public hosts and define certificate/trust setup for private hosts. Restrict filesystem access to the vault and reject path traversal and unsafe symlink escapes. Treat Markdown and attachment previews as untrusted content; keep Electron renderer isolation and expose only required operations.
 

@@ -36,7 +36,7 @@ The iPhone holds one notebook: a folder of Markdown files in the app's Documents
 
 1. Copy `apps/mobile/.env.example` to `.env.local` and set `APPLE_TEAM_ID`.
 2. Connect the iPhone and run `pnpm ios` from the repository root. This builds a self-contained app that does not need the Mac afterwards.
-3. On the host Mac, run `pnpm host serve`, then `pnpm host invite "Personal"`, and enter what it prints in the app.
+3. On the host Mac, run `pnpm host start`, then `pnpm host invite "Personal"`, and enter what it prints in the app.
 
 `pnpm dev:mobile` starts the development server instead, for a development build that reloads as code changes.
 

@@ -1,7 +1,8 @@
 {
-  "name": "opsidian",
+  "name": "opsidian-workspace",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT OR Apache-2.0",
   "description": "A Markdown-first notebook with self-hosted sync.",
   "packageManager": "pnpm@12.4.1",
   "engines": {
@@ -20,11 +21,12 @@
     "check": "pnpm format:check && pnpm typecheck && pnpm test",
     "test:desktop": "pnpm build:desktop && node scripts/test-desktop.mjs && node scripts/test-crash.mjs",
     "bench:desktop": "pnpm build:desktop && node scripts/bench-desktop.mjs",
-    "host": "pnpm --silent --filter @opsidian/host start",
-    "build:host": "pnpm --filter @opsidian/host build",
+    "host": "pnpm --silent --filter opsidian start host",
+    "build:host": "pnpm --filter opsidian build",
     "test:sync": "pnpm build:desktop && pnpm build:host && node scripts/test-sync.mjs",
     "ios": "pnpm build:mobile-editor && pnpm --filter @opsidian/mobile exec expo run:ios --device --configuration Release",
-    "test:hosting": "pnpm build:desktop && node scripts/test-hosting.mjs"
+    "test:hosting": "pnpm build:desktop && node scripts/test-hosting.mjs",
+    "icons": "pnpm --filter @opsidian/desktop exec electron ../../scripts/render-icons.cjs"
   },
   "devDependencies": {
     "prettier": "3.9.9",

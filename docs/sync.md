@@ -14,15 +14,15 @@ Milestone 3, 2026-10-14. A notebook can be kept in step between devices through 
 On the machine that will be the host (this Mac, another Mac, a VPS):
 
 ```sh
-pnpm host serve                 # listens on port 4810, data in ~/.opsidian-host
+pnpm host run                   # in this terminal; port 4810, data in ~/.opsidian/host
 pnpm host invite "Personal"     # prints an address and a single-use code
 ```
 
-`apps/host/dist/opsidian-host.mjs` is one file with no dependencies beyond Node 22 or later, so it can be copied to a server and run with `node opsidian-host.mjs serve`.
+To leave it running in the background instead, use `pnpm host start`, or `npx opsidian host start` on a machine without this repository. See [hosting](hosting.md).
 
 On the first Mac, open the notebook, click the sync line at the bottom of the sidebar, and enter the address and code. On the second Mac, run `invite` again for a fresh code, then choose **Connect to a notebook** on the welcome screen. Each invitation works once and expires after 15 minutes.
 
-Other commands: `devices` lists paired devices, `revoke DEVICE-ID` stops one syncing, `notebooks` lists what the host holds.
+Other commands: `host devices` lists paired devices, `host revoke DEVICE-ID` stops one syncing, `host notebooks` lists what the host holds.
 
 **The connection is not encrypted by the host.** Use it over Tailscale, on a network you trust, or behind an HTTPS reverse proxy such as Caddy. Certificates and a guided setup are milestone 5.
 
