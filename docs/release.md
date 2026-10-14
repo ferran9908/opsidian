@@ -45,9 +45,17 @@ It asks for the exported `.p12` and its password, reads the rest from `apps/desk
 
 ## Updates
 
-An installed copy checks for a new version when it starts and every six hours. It downloads in the background and installs when Opsidian quits. A hosting Mac rarely quits, so once a version is ready, the Opsidian menu and the menu bar icon offer **Restart to Update**. **Opsidian → Check for Updates…** checks at once. A copy run from the repository never updates.
+An installed copy checks for a new version 15 seconds after it opens and every four hours. It reads `latest-mac.yml` from `github.com/ferran9908/opsidian/releases/latest/download/`, an address that always points to the newest release. (GitHub's list of releases, which electron-updater reads by default, is cached for minutes and named the previous version just after a release.)
+
+The update is in one state at a time, kept by the app's main process and shown everywhere from that one copy: **available** → **downloading** (with progress) → **ready**, or an **error**. A notice in the corner of the window offers it: **Download now**, then progress, then **Restart now**. An offer or an error can be put away; a download and a waiting restart cannot. **Settings → Updates** shows the version you have and the same state. **Opsidian → Check for Updates…** checks where you can see the answer, opening the window if it is closed. The app menu and the menu bar icon also offer the next step, and a notification says when a version is ready, for a Mac that is only hosting.
+
+A later check never interrupts a download or a waiting restart, a check that fails with nothing on offer stays quiet, and "You’re on the latest version" is said only when it is true. The rules are `nextUpdate` in `packages/core/src/update.ts`, with tests. A copy run from the repository never updates.
 
 Updating requires the new version to be signed by the same team as the installed one.
+
+## Quitting
+
+The window waits, before closing, only for what has said it has work to save: the editor, while it is open. Every other screen closes at once. A page that has stopped answering gets ten seconds. `pnpm test:desktop` quits from the welcome screen, the editor with unsaved typing, Settings, and a stopped page, and requires the app to end each time.
 
 ## The app's own data
 

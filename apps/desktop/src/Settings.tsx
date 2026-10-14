@@ -10,15 +10,17 @@ import type {
 import type { ThemePreference } from '@opsidian/theme';
 import { bridge, message } from './bridge';
 import { syncLabel } from './SyncDialog';
+import { UpdateSettings } from './updates';
 import { Button } from '@/components/ui/button';
 
-export type SettingsSection = 'sync' | 'devices' | 'backups' | 'check' | 'appearance';
+export type SettingsSection = 'sync' | 'devices' | 'backups' | 'check' | 'appearance' | 'updates';
 const SECTIONS: [SettingsSection, string][] = [
   ['sync', 'Sync'],
   ['devices', 'Devices'],
   ['backups', 'Backups'],
   ['check', 'Connection check'],
   ['appearance', 'Appearance'],
+  ['updates', 'Updates'],
 ];
 
 const size = (bytes: number) =>
@@ -758,7 +760,17 @@ export function Settings(props: Props) {
         </p>
       </>
     );
-  } else
+  } else if (section === 'updates')
+    body = (
+      <>
+        <Heading
+          title="Updates"
+          sub="New versions come from GitHub, and install when you restart."
+        />
+        <UpdateSettings />
+      </>
+    );
+  else
     body = (
       <>
         <Heading title="Appearance" sub="Light, dark, or whatever this Mac is set to." />

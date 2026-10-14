@@ -58,7 +58,23 @@ contextBridge.exposeInMainWorld('opsidian', {
   backUpNow: call('backup:now'),
   restoreBackup: call('backup:restore'),
   onHosting: subscribe('hosting:info'),
-  onCloseRequest: subscribe('window:flush'),
+  // Whoever listens is waited for when the window closes, so listening is announced, and the
+  // announcement taken back when it stops.
+  onCloseRequest: (callback: () => void) => {
+    const stop = subscribe('window:flush')(callback);
+    ipcRenderer.send('window:guard', true);
+    return () => {
+      stop();
+      ipcRenderer.send('window:guard', false);
+    };
+  },
+  updateState: call('updates:state'),
+  checkForUpdate: call('updates:check'),
+  downloadUpdate: call('updates:download'),
+  restartToUpdate: call('updates:restart'),
+  appVersion: call('app:version'),
+  onUpdate: subscribe('updates:state'),
+  onUpdateCheckRequested: subscribe('updates:check-requested'),
   closeFailed: call('window:close-failed'),
   closeReady: call('window:close-ready'),
 });

@@ -1,4 +1,5 @@
 import type { Backlink, SearchResult } from './note-index';
+import type { AppUpdate, UpdateCheck } from './update';
 
 export interface VaultInfo {
   name: string;
@@ -188,6 +189,16 @@ export interface VaultBridge {
   backUpNow(): Promise<BackupInfo>;
   restoreBackup(name: string): Promise<BackupInfo>;
   onHosting(callback: (info: HostingInfo) => void): () => void;
+  /** This app's own update: where it stands, and what can be done about it. */
+  updateState(): Promise<AppUpdate>;
+  /** Rejects with a readable message when the update server cannot be reached. */
+  checkForUpdate(): Promise<UpdateCheck>;
+  downloadUpdate(): Promise<void>;
+  restartToUpdate(): Promise<void>;
+  appVersion(): Promise<string>;
+  onUpdate(callback: (update: AppUpdate) => void): () => void;
+  /** The app menu's Check for Updates…, asking the window to check where it can be seen. */
+  onUpdateCheckRequested(callback: () => void): () => void;
 }
 
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i;

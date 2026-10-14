@@ -145,6 +145,14 @@ export const previewVault: VaultBridge = {
   backUpNow: async () => ({ keep: 14, backups: [] }),
   restoreBackup: async () => ({ keep: 14, backups: [] }),
   onHosting: () => () => {},
+  // The browser preview is never installed, so it never updates.
+  updateState: async () => ({ kind: 'none' }),
+  checkForUpdate: async () => 'dev',
+  downloadUpdate: async () => {},
+  restartToUpdate: async () => {},
+  appVersion: async () => 'preview',
+  onUpdate: () => () => {},
+  onUpdateCheckRequested: () => () => {},
 };
 
 const notHosting = {
