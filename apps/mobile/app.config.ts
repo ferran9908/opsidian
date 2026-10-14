@@ -17,7 +17,9 @@ const config: ExpoConfig = {
     ...(appleTeamId ? { appleTeamId } : {}),
     infoPlist: {
       // The host is reached over Tailscale or the home network, which carry plain http.
-      NSAppTransportSecurity: { NSAllowsArbitraryLoads: true, NSAllowsLocalNetworking: true },
+      // NSAllowsLocalNetworking must not be added: iOS then ignores NSAllowsArbitraryLoads,
+      // and Tailscale's 100.x addresses do not count as local, so they are refused.
+      NSAppTransportSecurity: { NSAllowsArbitraryLoads: true },
       NSLocalNetworkUsageDescription:
         'Opsidian connects to the host that keeps your notebook in step, on your own network.',
       ITSAppUsesNonExemptEncryption: false,
