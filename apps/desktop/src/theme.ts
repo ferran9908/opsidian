@@ -24,5 +24,5 @@ export function useTheme() {
     document.documentElement.classList.toggle('dark', dark);
     localStorage.setItem('opsidian-theme', preference);
   }, [preference, dark]);
-  return { preference, dark, cycle: () => setPreference(NEXT[preference]) };
+  return { preference, dark, set: setPreference, cycle: () => setPreference(NEXT[preference]) };
 }

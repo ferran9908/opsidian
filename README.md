@@ -4,7 +4,7 @@ A Markdown-first desktop notebook with free, self-hosted sync and an eventual iP
 
 ## Status
 
-The desktop app is a local notebook over a folder of Markdown notes: notes and folders, wiki links that survive renames, embeds, backlinks, search, pasted images, and a trash you can restore from. See [what the desktop notebook does](docs/desktop-notebook.md). The iPhone app holds the same notebook: browse, write, search, organise, attach photos, and sync. See [the iPhone app](docs/iphone.md); **it has been run in the simulator but not yet accepted on a real iPhone.** Sync between Macs works through a host you run yourself; see [sync](docs/sync.md).
+The desktop app is a local notebook over a folder of Markdown notes: notes and folders, wiki links that survive renames, embeds, backlinks, search, pasted images, and a trash you can restore from. See [what the desktop notebook does](docs/desktop-notebook.md). The iPhone app holds the same notebook: browse, write, search, organise, attach photos, and sync. See [the iPhone app](docs/iphone.md); **it has been run in the simulator but not yet accepted on a real iPhone.** Sync works through a host you run yourself, either from the Mac app's settings or on a server; see [sync](docs/sync.md) and [hosting](docs/hosting.md).
 
 ## Get started
 

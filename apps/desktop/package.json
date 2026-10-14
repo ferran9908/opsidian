@@ -14,16 +14,17 @@
   "dependencies": {
     "@opsidian/core": "workspace:*",
     "@opsidian/editor": "workspace:*",
+    "@opsidian/notebook": "workspace:*",
+    "@opsidian/sync": "workspace:*",
     "@opsidian/theme": "workspace:*",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "^0.468.0",
+    "qrcode-generator": "^2.0.4",
     "radix-ui": "^1.8.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "tailwind-merge": "3.7.0",
-    "@opsidian/sync": "workspace:*",
-    "@opsidian/notebook": "workspace:*"
+    "tailwind-merge": "3.7.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",

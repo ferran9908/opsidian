@@ -27,10 +27,20 @@ const config: ExpoConfig = {
     'expo-document-picker',
     'expo-secure-store',
     [
+      'expo-camera',
+      {
+        cameraPermission:
+          'Opsidian uses the camera to scan an invitation and to add photos to notes.',
+        microphonePermission: false,
+        recordAudioAndroid: false,
+      },
+    ],
+    [
       'expo-image-picker',
       {
         photosPermission: 'Opsidian adds the photos you choose to your notes.',
-        cameraPermission: 'Opsidian uses the camera to add a photo to a note.',
+        cameraPermission:
+          'Opsidian uses the camera to scan an invitation and to add photos to notes.',
         microphonePermission: false,
       },
     ],

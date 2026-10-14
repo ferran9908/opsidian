@@ -1,5 +1,7 @@
 import type { NoteVersion, SyncInfo } from '@opsidian/core';
 import {
+  diagnose,
+  type Check,
   SyncEngine,
   httpTransport,
   pair,
@@ -127,6 +129,19 @@ export class SyncService {
   }
   confirmDeletions(): void {
     this.engine?.confirmDeletions();
+  }
+  /** Works out why this device and its host are not talking. Empty when not connected. */
+  async check(device: string, online: () => Promise<boolean>): Promise<Check[]> {
+    if (!this.state) return [];
+    return diagnose(this.state.host, await this.secrets.get(this.state.device), {
+      device,
+      online,
+      ...(this.request ? { request: this.request } : {}),
+    });
+  }
+  /** The id the host knows this device by. */
+  get deviceId(): string | undefined {
+    return this.state?.device;
   }
   /** Syncs now instead of waiting, for example when the app comes back to the front. */
   kick(): void {

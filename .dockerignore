@@ -1,0 +1,8 @@
+**/node_modules
+**/dist
+**/dist-electron
+apps/mobile
+apps/desktop
+.git
+docs
+tests

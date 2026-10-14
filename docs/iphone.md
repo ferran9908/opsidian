@@ -4,13 +4,14 @@ The iPhone holds one notebook: a folder of Markdown files in the app's Documents
 
 ## What it does
 
-- **Connect.** Enter the host address and a single-use invitation code. A link of the form `opsidian://connect?host=…&code=…` fills the form in; the Connect button still has to be pressed.
+- **Connect.** Scan the invitation the hosting Mac shows, or enter the host address and code by hand. A link of the form `opsidian://connect?host=…&code=…` fills the form in; the Connect button still has to be pressed.
 - **Start without a host.** A notebook can begin on the phone and be connected later. What is already written is uploaded when it connects.
 - **Browse.** The home screen shows the three most recently changed notes, then folders, then every note. Folders sort by recent change or by name.
 - **Write.** The shared editor, with a toolbar above the keyboard for undo, redo, heading, bold, italic, lists, checkboxes, links and attachments. Typing `[[` offers note names.
 - **Find.** Search covers note names and their text. With no match it offers to create the note.
 - **Organise.** Rename, move to a folder, create folders, and move to the trash. Renaming rewrites links in other notes, exactly as on the Mac. The trash lists what was removed, here or on another device, and puts things back.
 - **Attach.** Photos from the library or camera, and any file, are stored under `attachments/` and linked from the note.
+- **Connection check.** When sync is not working, the sync screen offers "See what is in the way", which tries each step and names the first that fails.
 - **Sync.** One line under the notebook's name says how sync is going; tapping it opens the details. Edits from another device appear in the open note. Overlapping edits are kept as two notes, and the note says so.
 - **History.** Lists the versions the host holds and restores any of them.
 

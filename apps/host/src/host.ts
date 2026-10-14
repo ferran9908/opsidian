@@ -1,9 +1,19 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, stat } from 'node:fs/promises';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  copyFile,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   MAX_FILE_BYTES,
   pathKey,
@@ -50,6 +60,115 @@ const remote = (row: Row): RemoteFile => ({
  * changes were accepted in. It never merges: a device whose change is out of date is told
  * so, and reconciles on its side.
  */
+export interface HostDevice {
+  id: string;
+  notebook: string;
+  name: string;
+  created: number;
+  revoked: boolean;
+  /** When it last asked the host for anything, milliseconds. */
+  seen?: number;
+}
+export interface HostNotebook {
+  name: string;
+  head: number;
+  /** Files that currently exist. */
+  files: number;
+  /** Every change ever recorded. */
+  versions: number;
+  bytes: number;
+}
+export interface Backup {
+  /** Names the snapshot; also its file name. */
+  name: string;
+  at: number;
+  notebooks: HostNotebook[];
+}
+
+/** Copies files that `to` does not have yet. Stored content never changes once written. */
+async function copyTree(from: string, to: string): Promise<void> {
+  for (const entry of await readdir(from, { withFileTypes: true }).catch(() => [])) {
+    const source = join(from, entry.name);
+    const target = join(to, entry.name);
+    if (entry.isDirectory()) await copyTree(source, target);
+    // Only finished content, which is named by its hash; uploads in progress are passed over.
+    else if (entry.isFile() && /^[0-9a-f]{64}$/.test(entry.name) && !existsSync(target)) {
+      await mkdir(dirname(target), { recursive: true });
+      // Copied under another name first, so an interrupted copy is never mistaken for content.
+      await copyFile(source, `${target}.partial`);
+      await rename(`${target}.partial`, target);
+    }
+  }
+}
+
+/** The backups in a folder, newest first. */
+export async function listBackups(folder: string): Promise<Backup[]> {
+  const snapshots = join(folder, 'snapshots');
+  const found: Backup[] = [];
+  for (const name of await readdir(snapshots).catch(() => [] as string[])) {
+    if (!name.endsWith('.json')) continue;
+    try {
+      const backup = JSON.parse(await readFile(join(snapshots, name), 'utf8')) as Backup;
+      if (existsSync(join(snapshots, `${backup.name}.sqlite`))) found.push(backup);
+    } catch {
+      // A manifest that cannot be read is not offered.
+    }
+  }
+  return found.sort((a, b) => b.at - a.at);
+}
+
+/**
+ * Puts a host's data back to a backup. The host must not be running. Devices notice the
+ * new history, keep their notes, and send up again whatever the backup lacks.
+ */
+export async function restoreBackup(dataDir: string, folder: string, name: string): Promise<void> {
+  if (!/^[\w-]+$/.test(name)) throw new Error('That is not a backup.');
+  const snapshot = join(folder, 'snapshots', `${name}.sqlite`);
+  if (!existsSync(snapshot)) throw new Error('That backup is no longer in the folder.');
+  await mkdir(dataDir, { recursive: true });
+  const live = join(dataDir, 'host.sqlite');
+  // Devices removed since the backup stay removed: going back in time must not hand a lost
+  // phone its access back.
+  const removed: string[] = [];
+  if (existsSync(live)) {
+    const current = new DatabaseSync(live);
+    try {
+      for (const row of current.prepare('select id from devices where revoked = 1').all())
+        removed.push(row.id as string);
+    } catch {
+      // A host too damaged to read has no say; that is what the restore is for.
+    } finally {
+      current.close();
+    }
+  }
+  await copyTree(join(folder, 'blobs'), join(dataDir, 'blobs'));
+  const staged = `${live}.restoring`;
+  await copyFile(snapshot, staged);
+  // The copy is given its new identity before it goes live, so there is never a moment when
+  // old history is served under the name devices already trust.
+  const db = new DatabaseSync(staged);
+  try {
+    if (db.prepare('pragma integrity_check').get()?.integrity_check !== 'ok')
+      throw new Error('That backup is damaged and cannot be restored.');
+    db.exec('create table if not exists meta (name text primary key, value text not null)');
+    const set = db.prepare(
+      'insert into meta (name, value) values (?, ?) on conflict (name) do update set value = excluded.value',
+    );
+    set.run('generation', randomUUID());
+    for (const row of db.prepare('select id, head from notebooks').all())
+      set.run(`floor:${row.id as string}`, String(row.head));
+    const revoke = db.prepare('update devices set revoked = 1 where id = ?');
+    for (const id of removed) revoke.run(id);
+  } catch (error) {
+    db.close();
+    await rm(staged, { force: true });
+    throw error;
+  }
+  db.close();
+  for (const ending of ['-wal', '-shm']) await rm(live + ending, { force: true });
+  await rename(staged, live);
+}
+
 export class Host {
   readonly app: FastifyInstance;
   private readonly db: DatabaseSync;
@@ -57,6 +176,10 @@ export class Host {
   private readonly attempts = new Map<string, number[]>();
   private readonly maxBytes: number;
   private readonly maxWait: number;
+  /** Identifies this history; a restore from backup gives the host a new one. */
+  private readonly generation: string;
+  /** When each device last asked for anything, kept in memory between writes. */
+  private readonly seen = new Map<string, number>();
 
   constructor(private readonly options: HostOptions) {
     this.maxWait = options.maxWait ?? 25;
@@ -84,7 +207,15 @@ export class Host {
         token text not null unique, created integer not null, revoked integer not null default 0);
       create table if not exists blobs (notebook text not null, hash text not null, size integer not null, primary key (notebook, hash));
       create table if not exists invites (code text primary key, notebook text not null, expires integer not null);
+      create table if not exists meta (name text primary key, value text not null);
     `);
+    if (!this.db.prepare("select 1 from pragma_table_info('devices') where name = 'seen'").get())
+      this.db.exec('alter table devices add column seen integer');
+    this.db
+      .prepare("insert into meta (name, value) values ('generation', ?) on conflict do nothing")
+      .run(randomUUID());
+    this.generation = this.db.prepare("select value from meta where name = 'generation'").get()!
+      .value as string;
     // Shutting down must not wait for devices to let go of connections they keep open.
     this.app = Fastify({ bodyLimit: 16 * 1024 * 1024, forceCloseConnections: true });
     this.routes();
@@ -113,30 +244,76 @@ export class Host {
       .run(sha(raw), id, expires);
     return { code: raw.replace(/(.{4})(?=.)/g, '$1-'), expires };
   }
-  devices(): { id: string; notebook: string; name: string; created: number; revoked: boolean }[] {
+  devices(): HostDevice[] {
     return this.db
       .prepare(
-        `select d.id, n.name as notebook, d.name, d.created, d.revoked
+        `select d.id, n.name as notebook, d.name, d.created, d.revoked, d.seen
          from devices d join notebooks n on n.id = d.notebook order by d.created`,
       )
       .all()
-      .map((row) => ({
-        ...(row as never as Device & { created: number }),
-        revoked: row.revoked === 1,
-      }));
+      .map((row) => {
+        const seen = this.seen.get(row.id as string) ?? (row.seen as number | null);
+        return {
+          id: row.id as string,
+          notebook: row.notebook as string,
+          name: row.name as string,
+          created: row.created as number,
+          revoked: row.revoked === 1,
+          ...(seen ? { seen } : {}),
+        };
+      });
+  }
+  /** Invitations nobody has used yet. `id` names one without revealing its code. */
+  invitations(): { id: string; notebook: string; expires: number }[] {
+    return this.db
+      .prepare(
+        `select i.code as id, n.name as notebook, i.expires from invites i
+         join notebooks n on n.id = i.notebook where i.expires > ? order by i.expires`,
+      )
+      .all(Date.now()) as never;
+  }
+  cancelInvitation(id: string): boolean {
+    return this.db.prepare('delete from invites where code = ?').run(id).changes > 0;
   }
   /** Stops a device syncing. Its copy of the notebook stays on it. */
   revoke(id: string): boolean {
     const done = this.db.prepare('update devices set revoked = 1 where id = ?').run(id);
     return done.changes > 0;
   }
-  notebooks(): { name: string; files: number; head: number }[] {
+  notebooks(): HostNotebook[] {
     return this.db
       .prepare(
-        `select n.name, n.head, (select count(*) from files f where f.notebook = n.id and f.hash is not null) as files
+        `select n.name, n.head,
+           (select count(*) from files f where f.notebook = n.id and f.hash is not null) as files,
+           (select count(*) from log l where l.notebook = n.id) as versions,
+           (select coalesce(sum(b.size), 0) from blobs b where b.notebook = n.id) as bytes
          from notebooks n order by n.name`,
       )
       .all() as never;
+  }
+
+  /**
+   * Copies everything the host holds into `folder`: a snapshot of the database, and any
+   * stored content the folder does not have yet. Content is only ever added there, so each
+   * backup after the first is quick. Keeps the newest `keep` snapshots.
+   */
+  async backup(folder: string, keep = 14): Promise<Backup> {
+    const at = Date.now();
+    const name = new Date(at).toISOString().replace(/[:.]/g, '-');
+    const snapshots = join(folder, 'snapshots');
+    await mkdir(snapshots, { recursive: true });
+    const file = join(snapshots, `${name}.sqlite`);
+    // A consistent copy, taken while devices keep syncing.
+    this.db.exec(`vacuum into '${file.replaceAll("'", "''")}'`);
+    await copyTree(join(this.options.dataDir, 'blobs'), join(folder, 'blobs'));
+    const backup: Backup = { name, at, notebooks: this.notebooks() };
+    await writeFile(join(snapshots, `${name}.json`), JSON.stringify(backup));
+    const all = (await listBackups(folder)).slice(Number.isFinite(keep) ? Math.max(keep, 1) : 14);
+    for (const old of all)
+      if (/^[\w-]+$/.test(old.name))
+        for (const ending of ['.sqlite', '.json'])
+          await rm(join(snapshots, old.name + ending), { force: true });
+    return backup;
   }
 
   async listen(port: number, address: string): Promise<string> {
@@ -162,9 +339,17 @@ export class Host {
     const header = request.headers.authorization;
     const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
     if (!token) return undefined;
-    return this.db
+    const device = this.db
       .prepare('select id, notebook, name from devices where token = ? and revoked = 0')
       .get(sha(token)) as Device | undefined;
+    if (device) {
+      const now = Date.now();
+      // Written at most once a minute per device; the rest is remembered in memory.
+      if (now - (this.seen.get(device.id) ?? 0) > 60000)
+        this.db.prepare('update devices set seen = ? where id = ?').run(now, device.id);
+      this.seen.set(device.id, now);
+    }
+    return device;
   }
 
   private changes(notebook: string, since: number): Changes {
@@ -176,7 +361,13 @@ export class Host {
          where f.notebook = ? and f.seq > ? order by f.seq`,
       )
       .all(notebook, since) as Row[];
-    return { changes: rows.map(remote), head };
+    const floor = this.db.prepare('select value from meta where name = ?').get(`floor:${notebook}`);
+    return {
+      changes: rows.map(remote),
+      head,
+      generation: this.generation,
+      ...(floor ? { floor: Number(floor.value) } : {}),
+    };
   }
 
   /** Other live files whose path is this one, or lies inside it, or contains it as a folder. */
@@ -332,6 +523,15 @@ export class Host {
         .prepare('insert into devices (id, notebook, name, token, created) values (?, ?, ?, ?, ?)')
         .run(device.id, notebook.id, name, sha(token), now);
       return { notebook, device, token };
+    });
+
+    /** Tells a device whether the host still accepts it, for the connection check. */
+    app.get('/v1/whoami', async (request) => {
+      const device = signedIn(request);
+      const notebook = this.db
+        .prepare('select name from notebooks where id = ?')
+        .get(device.notebook);
+      return { device: device.name, notebook: notebook?.name };
     });
 
     app.get('/v1/changes', async (request): Promise<Changes> => {

@@ -37,6 +37,8 @@ export interface SyncState {
   deviceName: string;
   /** Changes up to here have been applied. */
   cursor: number;
+  /** The host history this agreement belongs to. */
+  generation?: string;
   files: Record<string, Tracked>;
 }
 
@@ -600,7 +602,45 @@ export class SyncEngine {
     problems: string[];
   }> {
     const view = await this.look();
-    const { changes, head } = await this.transport.changes(this.state.cursor, 0);
+    const pulled = await this.transport.changes(this.state.cursor, 0);
+    const renewed =
+      pulled.generation !== undefined &&
+      this.state.generation !== undefined &&
+      pulled.generation !== this.state.generation;
+    // A host that is behind what this device has already applied was also put back in time,
+    // even if nothing announced it.
+    if (renewed || pulled.head < this.state.cursor) {
+      // The host was restored from a backup. Everything up to `floor` is history both sides
+      // still share, so what was agreed about it stands, and anything newer on the host is
+      // met in the usual way. What this device agreed after that point no longer exists on
+      // the host: those files are taken to stand where the restored host has them, so that
+      // what is here counts as a change made here and is sent up. Files the host no longer
+      // knows become new ones.
+      const restored = await this.transport.changes(0, 0);
+      const floor = renewed ? (restored.floor ?? 0) : restored.head;
+      const there = new Map(restored.changes.map((change) => [change.file, change]));
+      for (const [id, tracked] of Object.entries(this.state.files)) {
+        if (tracked.seq <= floor) continue;
+        const host = there.get(id);
+        const here = tracked.local ?? tracked.path;
+        if (!host) delete this.state.files[id];
+        else if (host.hash === null)
+          this.state.files[id] = { path: here, seq: host.seq, hash: null };
+        else
+          this.state.files[id] = {
+            path: host.path,
+            seq: host.seq,
+            hash: host.hash,
+            ...(here !== host.path ? { local: here } : {}),
+          };
+      }
+      this.state.cursor = 0;
+      if (restored.generation) this.state.generation = restored.generation;
+      await this.persist();
+      return this.round();
+    }
+    if (pulled.generation) this.state.generation = pulled.generation;
+    const { changes, head } = pulled;
     const pending = new Map(changes.map((change) => [change.file, change]));
     const problems: string[] = [];
     try {

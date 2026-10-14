@@ -65,6 +65,66 @@ export interface NoteVersion {
   at: number;
 }
 
+/** One step of the connection check. Mirrors the sync package's own type. */
+export interface ConnectionCheck {
+  id: 'online' | 'reach' | 'accepted';
+  state: 'ok' | 'failed' | 'skipped';
+  title: string;
+  detail?: string;
+  tailscale?: true;
+}
+export interface HostedNotebook {
+  name: string;
+  files: number;
+  versions: number;
+  bytes: number;
+}
+export interface HostedDevice {
+  id: string;
+  notebook: string;
+  name: string;
+  created: number;
+  seen?: number;
+  /** This very Mac. */
+  self: boolean;
+}
+/** Whether this Mac hosts notebooks for other devices, and what it is hosting. */
+export interface HostingInfo {
+  hosting: boolean;
+  /** Why hosting could not start, for example the port being in use. */
+  error?: string;
+  port: number;
+  /** Where other devices reach this Mac. */
+  addresses: { kind: 'tailscale' | 'network'; address: string }[];
+  notebooks: HostedNotebook[];
+  devices: HostedDevice[];
+  invitations: { id: string; notebook: string; expires: number }[];
+  /** Keep hosting from the menu bar after the window is closed. */
+  keepRunning: boolean;
+}
+export interface Invitation {
+  notebook: string;
+  code: string;
+  expires: number;
+  /** The address to type on another device; the first of `HostingInfo.addresses`. */
+  address: string;
+  /** `opsidian://connect?…`, which the iPhone app reads from a QR code. */
+  link: string;
+  /** The link as a QR code: one string per row, `1` for a dark square. */
+  qr: string[];
+}
+export interface BackupSettings {
+  folder?: string;
+  /** Hour of the day, 0–23, at which a daily backup is made. Absent: only by hand. */
+  hour?: number;
+  keep: number;
+}
+export interface BackupInfo extends BackupSettings {
+  backups: { name: string; at: number; notebooks: HostedNotebook[] }[];
+  /** The latest attempt that did not work. Cleared by the next one that does. */
+  failed?: { at: number; message: string };
+}
+
 /** What the desktop interface needs from whatever stores the vault. */
 export interface VaultBridge {
   current(): Promise<VaultInfo | null>;
@@ -110,6 +170,24 @@ export interface VaultBridge {
   history(path: string): Promise<NoteVersion[]>;
   versionText(hash: string): Promise<string>;
   onSync(callback: (info: SyncInfo) => void): () => void;
+  /** Why sync is not working, one step at a time. Empty when not connected. */
+  checkConnection(): Promise<ConnectionCheck[]>;
+  openTailscale(): Promise<void>;
+  hosting(): Promise<HostingInfo>;
+  /** Makes this Mac the host for the open notebook, and connects the notebook to it. */
+  startHosting(): Promise<HostingInfo>;
+  stopHosting(): Promise<HostingInfo>;
+  setKeepRunning(value: boolean): Promise<HostingInfo>;
+  invite(notebook: string): Promise<Invitation>;
+  cancelInvitation(id: string): Promise<HostingInfo>;
+  removeDevice(id: string): Promise<HostingInfo>;
+  backups(): Promise<BackupInfo>;
+  /** Asks for a folder. Null if cancelled. */
+  chooseBackupFolder(): Promise<BackupInfo | null>;
+  setBackupSchedule(hour: number | null, keep: number): Promise<BackupInfo>;
+  backUpNow(): Promise<BackupInfo>;
+  restoreBackup(name: string): Promise<BackupInfo>;
+  onHosting(callback: (info: HostingInfo) => void): () => void;
 }
 
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
