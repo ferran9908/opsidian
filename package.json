@@ -25,7 +25,8 @@
     "build:host": "pnpm --filter @opsidian/host build",
     "test:sync": "pnpm build:desktop && pnpm build:host && node scripts/test-sync.mjs",
     "ios": "pnpm build:mobile-editor && pnpm --filter @opsidian/mobile exec expo run:ios --device --configuration Release",
-    "test:hosting": "pnpm build:desktop && node scripts/test-hosting.mjs"
+    "test:hosting": "pnpm build:desktop && node scripts/test-hosting.mjs",
+    "icons": "pnpm --filter @opsidian/desktop exec electron ../../scripts/render-icons.cjs"
   },
   "devDependencies": {
     "prettier": "3.9.9",
