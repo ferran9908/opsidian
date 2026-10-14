@@ -25,10 +25,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+      # pnpm first: setup-node caches the pnpm store, and looks for pnpm to do it. The version
+      # comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      - run: corepack enable
+          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm typecheck
@@ -64,10 +67,13 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
+      # pnpm first: setup-node caches the pnpm store, and looks for pnpm to do it. The version
+      # comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      - run: corepack enable
+          cache: pnpm
       - run: pnpm install --frozen-lockfile
 
       - name: Stamp the version
