@@ -1,17 +1,17 @@
-# @triadlabs/opsidian
+# opsidian
 
 Host your own [Opsidian](https://ferran.sh/opsidian) notebooks. One machine hosts them; your Mac and iPhone sync through it. Your notes stay on your machines, as Markdown files.
 
 Needs Node 24 or later, on macOS or Linux.
 
 ```sh
-npx @triadlabs/opsidian host start
+npx opsidian host start
 ```
 
 It starts in the background and comes back by itself after a crash or a restart. Then let a device join:
 
 ```sh
-npx @triadlabs/opsidian host invite "Personal"
+npx opsidian host invite "Personal"
 ```
 
 Scan the code it prints with the Opsidian app, or type the address and code. A name the host has not seen makes a new notebook.
@@ -36,7 +36,7 @@ The host has no sign-in of its own, so it should only be reachable by your devic
 | `host uninstall [--delete-data]`                         | Removes it; your notebooks stay unless you say otherwise    |
 | `host run`                                               | Runs in the terminal instead, for Docker or to watch it     |
 
-Install it with `npm install -g @triadlabs/opsidian` to type `opsidian host …` instead.
+Install it with `npm install -g opsidian` to type `opsidian host …` instead.
 
 Everything lives in `~/.opsidian`: settings, the notebooks' data, the log, and the copy of the program the service runs. On a Mac, launchd runs it; on Linux, systemd. On Linux, a non-root user may be asked to run `sudo loginctl enable-linger` once, so the host keeps running after logging out.
 

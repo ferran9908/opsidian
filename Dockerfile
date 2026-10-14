@@ -6,12 +6,12 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/host/package.json apps/host/
 COPY packages/core/package.json packages/core/
 COPY packages/sync/package.json packages/sync/
-RUN pnpm install --frozen-lockfile --filter @triadlabs/opsidian...
+RUN pnpm install --frozen-lockfile --filter opsidian...
 COPY tsconfig.base.json ./
 COPY apps/host apps/host
 COPY packages/core packages/core
 COPY packages/sync packages/sync
-RUN pnpm --filter @triadlabs/opsidian build
+RUN pnpm --filter opsidian build
 
 FROM node:24-slim
 # One file, no dependencies to install.

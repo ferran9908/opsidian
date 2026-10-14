@@ -1,5 +1,5 @@
 {
-  "name": "@triadlabs/opsidian",
+  "name": "opsidian",
   "version": "0.1.0",
   "description": "Host your own Opsidian notebooks: every device syncs through it.",
   "license": "MIT OR Apache-2.0",

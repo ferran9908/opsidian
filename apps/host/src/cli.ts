@@ -25,7 +25,7 @@ const me =
   process.env.npm_lifecycle_event === 'start'
     ? 'pnpm'
     : process.env.npm_command === 'exec'
-      ? 'npx @triadlabs/opsidian'
+      ? 'npx opsidian'
       : 'opsidian';
 
 const BOOLEAN = new Set(['follow', 'f', 'delete-data', 'help', 'h', 'version', 'v']);

@@ -18,7 +18,7 @@ pnpm host run                   # in this terminal; port 4810, data in ~/.opsidi
 pnpm host invite "Personal"     # prints an address and a single-use code
 ```
 
-To leave it running in the background instead, use `pnpm host start`, or `npx @triadlabs/opsidian host start` on a machine without this repository. See [hosting](hosting.md).
+To leave it running in the background instead, use `pnpm host start`, or `npx opsidian host start` on a machine without this repository. See [hosting](hosting.md).
 
 On the first Mac, open the notebook, click the sync line at the bottom of the sidebar, and enter the address and code. On the second Mac, run `invite` again for a fresh code, then choose **Connect to a notebook** on the welcome screen. Each invitation works once and expires after 15 minutes.
 

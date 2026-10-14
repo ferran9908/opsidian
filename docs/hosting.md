@@ -27,8 +27,8 @@ Each notebook folder on this Mac is its own notebook on the host, even when two 
 Use this for a host that is always on, with no window: a Mac mini at home, or a Linux server. It needs Node 24 or later and, for anything but the home network, Tailscale.
 
 ```sh
-npx @triadlabs/opsidian host start
-npx @triadlabs/opsidian host invite "Personal"
+npx opsidian host start
+npx opsidian host invite "Personal"
 ```
 
 `start` returns at once and the host keeps running. launchd (on a Mac) or systemd (on Linux) runs it, starts it at login or boot, and starts it again if it stops. `invite` prints a QR code to scan with the iPhone app, plus the address and code to type. `host status` shows whether it is running, its address, notebooks, devices and backups. `host stop` stops it, and stops it starting by itself.
