@@ -20,20 +20,28 @@ The Mac app is packaged with electron-builder (`apps/desktop/electron-builder.ym
 
 ## Making a release
 
-1. Raise `version` in `apps/desktop/package.json`. Installed copies update only to a higher version.
-2. From the repository root:
+Every push to `main` is a release, when it changes something the Mac app is built from (`apps/desktop`, the shared packages, the host code it embeds, the logo or the lockfile). `.github/workflows/release.yml`:
 
-   ```sh
-   pnpm release:mac
-   ```
+1. **Check:** formatting, typecheck and unit tests, on Linux. Nothing is released unless they pass.
+2. **Mac app,** on a macOS runner: stamps the version, builds both architectures, signs, notarises, and publishes `v<version>` on GitHub with both `.dmg` files, both `.zip` files and `latest-mac.yml`. The release is a draft until every file is uploaded.
 
-   This builds the app, signs it, sends it to Apple for notarisation (a few minutes), and publishes `v<version>` on GitHub with both `.dmg` files, both `.zip` files and `latest-mac.yml`. The release is made as a draft first and published only once every file is uploaded, so nobody can download half a release. If a run fails, run it again: it reuses the draft. The commit must be pushed first, since the release is tagged at it.
+The version is `<major>.<minor>.<run number>`: `<major>.<minor>` comes from `apps/desktop/package.json`, which stays at `.0`, and the run number only grows, so every release is newer than the last, which updates need. The stamp is never committed. To start 0.2, set `version` to `0.2.0`. A push that only changes docs releases nothing; **Run workflow** on the Actions page releases the current `main` anyway.
 
-   The `.dmg` files are named without the version, `Opsidian-arm64.dmg` and `Opsidian-x64.dmg`, so `https://github.com/ferran9908/opsidian/releases/latest/download/Opsidian-arm64.dmg` always downloads the newest. The `.zip` files keep the version, for the updater.
+Releases run one at a time, in push order, and a running one is never cancelled.
 
-3. Commit the version change.
+### Secrets
 
-`pnpm package:mac` does the same without publishing, into `apps/desktop/release/`. Without credentials it makes an unsigned app, which runs only on the Mac that built it.
+CI signs with five GitHub Actions secrets: `CSC_LINK` and `CSC_KEY_PASSWORD` (the Developer ID certificate as a `.p12`, and its password), and `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` (the notarisation key). After the setup above, run once from the repository root:
+
+```sh
+scripts/ci-secrets.sh
+```
+
+It asks for the exported `.p12` and its password, reads the rest from `apps/desktop/.env.local`, and stores them on GitHub. A release without them stops at once and says which are missing.
+
+### From a Mac instead
+
+`pnpm release:mac` builds and publishes the version in `apps/desktop/package.json` from the Mac you run it on, the same way. It is for when CI is unavailable; set a version CI has not used. The release is made as a draft first and published only once every file is uploaded; if a run fails, run it again and it reuses the draft. The commit must be pushed first, since the release is tagged at it. `pnpm package:mac` builds without publishing, into `apps/desktop/release/`. Without credentials it makes an unsigned app, which runs only on the Mac that built it.
 
 ## Updates
 

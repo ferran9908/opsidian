@@ -43,9 +43,10 @@ if (publish) {
     throw new Error('A release must be signed and notarised: set APPLE_API_KEY in .env.local.');
   // electron-builder uploads with this; the GitHub CLI's own login is enough.
   process.env.GH_TOKEN ??= gh('auth', 'token');
-  // The release is tagged at this commit, so it must already be on GitHub.
-  const commit = git('rev-parse', 'HEAD');
-  if (!git('branch', '-r', '--contains', commit))
+  // The release is tagged at this commit, so it must already be on GitHub. CI builds a pushed
+  // commit by definition.
+  const commit = process.env.GITHUB_SHA ?? git('rev-parse', 'HEAD');
+  if (!process.env.GITHUB_ACTIONS && !git('branch', '-r', '--contains', commit))
     throw new Error('Push this commit first: the release is tagged at it.');
   let existing;
   try {
@@ -68,7 +69,8 @@ if (publish) {
       '--title',
       `Opsidian ${version}`,
       '--notes',
-      'Download Opsidian-arm64.dmg for Apple silicon, or Opsidian-x64.dmg for Intel.',
+      `${git('log', '-1', '--format=%s', commit)}\n\n` +
+        'Download Opsidian-arm64.dmg for Apple silicon, or Opsidian-x64.dmg for Intel.',
     );
 }
 if (!signed) {
