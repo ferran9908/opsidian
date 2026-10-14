@@ -92,6 +92,7 @@ Sync on launch, resume, and while active. Background execution is best effort un
 - `core`: pure models, Markdown/link semantics, and platform interfaces.
 - `editor`: browser editor behavior and commands.
 - `sync`: shared protocol/state-machine rules using injected storage/transport.
+- `notebook`: the notebook folder (index, link rewriting, trash, sync store) over a `Platform` the Mac and the iPhone each supply.
 - `theme`: semantic theme data.
 - `desktop`, `mobile`, `host`: platform adapters and composition roots.
 

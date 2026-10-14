@@ -1,8 +1,20 @@
-import { open, rename, lstat } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import {
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  rmdir,
+} from 'node:fs/promises';
+import { watch } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { basename, dirname, join, sep } from 'node:path';
+import { PENDING, usePlatform, type Platform } from '@opsidian/notebook';
 
-/** Ending of the hidden temporary files below; distinctive enough to delete after a crash. */
-export const PENDING = '.opsidian-pending';
+export { PENDING, detectImage } from '@opsidian/notebook';
 
 /**
  * Replaces a file in one step, so a crash leaves either the old content or the new.
@@ -32,12 +44,25 @@ export async function atomicWrite(path: string, content: string | Uint8Array): P
   }
 }
 
-export function detectImage(bytes: Uint8Array): string | undefined {
-  const b = Buffer.from(bytes);
-  if (b.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'png';
-  if (b[0] === 255 && b[1] === 216 && b[2] === 255) return 'jpeg';
-  if (['GIF87a', 'GIF89a'].includes(b.subarray(0, 6).toString())) return 'gif';
-  if (b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP')
-    return 'webp';
-  return undefined;
-}
+/** The Mac's file system, as notebooks use it. */
+export const nodePlatform: Platform = {
+  lstat,
+  mkdir,
+  readFile: (path) => readFile(path),
+  readdir: (path) => readdir(path, { withFileTypes: true }),
+  realpath,
+  rename,
+  rm,
+  rmdir,
+  create: async (path) => (await open(path, 'wx', 0o600)).close(),
+  atomicWrite,
+  watch(root, listener) {
+    const watcher = watch(root, { recursive: true }, (_event, filename) =>
+      listener((filename?.toString() ?? '').split(sep).join('/')),
+    );
+    watcher.on('error', () => {});
+    return watcher;
+  },
+  sha256: (content) => createHash('sha256').update(content).digest('hex'),
+};
+usePlatform(nodePlatform);

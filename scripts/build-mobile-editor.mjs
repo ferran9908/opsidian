@@ -13,13 +13,13 @@ const js = result.outputFiles
   .find((f) => f.path.endsWith('.js'))
   .text.replace(/<\/script/gi, '<\\/script');
 const css = result.outputFiles.find((f) => f.path.endsWith('.css')).text;
-const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-opsidian-bundled-editor'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'"><style>${css}</style></head><body>
-<header><strong>opsidian</strong><select id="mode" aria-label="Editing mode" disabled><option value="live">Live Preview</option><option value="source">Source</option></select><button id="theme" aria-label="Change theme">Dark</button></header>
-<div id="link-notice" hidden><span id="link-detail"></span><button id="dismiss-link">Dismiss</button></div>
-<main><div class="eyebrow">PERSONAL NOTES · YOUR OWN LITTLE CORNER</div><div id="loading">Opening your notebook…</div><div id="editor"></div></main>
-<footer><div id="toolbar" role="toolbar" aria-label="Formatting">
-<button data-command="undo" aria-label="Undo" disabled>↶</button><button data-command="redo" aria-label="Redo" disabled>↷</button><button data-command="heading" aria-label="Heading" disabled>H₂</button><button data-command="bold" aria-label="Bold" disabled><b>B</b></button><button data-command="italic" aria-label="Italic" disabled><i>I</i></button><button data-command="bullet" aria-label="Bullet list" disabled>• ≡</button><button data-command="task" aria-label="Checklist" disabled>☑</button><button data-command="link" aria-label="Link a note" disabled>[[ ]]</button><button id="attach" aria-label="Attach image" disabled>＋▧</button><button id="dismiss-keyboard" aria-label="Dismiss keyboard">⌄</button>
-</div><div class="status"><span id="save-status">Opening…</span><button id="retry" hidden>Retry</button></div></footer>
+const button = (command, label, text) =>
+  `<button data-command="${command}" aria-label="${label}">${text}</button>`;
+const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-opsidian-bundled-editor'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'"><style>${css}</style></head><body>
+<main id="page"><h1 id="title"></h1><div id="loading">Opening…</div><div id="editor"></div></main>
+<footer id="bar" hidden><div id="toolbar" role="toolbar" aria-label="Formatting">
+${button('undo', 'Undo', '<svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>')}${button('redo', 'Redo', '<svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>')}${button('heading', 'Heading', '<b>H</b>')}${button('bold', 'Bold', '<b>B</b>')}${button('italic', 'Italic', '<i>I</i>')}${button('bullet', 'Bullet list', '<svg viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>')}${button('task', 'Checklist', '<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="m8 12 3 3 5-6"/></svg>')}${button('link', 'Link a note', '<span class="link">[[ ]]</span>')}<button id="attach" aria-label="Add a photo or file"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button><button id="dismiss-keyboard" aria-label="Hide keyboard"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+</div></footer>
 <script nonce="opsidian-bundled-editor">${js}</script></body></html>`;
 await mkdir('apps/mobile/generated', { recursive: true });
 await writeFile(

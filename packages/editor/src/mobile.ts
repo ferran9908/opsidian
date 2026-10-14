@@ -1,31 +1,46 @@
 import { createEditor, type EditorCommand, type EditorMode } from './index';
 import {
   SaveQueue,
-  imageMarkdown,
-  noteSuggestions,
-  type ImportedImage,
-  type NoteSnapshot,
+  linkResolver,
+  mergeText,
+  noteFolder,
+  noteTitle,
+  type NoteDocument,
+  type SaveResult,
   type SaveStatus,
 } from '@opsidian/core';
 import '@opsidian/theme/tokens.css';
 import './style.css';
 import './mobile.css';
 
+/** What the app sends when a note should be shown. */
+interface Opening {
+  path: string;
+  content: string;
+  revision: string;
+  notes: string[];
+  mode: EditorMode;
+  heading?: string;
+}
+type Incoming =
+  | { id: number; session: string; result?: unknown; error?: string }
+  | ({ event: 'open' } & Opening)
+  | { event: 'notes'; notes: string[] }
+  | { event: 'changed'; path: string }
+  | { event: 'moved'; path: string | null }
+  | { event: 'mode'; mode: EditorMode }
+  | { event: 'insert'; text: string }
+  | { event: 'blur' }
+  | { event: 'flush'; ask: number };
+
 declare global {
   interface Window {
     ReactNativeWebView?: { postMessage(value: string): void };
-    OpsidianHost?: {
-      receive(message: {
-        id?: number;
-        session?: string;
-        result?: unknown;
-        error?: string;
-        event?: string;
-      }): void;
-    };
+    OpsidianHost?: { receive(message: Incoming): void };
   }
 }
 const session = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const post = (value: object) => window.ReactNativeWebView?.postMessage(JSON.stringify(value));
 let nextId = 0;
 const pending = new Map<
   number,
@@ -35,28 +50,204 @@ const pending = new Map<
     timer: ReturnType<typeof setTimeout>;
   }
 >();
-function request<T>(method: string, content?: string): Promise<T> {
+/** Asks the app to do something with the notebook, which only it can reach. */
+function call<T>(method: string, ...args: unknown[]): Promise<T> {
   return new Promise((resolve, reject) => {
     const id = ++nextId;
     const timer = setTimeout(
       () => {
         pending.delete(id);
-        reject(new Error('The device has not confirmed this save. Tap Retry.'));
+        reject(new Error('The device has not confirmed this save.'));
       },
-      method === 'image' ? 600000 : 15000,
+      method === 'attach' ? 600000 : 15000,
     );
     pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
-    window.ReactNativeWebView?.postMessage(JSON.stringify({ session, id, method, content }));
+    post({ session, id, method, args });
   });
 }
+const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+const tell = (note: string, detail: object = {}) => post({ session, note, ...detail });
+
+const scheme = matchMedia('(prefers-color-scheme: dark)');
+const paint = () => document.documentElement.classList.toggle('dark', scheme.matches);
+paint();
+scheme.addEventListener('change', paint);
+
+let editor: ReturnType<typeof createEditor> | undefined;
 let saves: SaveQueue | undefined;
-window.OpsidianHost = {
-  receive(message) {
-    if (message.event === 'flush') {
-      void saves?.flush().catch(() => {});
+/** The note being edited; null once it has been trashed. */
+let target: string | null = null;
+let revision = '';
+let notes: string[] = [];
+let resolve = linkResolver([]);
+const images = new Map<string, string | null>();
+const doc = () => editor?.view.state.doc.toString();
+const words = () =>
+  tell('words', { count: (doc() ?? '').trim().split(/\s+/).filter(Boolean).length });
+
+/**
+ * Saves whatever is in the editor into `copy` until the two match, and returns with no await
+ * after the last look, so the caller can replace the editor's text without a keystroke
+ * falling in between.
+ */
+async function keepAside(copy: string, holds: string) {
+  for (let saved = holds; ;) {
+    const typed = doc();
+    if (typed === undefined || typed === saved) return;
+    const current = await call<NoteDocument>('read', copy);
+    const result = await call<SaveResult>('save', copy, typed, current.revision);
+    if ('revision' in result) saved = typed;
+  }
+}
+/** Saves one snapshot. A string result is what the file holds instead. */
+async function write(content: string): Promise<void | string> {
+  const path = target;
+  // Trashed while this edit was waiting: there is no note left to write it to.
+  if (path === null) return;
+  const result = await call<SaveResult>('save', path, content, revision);
+  if ('revision' in result) {
+    if (result.merged === undefined) {
+      revision = result.revision;
       return;
     }
-    if (message.session !== session || message.id === undefined) return;
+    // The file had moved on (another device) and the two were combined. Show the result,
+    // keeping anything typed since this save began.
+    const typed = doc() ?? content;
+    let next = typed === content ? result.merged : mergeText(content, typed, result.merged);
+    if (next === undefined) {
+      // The newest keystrokes touch the very lines that changed elsewhere: keep them apart.
+      const copy = await call<string>(
+        'createNote',
+        noteFolder(path),
+        `${noteTitle(path).slice(0, 150)} (my edit)`,
+      );
+      await keepAside(copy, '');
+      tell('notice', {
+        text: `This note changed on another device while you were typing. Your latest text is in “${noteTitle(copy)}”.`,
+        copy,
+      });
+      next = result.merged;
+    } else tell('notice', { text: 'Another device added to this note. Both edits are here.' });
+    revision = result.revision;
+    editor?.setContent(next);
+    setTimeout(() => {
+      const now = doc();
+      if (now !== undefined && now !== result.merged) saves?.update(now);
+    }, 0);
+    return result.merged;
+  }
+  // The file changed underneath this edit. The edit is in a copy; show what is on disk.
+  const disk = await call<NoteDocument>('read', path);
+  await keepAside(result.conflict, content);
+  revision = disk.revision;
+  editor?.setContent(disk.content);
+  tell('notice', {
+    text: `This note changed elsewhere, so the newer text was kept. Yours is saved as “${noteTitle(result.conflict)}”.`,
+    copy: result.conflict,
+  });
+  return disk.content;
+}
+const report = (status: SaveStatus) => tell('status', status);
+
+function show(opening: Opening) {
+  editor?.view.destroy();
+  images.clear();
+  target = opening.path;
+  revision = opening.revision;
+  notes = opening.notes;
+  resolve = linkResolver(notes);
+  element('title').textContent = noteTitle(opening.path);
+  element('loading').hidden = true;
+  element('editor').textContent = '';
+  saves = new SaveQueue(opening.content, write, report);
+  const made = createEditor({
+    parent: element('editor'),
+    content: opening.content,
+    mode: opening.mode,
+    suggestions: () => notes.map(noteTitle),
+    linkExists: (name) => Boolean(resolve(name)),
+    resolveImage(source) {
+      const known = images.get(source);
+      if (known !== undefined) return known ?? undefined;
+      // Asked for once; the picture appears when the app has read it.
+      images.set(source, null);
+      void call<string | null>('image', source).then(
+        (url) => {
+          if (!url || editor !== made) return;
+          images.set(source, url);
+          made.refresh();
+        },
+        () => {},
+      );
+      return undefined;
+    },
+    // The note is left behind when a link opens, so what it holds is saved first.
+    onLink: (name, heading) =>
+      void (saves?.flush() ?? Promise.resolve())
+        .catch(() => {})
+        .then(() => tell('link', { target: name, heading })),
+    loadEmbed: (name, heading) => call<string | undefined>('embed', target, name, heading),
+    onChange: (content) => {
+      saves?.update(content);
+      words();
+    },
+    onSave: () => void saves?.flush().catch(() => {}),
+  });
+  editor = made;
+  made.view.contentDOM.addEventListener('focus', () => setEditing(true));
+  made.view.contentDOM.addEventListener('blur', () => setEditing(false));
+  if (opening.heading) made.scrollToHeading(opening.heading);
+  else element('page').scrollTop = 0;
+  report({ state: 'saved' });
+  words();
+}
+function setEditing(value: boolean) {
+  element('bar').hidden = !value;
+  tell('editing', { value });
+  if (!value) void saves?.flush().catch(() => {});
+}
+/** Brings in a version written by sync, unless there are edits here still to save. */
+async function reload(path: string) {
+  if (path !== target || !editor || !saves?.settled) return;
+  const disk = await call<NoteDocument>('read', path);
+  // Anything typed during the read is merged by the next save instead.
+  if (path !== target || !saves.settled || disk.revision === revision) return;
+  revision = disk.revision;
+  saves.adopt(disk.content);
+  editor.setContent(disk.content);
+  images.clear();
+  editor.refresh();
+  tell('notice', { text: 'Updated from another device.' });
+  words();
+}
+
+window.OpsidianHost = {
+  receive(message) {
+    if ('event' in message) {
+      if (message.event === 'open') show(message);
+      else if (message.event === 'notes') {
+        notes = message.notes;
+        resolve = linkResolver(notes);
+        editor?.refresh();
+      } else if (message.event === 'changed') void reload(message.path).catch(() => {});
+      else if (message.event === 'moved') {
+        target = message.path;
+        if (message.path) element('title').textContent = noteTitle(message.path);
+      } else if (message.event === 'mode') editor?.setMode(message.mode);
+      else if (message.event === 'insert') {
+        editor?.insert(message.text);
+        void saves?.flush().catch(() => {});
+      } else if (message.event === 'blur') editor?.view.contentDOM.blur();
+      else if (message.event === 'flush') {
+        const done = (error?: string) => post({ session, answer: message.ask, error });
+        (saves?.flush() ?? Promise.resolve()).then(
+          () => done(),
+          (reason) => done(String(reason instanceof Error ? reason.message : reason)),
+        );
+      }
+      return;
+    }
+    if (message.session !== session) return;
     const task = pending.get(message.id);
     if (!task) return;
     clearTimeout(task.timer);
@@ -65,82 +256,20 @@ window.OpsidianHost = {
     else task.resolve(message.result);
   },
 };
-const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-function report(status: SaveStatus) {
-  element('save-status').textContent =
-    status.state === 'saved'
-      ? 'Saved on this iPhone'
-      : status.state === 'saving'
-        ? 'Saving…'
-        : status.message;
-  element('retry').hidden = status.state !== 'error';
-  element('save-status').setAttribute('data-state', status.state);
+
+for (const button of document.querySelectorAll<HTMLButtonElement>('[data-command]')) {
+  // Keeps the keyboard up: the button never takes focus from the note.
+  button.addEventListener('pointerdown', (event) => event.preventDefault());
+  button.onclick = () => editor?.command(button.dataset.command as EditorCommand);
 }
-let dark = matchMedia('(prefers-color-scheme: dark)').matches;
-function setTheme() {
-  document.documentElement.classList.toggle('dark', dark);
-  element('theme').textContent = dark ? 'Light' : 'Dark';
-}
-setTheme();
-element('theme').onclick = () => {
-  dark = !dark;
-  setTheme();
+element('attach').addEventListener('pointerdown', (event) => event.preventDefault());
+element('attach').onclick = () => {
+  void saves?.flush().catch(() => {});
+  tell('attach');
 };
-async function start() {
-  const note = await request<NoteSnapshot>('load');
-  const assets = note.assets;
-  saves = new SaveQueue(note.content, (content) => request<void>('save', content), report, 80);
-  const editor = createEditor({
-    parent: element('editor'),
-    content: note.content,
-    suggestions: noteSuggestions,
-    resolveImage: (path) => assets[path],
-    onLink: (name) => {
-      element('link-detail').textContent =
-        `“${name}” is saved as a link. Opening other notes arrives with the full notebook.`;
-      element('link-notice').hidden = false;
-    },
-    onChange: (content) => saves?.update(content),
-    onSave: () => {
-      void saves?.flush().catch(() => {});
-    },
-  });
-  element('loading').hidden = true;
-  element('retry').onclick = () => void saves?.flush().catch(() => {});
-  element('dismiss-link').onclick = () => {
-    element('link-notice').hidden = true;
-  };
-  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-command]')) {
-    button.disabled = false;
-    button.addEventListener('pointerdown', (event) => event.preventDefault());
-    button.onclick = () => editor.command(button.dataset.command as EditorCommand);
-  }
-  element<HTMLSelectElement>('mode').disabled = false;
-  element<HTMLSelectElement>('mode').onchange = (event) =>
-    editor.setMode((event.target as HTMLSelectElement).value as EditorMode);
-  element<HTMLButtonElement>('attach').disabled = false;
-  element('attach').onclick = async () => {
-    try {
-      await saves?.flush();
-      const image = await request<ImportedImage | null>('image');
-      if (image) {
-        assets[image.path] = image.url;
-        editor.insert(imageMarkdown(image.path));
-        await saves?.flush();
-      }
-    } catch (error) {
-      element('link-detail').textContent = error instanceof Error ? error.message : String(error);
-      element('link-notice').hidden = false;
-    }
-  };
-  element('dismiss-keyboard').onclick = () => editor.view.contentDOM.blur();
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) void saves?.flush().catch(() => {});
-  });
-  window.addEventListener('pagehide', () => void saves?.flush().catch(() => {}));
-  report({ state: 'saved' });
-}
-void start().catch((error) => {
-  element('loading').textContent =
-    `Could not open your note: ${String(error)}. Close and reopen the app to retry.`;
+element('dismiss-keyboard').onclick = () => editor?.view.contentDOM.blur();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) void saves?.flush().catch(() => {});
 });
+window.addEventListener('pagehide', () => void saves?.flush().catch(() => {}));
+tell('ready');

@@ -15,8 +15,26 @@ const config: ExpoConfig = {
     supportsTablet: true,
     bundleIdentifier,
     ...(appleTeamId ? { appleTeamId } : {}),
+    infoPlist: {
+      // The host is reached over Tailscale or the home network, which carry plain http.
+      NSAppTransportSecurity: { NSAllowsArbitraryLoads: true, NSAllowsLocalNetworking: true },
+      NSLocalNetworkUsageDescription:
+        'Opsidian connects to the host that keeps your notebook in step, on your own network.',
+      ITSAppUsesNonExemptEncryption: false,
+    },
   },
-  plugins: ['expo-sqlite', 'expo-document-picker'],
+  plugins: [
+    'expo-document-picker',
+    'expo-secure-store',
+    [
+      'expo-image-picker',
+      {
+        photosPermission: 'Opsidian adds the photos you choose to your notes.',
+        cameraPermission: 'Opsidian uses the camera to add a photo to a note.',
+        microphonePermission: false,
+      },
+    ],
+  ],
 };
 
 export default config;

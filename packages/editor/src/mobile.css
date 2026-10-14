@@ -26,93 +26,64 @@ button:focus-visible,
 select:focus-visible {
   outline: 2px solid var(--ring);
 }
-header {
-  padding: 12px 20px;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-header strong {
-  flex: 1;
-  font-size: 16px;
-  letter-spacing: -0.03em;
-}
-header button,
-select {
-  font-size: 12px;
-  min-height: 36px;
-  padding: 8px;
-}
-select {
-  max-width: 124px;
-  background: var(--card);
-}
 main {
   flex: 1;
   overflow: auto;
-  padding: 24px;
+  padding: 10px 24px 24px;
   min-height: 0;
   -webkit-overflow-scrolling: touch;
 }
-.eyebrow {
-  font-size: 10px;
-  letter-spacing: 0.08em;
+#title {
+  margin: 0 0 12px;
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  overflow-wrap: anywhere;
+}
+#loading {
   color: var(--muted-foreground);
-  padding-bottom: 23px;
 }
 footer {
   flex-shrink: 0;
-  background: var(--sidebar);
+  background: var(--muted);
   border-top: 1px solid var(--border);
 }
 #toolbar {
   display: flex;
   overflow-x: auto;
   align-items: center;
+  justify-content: space-between;
   padding: 3px 8px;
   gap: 2px;
 }
 #toolbar button {
-  min-width: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
   height: 42px;
   flex-shrink: 0;
-  font-size: 16px;
+  font-size: 17px;
+  color: var(--foreground);
   touch-action: manipulation;
+}
+#toolbar svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#toolbar .link {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 14px;
+  color: var(--link);
 }
 #toolbar button:active {
   background: var(--accent);
-  color: var(--accent-foreground);
-}
-#toolbar button:disabled {
-  opacity: 0.35;
-}
-.status {
-  display: flex;
-  align-items: center;
-  padding: 5px 20px 9px;
-  gap: 10px;
-  font-size: 11px;
-  color: var(--muted-foreground);
-  min-height: 27px;
-}
-#save-status[data-state='error'] {
-  color: var(--destructive);
-}
-#retry {
-  color: var(--link);
-  text-decoration: underline;
-}
-#link-notice {
-  padding: 12px 20px;
-  background: var(--card);
-  font-size: 12px;
-  line-height: 1.7;
-}
-#dismiss-link {
-  padding: 6px 12px;
-  color: var(--link);
 }
 [hidden] {
   display: none !important;

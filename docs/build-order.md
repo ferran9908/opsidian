@@ -1,6 +1,6 @@
 # Build order
 
-Milestone 1 is implemented as a single-note prototype and is awaiting real-iPhone acceptance. Milestone 2 is implemented and passes its automated exit checks; whether it is usable as a daily notebook is for the user to judge. See [the desktop notebook](desktop-notebook.md). Milestone 3 is implemented and passes its automated checks; it has not yet been run between two physical Macs. See [sync](sync.md). Milestones 4–6 are pending. See also [prototype setup and validation](editor-prototype.md).
+Milestone 1 is implemented as a single-note prototype and is awaiting real-iPhone acceptance. Milestone 2 is implemented and passes its automated exit checks; whether it is usable as a daily notebook is for the user to judge. See [the desktop notebook](desktop-notebook.md). Milestone 3 is implemented and passes its automated checks; it has not yet been run between two physical Macs. See [sync](sync.md). Milestone 4 is implemented and was exercised in the iPhone simulator against a real host; its exit gate needs a real iPhone. See [the iPhone app](iphone.md). Milestones 5–6 are pending. See also [prototype setup and validation](editor-prototype.md).
 
 ## 1. Prove the editor on Mac and iPhone
 

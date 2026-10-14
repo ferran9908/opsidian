@@ -1,127 +1,194 @@
-import { useEffect, useRef, useState } from 'react';
-import {
-  AppState,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  useColorScheme,
-} from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { useEffect, useMemo, useState } from 'react';
+import { AppState, Linking, Modal, Text, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import WebView, { type WebViewMessageEvent } from 'react-native-webview';
-import { editorHtml } from '../generated/editor-html';
-import { loadNote, saveNote, importImage } from './storage';
-import { validateContent } from '@opsidian/core';
-import { themes } from '@opsidian/theme';
+import { noteTitle } from '@opsidian/core';
+import { connect, open, refresh, store } from './notebook';
+import { phonePlatform } from './platform';
+import { NavigationContext, type Navigation, type Route } from './nav';
+import { Button, Screen, message, useColors, useStore } from './ui';
+import { Folder, Home, Search, Trash } from './screens/browse';
+import { Note } from './screens/note';
+import { Connect, Downloading, HeldDeletions, Welcome } from './screens/start';
+import { History, Sync, Version } from './screens/sync';
 
-export default function App() {
-  const web = useRef<WebView>(null);
-  const [error, setError] = useState('');
-  const dark = useColorScheme() === 'dark';
-  const backgroundColor = themes[dark ? 'dark' : 'light'].background;
+/** Handles for driving a development build from the debugger. */
+export const dev: Record<string, unknown> = {};
+if (__DEV__) {
+  Object.assign(dev, { store, open, connect, refresh, platform: phonePlatform });
+  (globalThis as { opsidian?: unknown }).opsidian = dev;
+}
+
+const label = (route: Route | undefined): string => {
+  if (!route) return '‹ Back';
+  if (route.name === 'home') return `‹ ${store.name}`;
+  if (route.name === 'folder') return `‹ ${route.path.slice(route.path.lastIndexOf('/') + 1)}`;
+  if (route.name === 'all') return '‹ All notes';
+  if (route.name === 'note') return `‹ ${noteTitle(route.path)}`;
+  if (route.name === 'history') return '‹ History';
+  if (route.name === 'sync') return '‹ Sync';
+  return '‹ Back';
+};
+
+function Stack() {
+  const [routes, setRoutes] = useState<Route[]>([{ name: 'home' }]);
+  const [welcoming, setWelcoming] = useState<'welcome' | 'connect'>('welcome');
+  /** Set after connecting, until the first download is in or waved through. */
+  const [arriving, setArriving] = useState(false);
+  const [snoozed, setSnoozed] = useState(false);
+  const [invitation, setInvitation] = useState<{ host: string; code: string }>();
+  const { notebook, sync } = useStore();
+  const top = routes[routes.length - 1]!;
+  const navigation: Navigation = useMemo(
+    () => ({
+      push: (route) => setRoutes((stack) => [...stack, route]),
+      pop: () => setRoutes((stack) => (stack.length > 1 ? stack.slice(0, -1) : stack)),
+      replace: (route) => setRoutes((stack) => [...stack.slice(0, -1), route]),
+      back: label(routes[routes.length - 2]).slice(0, 22),
+    }),
+    [routes],
+  );
+  // Development builds can be driven from the debugger, which is how the app is tested
+  // in the simulator. Nothing here exists in a release build.
+  useEffect(() => {
+    if (__DEV__) Object.assign(dev, { setRoutes, setArriving });
+  }, []);
+  useEffect(() => {
+    if (arriving && sync.state === 'synced') setArriving(false);
+  }, [arriving, sync.state]);
+  useEffect(() => {
+    if (!sync.held) setSnoozed(false);
+  }, [sync.held]);
+  // iOS suspends the app in the background; catch up the moment it is in front again.
   useEffect(() => {
     const listener = AppState.addEventListener('change', (state) => {
-      if (state !== 'active')
-        web.current?.injectJavaScript('window.OpsidianHost?.receive({event:"flush"});true;');
+      if (state === 'active') store.notebook?.sync.kick();
     });
     return () => listener.remove();
   }, []);
-  async function message(event: WebViewMessageEvent) {
-    let request: { id: number; session: string; method: string; content?: unknown };
-    try {
-      const value = JSON.parse(event.nativeEvent.data);
-      if (
-        !value ||
-        !Number.isSafeInteger(value.id) ||
-        typeof value.session !== 'string' ||
-        value.session.length > 100 ||
-        !['load', 'save', 'image'].includes(value.method)
-      )
-        throw new Error('Invalid editor request');
-      request = value;
-    } catch {
-      setError('An invalid editor message was rejected.');
-      return;
-    }
-    let result: unknown, failure: string | undefined;
-    try {
-      if (request.method === 'load') result = await loadNote();
-      if (request.method === 'save') {
-        validateContent(request.content);
-        await saveNote(request.content);
+
+  // `opsidian://connect?host=…&code=…` fills in an invitation; `opsidian://note?path=…` opens a note.
+  useEffect(() => {
+    const follow = (address: string | null) => {
+      try {
+        route(address);
+      } catch {
+        // A link that cannot be read is ignored.
       }
-      if (request.method === 'image') result = await importImage();
-    } catch (reason) {
-      failure = reason instanceof Error ? reason.message : String(reason);
-    }
-    const json = JSON.stringify({
-      id: request.id,
-      session: request.session,
-      result,
-      error: failure,
-    })
-      .replace(/</g, '\\u003c')
-      .replace(/\u2028/g, '\\u2028')
-      .replace(/\u2029/g, '\\u2029');
-    web.current?.injectJavaScript(`window.OpsidianHost?.receive(${json});true;`);
+    };
+    const route = (address: string | null) => {
+      const match = address?.match(/^opsidian:\/\/(connect|note)\/?\?(.*)$/);
+      if (!match) return;
+      const query = new Map(
+        match[2]!.split('&').map((pair) => {
+          const [name = '', value = ''] = pair.split('=');
+          return [name, decodeURIComponent(value)] as const;
+        }),
+      );
+      if (match[1] === 'connect') {
+        setInvitation({ host: query.get('host') ?? '', code: query.get('code') ?? '' });
+        if (store.notebook) setRoutes((stack) => [...stack, { name: 'connect' }]);
+        else setWelcoming('connect');
+      } else if (store.tree.notes.includes(query.get('path') ?? ''))
+        setRoutes((stack) => [...stack, { name: 'note', path: query.get('path')! }]);
+    };
+    void Linking.getInitialURL().then(follow, () => {});
+    const listener = Linking.addEventListener('url', (event) => follow(event.url));
+    return () => listener.remove();
+  }, []);
+
+  if (!notebook) {
+    return welcoming === 'connect' ? (
+      <Connect
+        {...(invitation ? { invitation } : {})}
+        onBack={() => setWelcoming('welcome')}
+        onConnected={() => setArriving(true)}
+      />
+    ) : (
+      <Welcome onConnect={() => setWelcoming('connect')} onStarted={() => {}} />
+    );
   }
+  if (arriving) return <Downloading onContinue={() => setArriving(false)} />;
+  return (
+    <NavigationContext.Provider value={navigation}>
+      {/* Laid over the screens rather than replacing them, so an open note keeps its text. */}
+      <Modal visible={Boolean(sync.held) && !snoozed && top.name !== 'sync'} animationType="slide">
+        <SafeAreaProvider>
+          <HeldDeletions onLater={() => setSnoozed(true)} />
+        </SafeAreaProvider>
+      </Modal>
+      {/* Keyed by depth, so a renamed note keeps its editor and a new screen starts fresh. */}
+      <View key={routes.length} style={{ flex: 1 }}>
+        {top.name === 'home' ? (
+          <Home />
+        ) : top.name === 'folder' ? (
+          <Folder path={top.path} />
+        ) : top.name === 'all' ? (
+          <Folder />
+        ) : top.name === 'note' ? (
+          <Note path={top.path} {...(top.heading ? { heading: top.heading } : {})} />
+        ) : top.name === 'search' ? (
+          <Search />
+        ) : top.name === 'trash' ? (
+          <Trash />
+        ) : top.name === 'sync' ? (
+          <Sync />
+        ) : top.name === 'connect' ? (
+          <Connect
+            {...(invitation ? { invitation } : {})}
+            onBack={navigation.pop}
+            onConnected={() => {
+              navigation.pop();
+              setArriving(true);
+            }}
+          />
+        ) : top.name === 'history' ? (
+          <History path={top.path} />
+        ) : (
+          <Version path={top.path} version={top.version} />
+        )}
+      </View>
+    </NavigationContext.Provider>
+  );
+}
+
+export default function App() {
+  const colors = useColors();
+  const [state, setState] = useState<'opening' | 'ready' | { error: string }>('opening');
+  const start = () => {
+    setState('opening');
+    open().then(
+      () => setState('ready'),
+      (reason) => setState({ error: message(reason) }),
+    );
+  };
+  useEffect(start, []);
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={[styles.fill, { backgroundColor }]}>
-        <StatusBar style={dark ? 'light' : 'dark'} />
-        {error ? (
-          <View style={styles.error}>
-            <Text style={styles.errorText}>{error}</Text>
-            <Pressable
-              onPress={() => {
-                setError('');
-                web.current?.reload();
-              }}
-            >
-              <Text style={styles.reload}>Reload saved note</Text>
-            </Pressable>
+      <StatusBar style={colors.background === '#ffffff' ? 'dark' : 'light'} />
+      {state === 'ready' ? (
+        <Stack />
+      ) : (
+        <Screen>
+          <View style={{ flex: 1, justifyContent: 'center', padding: 28, gap: 14 }}>
+            {state === 'opening' ? (
+              <Text style={{ fontSize: 17, color: colors.mutedForeground }}>
+                Opening your notebook…
+              </Text>
+            ) : (
+              <>
+                <Text style={{ fontSize: 24, fontWeight: '700', color: colors.foreground }}>
+                  The notebook could not be opened.
+                </Text>
+                <Text style={{ fontSize: 16, lineHeight: 24, color: colors.mutedForeground }}>
+                  {state.error}
+                </Text>
+                <Button label="Try again" onPress={start} />
+              </>
+            )}
           </View>
-        ) : null}
-        <KeyboardAvoidingView
-          style={styles.fill}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <WebView
-            ref={web}
-            source={{ html: editorHtml, baseUrl: 'https://opsidian.local/' }}
-            style={[styles.fill, { backgroundColor }]}
-            originWhitelist={['https://opsidian.local']}
-            onMessage={(event) => void message(event)}
-            javaScriptEnabled
-            domStorageEnabled={false}
-            allowFileAccess={false}
-            allowFileAccessFromFileURLs={false}
-            allowUniversalAccessFromFileURLs={false}
-            setSupportMultipleWindows={false}
-            keyboardDisplayRequiresUserAction={false}
-            hideKeyboardAccessoryView={true}
-            automaticallyAdjustContentInsets={false}
-            contentInsetAdjustmentBehavior="never"
-            scrollEnabled={false}
-            onShouldStartLoadWithRequest={(request) =>
-              request.url === 'about:blank' || request.url === 'https://opsidian.local/'
-            }
-            onContentProcessDidTerminate={() =>
-              setError('The editor was stopped by iOS. Reload to restore the last confirmed save.')
-            }
-            onError={(event) => setError(event.nativeEvent.description)}
-          />
-        </KeyboardAvoidingView>
-      </SafeAreaView>
+        </Screen>
+      )}
     </SafeAreaProvider>
   );
 }
-const styles = StyleSheet.create({
-  fill: { flex: 1 },
-  error: { padding: 16, backgroundColor: '#382a2a' },
-  errorText: { color: '#f1d2cf', lineHeight: 21 },
-  reload: { color: themes.dark.link, paddingTop: 12 },
-});

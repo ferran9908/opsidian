@@ -107,7 +107,7 @@ All paths begin `/v1`. Everything except `pair` needs `Authorization: Bearer <cr
 - **A browsable copy on the host.** The host stores versions by content hash, not as a folder of Markdown files. To read a notebook on the host machine, connect a device to it.
 - **Empty folders.** Folders exist on other devices only once they contain a file.
 - **Files over 100 MB** are not synced.
-- **The iPhone.** It will use the same engine (`packages/sync`) with its own storage adapter in milestone 4.
+- **Sync while the iPhone app is closed.** The phone uses the same engine and syncs whenever the app is open. See [the iPhone app](iphone.md).
 - **Rotating a device credential,** and moving a notebook to another host.
 
 ## Checks

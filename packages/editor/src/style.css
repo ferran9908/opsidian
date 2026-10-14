@@ -19,12 +19,16 @@
 }
 .cm-content {
   padding: 0 0 180px;
+}
+/* Named through the editor so these win over CodeMirror's own black caret. */
+.cm-editor .cm-content {
   caret-color: var(--link);
 }
 .cm-editor .cm-line {
   padding: 0;
 }
-.cm-cursor {
+.cm-editor .cm-cursor,
+.cm-editor .cm-dropCursor {
   border-left-color: var(--link);
 }
 .cm-selectionBackground,

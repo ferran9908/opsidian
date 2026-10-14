@@ -79,6 +79,16 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Sync state lives in `.opsidian/` in the notebook; the credential does not.** It is kept in the app's own data, encrypted with the keychain.
 - **Still open:** transport encryption and certificates, packaging the host, history retention, host migration.
 
+## iPhone app — 2026-10-14
+
+- **The phone runs the Mac's notebook code, not a second implementation.** The vault and sync service moved to `packages/notebook` behind a `Platform` interface, so link rewriting, the trash, merging and every sync fix are shared.
+- **One notebook per phone,** in the app's Documents folder. A notebook can start on the phone and connect later.
+- **Saves are made crash-safe in the app,** because iOS cannot replace a file in one step: write beside, mark complete, swap, and finish the swap at next launch if interrupted.
+- **Sync runs only while the app is open.** Background sync is not attempted.
+- **Plain `http` is allowed,** matching the Tailscale-only decision for the host. To revisit before an App Store release.
+- **Pairing is typed.** An `opsidian://connect` link fills the form but never connects by itself, so a link cannot attach a notebook to someone else's host.
+- **No navigation library and no icon library.** The app has a dozen screens and a plain stack is enough.
+
 ## Future AI direction
 
 Potential features: organize a messy thought, answer questions over notes with citations, and suggest related notes. A machine-hosted agent and supported Codex/ChatGPT sign-in were explored. No AI integration is committed for the initial milestones; re-check product access and integration documentation when that work begins.

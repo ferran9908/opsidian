@@ -10,19 +10,25 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@noble/hashes": "^2.4.0",
     "@opsidian/core": "workspace:*",
+    "@opsidian/notebook": "workspace:*",
+    "@opsidian/sync": "workspace:*",
     "@opsidian/theme": "workspace:*",
     "expo": "57.0.25",
-    "react": "19.2.3",
-    "react-native": "0.86.3",
-    "react-native-webview": "13.16.1",
-    "expo-sqlite": "~57.0.3",
-    "expo-file-system": "~57.0.7",
-    "expo-document-picker": "~57.0.2",
+    "expo-crypto": "~57.0.4",
     "expo-dev-client": "~57.0.19",
+    "expo-device": "~57.0.2",
+    "expo-document-picker": "~57.0.2",
+    "expo-file-system": "~57.0.7",
+    "expo-image-picker": "~57.0.20",
+    "expo-secure-store": "~57.0.4",
     "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
     "react-native-safe-area-context": "~5.7.0",
-    "react-dom": "19.2.3"
+    "react-native-webview": "13.16.1"
   },
   "devDependencies": {
     "@types/react": "~19.2.4"

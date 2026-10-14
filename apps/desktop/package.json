@@ -22,7 +22,8 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "tailwind-merge": "3.7.0",
-    "@opsidian/sync": "workspace:*"
+    "@opsidian/sync": "workspace:*",
+    "@opsidian/notebook": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",

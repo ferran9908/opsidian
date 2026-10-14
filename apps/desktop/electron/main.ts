@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { validateContent, validateName, type VaultInfo } from '@opsidian/core';
 import { themes } from '@opsidian/theme';
 import { Vault } from './vault';
-import { SyncService, hostAddress } from './sync';
+import { desktopSync, hostAddress } from './sync';
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'opsidian', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -27,7 +27,7 @@ async function start() {
   let mayClose = false;
   let vault: Vault | null = null;
 
-  const sync = new SyncService(app.getPath('userData'), (info) =>
+  const sync = desktopSync(app.getPath('userData'), (info) =>
     window?.webContents.send('sync:info', info),
   );
   async function use(directory: string, remember: boolean): Promise<VaultInfo> {

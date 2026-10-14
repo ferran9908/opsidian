@@ -1,6 +1,6 @@
 # @opsidian/mobile
 
-Expo iPhone prototype with the locally bundled shared CodeMirror editor in a WebView. From the root, run `pnpm dev:mobile`. Native development builds require Xcode and signing. See [setup and required device checks](../../docs/editor-prototype.md). Real-iPhone acceptance is pending.
+The iPhone app: one notebook, with the shared editor in a web view and the same notebook and sync code as the Mac. From the repository root, `pnpm ios` builds and installs it on a connected iPhone, and `pnpm dev:mobile` starts the development server. See [what it does and how it is built](../../docs/iphone.md).
 
 ## Signing
 
