@@ -1,0 +1,36 @@
+# Packages the Mac app. See docs/release.md.
+appId: sh.ferran.opsidian
+productName: Opsidian
+copyright: Copyright © 2026 Ferran Sulaiman
+directories:
+  output: release
+  buildResources: packaging
+# Everything the app runs is bundled into these folders, so no node_modules are shipped.
+files:
+  - dist/**
+  - dist-electron/**
+  - '!dist-electron/*.map'
+  - resources/**
+  - package.json
+npmRebuild: false
+asar: true
+mac:
+  category: public.app-category.productivity
+  icon: packaging/icon.icns
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  hardenedRuntime: true
+  entitlements: packaging/entitlements.mac.plist
+  entitlementsInherit: packaging/entitlements.mac.plist
+  notarize: true
+dmg:
+  title: Opsidian ${version}
+artifactName: Opsidian-${version}-${arch}.${ext}
+publish:
+  provider: github
+  owner: ferran9908
+  repo: opsidian
+  releaseType: release

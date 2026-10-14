@@ -13,6 +13,8 @@
     "dev:preview": "pnpm --filter @opsidian/desktop dev:renderer",
     "dev:mobile": "pnpm build:mobile-editor && pnpm --filter @opsidian/mobile start",
     "build:desktop": "pnpm --filter @opsidian/desktop build",
+    "package:mac": "pnpm --filter @opsidian/desktop package",
+    "release:mac": "pnpm --filter @opsidian/desktop release",
     "build:mobile-editor": "node scripts/build-mobile-editor.mjs",
     "typecheck": "pnpm build:mobile-editor && pnpm -r --if-present typecheck",
     "test": "vitest run",

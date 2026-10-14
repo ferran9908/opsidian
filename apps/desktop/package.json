@@ -1,6 +1,10 @@
 {
   "name": "@opsidian/desktop",
-  "version": "0.0.0",
+  "productName": "Opsidian",
+  "version": "0.1.0",
+  "description": "A Markdown-first notebook with self-hosted sync.",
+  "author": "Ferran Sulaiman",
+  "homepage": "https://ferran.sh/opsidian",
   "private": true,
   "license": "MIT OR Apache-2.0",
   "type": "module",
@@ -10,29 +14,31 @@
     "dev:renderer": "vite --host 127.0.0.1",
     "build": "node scripts/build.mjs",
     "start": "electron .",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "package": "node scripts/build.mjs && node scripts/package.mjs",
+    "release": "node scripts/build.mjs && node scripts/package.mjs --publish"
   },
-  "dependencies": {
+  "devDependencies": {
     "@opsidian/core": "workspace:*",
     "@opsidian/editor": "workspace:*",
     "@opsidian/notebook": "workspace:*",
     "@opsidian/sync": "workspace:*",
     "@opsidian/theme": "workspace:*",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "~19.2.4",
+    "@types/react-dom": "~19.2.0",
+    "@vitejs/plugin-react": "6.1.1",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
+    "electron": "44.4.5",
+    "electron-builder": "^26.15.3",
+    "electron-updater": "^6.8.9",
     "lucide-react": "^0.468.0",
     "qrcode-generator": "^2.0.4",
     "radix-ui": "^1.8.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "tailwind-merge": "3.7.0"
-  },
-  "devDependencies": {
-    "@tailwindcss/vite": "4.3.3",
-    "@types/react": "~19.2.4",
-    "@types/react-dom": "~19.2.0",
-    "@vitejs/plugin-react": "6.1.1",
-    "electron": "44.4.5",
+    "tailwind-merge": "3.7.0",
     "tailwindcss": "4.3.3",
     "vite": "8.3.1"
   }

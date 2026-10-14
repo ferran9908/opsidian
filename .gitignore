@@ -14,3 +14,4 @@ dist-electron/
 apps/mobile/generated/
 apps/mobile/ios/
 apps/mobile/android/
+apps/desktop/release/

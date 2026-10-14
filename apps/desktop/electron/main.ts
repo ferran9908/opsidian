@@ -19,6 +19,7 @@ import { validateContent, validateName, type VaultInfo } from '@opsidian/core';
 import { themes } from '@opsidian/theme';
 import { Vault } from './vault';
 import { desktopSync, hostAddress } from './sync';
+import { Updates } from './updates';
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'opsidian', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -49,6 +50,46 @@ async function start() {
     window?.webContents.send('sync:info', info),
   );
   let tray: Tray | undefined;
+  /** Offered in the menus once a new version has downloaded. */
+  const restartItem = (): Electron.MenuItemConstructorOptions[] =>
+    updates.ready
+      ? [{ label: `Restart to Update to ${updates.ready}`, click: () => updates.restart() }]
+      : [];
+  const menus = () => {
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        {
+          label: 'Opsidian',
+          submenu: [
+            { role: 'about' },
+            ...(updates.available
+              ? [
+                  ...restartItem(),
+                  ...(updates.ready
+                    ? []
+                    : [{ label: 'Check for Updates…', click: () => void updates.checkNow() }]),
+                ]
+              : []),
+            { type: 'separator' },
+            { role: 'quit' },
+          ],
+        },
+        { role: 'editMenu' },
+        { role: 'viewMenu' },
+        { role: 'windowMenu' },
+      ]),
+    );
+    tray?.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: 'Hosting notebooks for your devices', enabled: false },
+        { type: 'separator' },
+        ...restartItem(),
+        { label: 'Open Opsidian', click: () => app.emit('activate') },
+        { label: 'Quit Opsidian', role: 'quit' },
+      ]),
+    );
+  };
+  const updates = new Updates(menus);
   /** While this Mac hosts for other devices, it stays in the menu bar with no window open. */
   const showTray = () => {
     const wanted = hosting.keepRunning;
@@ -56,14 +97,7 @@ async function start() {
       // A template image: macOS draws it in the menu bar's own colour, light or dark.
       tray = new Tray(nativeImage.createFromPath(join(resources, 'trayTemplate.png')));
       tray.setToolTip('Opsidian is hosting your notebooks');
-      tray.setContextMenu(
-        Menu.buildFromTemplate([
-          { label: 'Hosting notebooks for your devices', enabled: false },
-          { type: 'separator' },
-          { label: 'Open Opsidian', click: () => app.emit('activate') },
-          { label: 'Quit Opsidian', role: 'quit' },
-        ]),
-      );
+      menus();
     } else if (!wanted && tray) {
       tray.destroy();
       tray = undefined;
@@ -349,14 +383,7 @@ async function start() {
       void window.loadURL(devUrl);
     } else void window.loadURL('opsidian://app/');
   };
-  Menu.setApplicationMenu(
-    Menu.buildFromTemplate([
-      { label: 'Opsidian', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'quit' }] },
-      { role: 'editMenu' },
-      { role: 'viewMenu' },
-      { role: 'windowMenu' },
-    ]),
-  );
+  menus();
   createWindow();
   app.on('activate', () => {
     if (!window) createWindow();

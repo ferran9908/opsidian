@@ -48,5 +48,27 @@ app.whenReady().then(async () => {
     }
     console.log(`${target} (${size} px)`);
   }
+  // The packaged Mac app wants every size in one .icns file, made from the 1024 px icon.
+  const set = join(require('node:os').tmpdir(), 'opsidian.iconset');
+  require('node:fs').rmSync(set, { recursive: true, force: true });
+  require('node:fs').mkdirSync(set);
+  for (const size of [16, 32, 128, 256, 512])
+    for (const scale of [1, 2])
+      execFileSync('sips', [
+        '-z',
+        String(size * scale),
+        String(size * scale),
+        join(root, 'apps/desktop/resources/icon.png'),
+        '--out',
+        join(set, `icon_${size}x${size}${scale === 2 ? '@2x' : ''}.png`),
+      ]);
+  execFileSync('iconutil', [
+    '-c',
+    'icns',
+    set,
+    '-o',
+    join(root, 'apps/desktop/packaging/icon.icns'),
+  ]);
+  console.log('apps/desktop/packaging/icon.icns');
   app.exit(0);
 });
