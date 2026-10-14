@@ -59,11 +59,27 @@ async function start() {
     window?.webContents.send('sync:info', info),
   );
   let tray: Tray | undefined;
-  /** Offered in the menus once a new version has downloaded. */
-  const restartItem = (): Electron.MenuItemConstructorOptions[] =>
-    updates.ready
-      ? [{ label: `Restart to Update to ${updates.ready}`, click: () => updates.restart() }]
-      : [];
+  /** Opens the window, if it is closed, and has it check for a new version where you can see. */
+  const checkForUpdates = () => {
+    if (!window) createWindow();
+    window?.show();
+    const ask = () => window?.webContents.send('updates:check-requested');
+    if (window?.webContents.isLoading()) window.webContents.once('did-finish-load', ask);
+    else ask();
+  };
+  /** What the menus offer about updates follows the one update state. */
+  const updateItems = (): Electron.MenuItemConstructorOptions[] => {
+    const update = updates.state;
+    if (update.kind === 'ready')
+      return [{ label: `Restart to Update to ${update.version}`, click: () => updates.restart() }];
+    if (update.kind === 'available')
+      return [{ label: `Download Opsidian ${update.version}`, click: () => updates.download() }];
+    if (update.kind === 'downloading')
+      return [
+        { label: `Downloading ${update.version}… ${Math.round(update.percent)}%`, enabled: false },
+      ];
+    return [];
+  };
   const menus = () => {
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
@@ -72,12 +88,7 @@ async function start() {
           submenu: [
             { role: 'about' },
             ...(updates.available
-              ? [
-                  ...restartItem(),
-                  ...(updates.ready
-                    ? []
-                    : [{ label: 'Check for Updates…', click: () => void updates.checkNow() }]),
-                ]
+              ? [...updateItems(), { label: 'Check for Updates…', click: checkForUpdates }]
               : []),
             { type: 'separator' },
             { role: 'quit' },
@@ -92,13 +103,23 @@ async function start() {
       Menu.buildFromTemplate([
         { label: 'Hosting notebooks for your devices', enabled: false },
         { type: 'separator' },
-        ...restartItem(),
+        ...updateItems(),
         { label: 'Open Opsidian', click: () => app.emit('activate') },
         { label: 'Quit Opsidian', role: 'quit' },
       ]),
     );
   };
-  const updates = new Updates(menus);
+  let shownPercent = -1;
+  const updates = new Updates((state) => {
+    window?.webContents.send('updates:state', state);
+    // Menus are rebuilt for every change of state, but only every tenth of a download.
+    if (state.kind === 'downloading') {
+      const step = Math.floor(state.percent / 10);
+      if (step === shownPercent) return;
+      shownPercent = step;
+    } else shownPercent = -1;
+    menus();
+  });
   /** While this Mac hosts for other devices, it stays in the menu bar with no window open. */
   const showTray = () => {
     const wanted = hosting.keepRunning;
@@ -329,7 +350,28 @@ async function start() {
     await sync.adopt(open(), address, pairing);
     return info;
   });
+  /**
+   * How many parts of the page have work to save before the window may close: the editor, while
+   * it is open. Nothing else is waited for, so every other screen closes, and quits, at once.
+   */
+  let guards = 0;
+  /** While the page saves, a limit on the wait: a page that has stopped could not save anyway. */
+  let flushing: NodeJS.Timeout | undefined;
+  const settled = () => {
+    clearTimeout(flushing);
+    flushing = undefined;
+  };
+  handle('updates:state', () => updates.state);
+  handle('updates:check', () => updates.check());
+  handle('updates:download', () => updates.download());
+  handle('updates:restart', () => updates.restart());
+  handle('app:version', () => app.getVersion());
+  ipcMain.on('window:guard', (event, on: unknown) => {
+    if (event.sender !== window?.webContents) return;
+    guards = Math.max(0, guards + (on === true ? 1 : -1));
+  });
   handle('window:close-failed', async (message) => {
+    settled();
     const result = await dialog.showMessageBox(window!, {
       type: 'warning',
       message: 'Your latest changes could not be saved.',
@@ -347,11 +389,14 @@ async function start() {
     } else quitting = false;
   });
   handle('window:close-ready', () => {
+    settled();
     mayClose = true;
     window?.close();
   });
   const createWindow = () => {
     mayClose = false;
+    guards = 0;
+    settled();
     window = new BrowserWindow({
       width: 1280,
       height: 900,
@@ -376,14 +421,25 @@ async function start() {
       mayClose = true;
     });
     window.webContents.on('will-navigate', (event) => event.preventDefault());
+    // A reload starts the page afresh; whatever guarded the old one is gone.
+    window.webContents.on('did-start-loading', () => {
+      guards = 0;
+    });
     window.on('close', (event) => {
-      if (!mayClose && !window?.webContents.isLoadingMainFrame()) {
-        event.preventDefault();
-        window?.webContents.send('window:flush');
-      }
+      if (mayClose || guards === 0 || window?.webContents.isLoadingMainFrame()) return;
+      event.preventDefault();
+      if (flushing) return;
+      flushing = setTimeout(() => {
+        flushing = undefined;
+        mayClose = true;
+        // Destroyed, not closed: a page that has stopped answering would not answer that either.
+        window?.destroy();
+      }, 10_000);
+      window?.webContents.send('window:flush');
     });
     window.on('closed', () => {
       window = null;
+      settled();
     });
     const devUrl = process.env.OPSIDIAN_RENDERER_URL;
     if (devUrl) {
