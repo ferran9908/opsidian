@@ -43,6 +43,11 @@ export function Welcome({ error: initialError, onOpened, onCancel }: Props) {
   };
   const field =
     'border-input bg-card focus:border-ring mt-2 h-12 w-full rounded-lg border px-4 outline-none';
+  // Where the notebook will be, written as the path it is: the folder, then the notebook's name.
+  const folder = parent ?? fallback;
+  const leaf = joining ? 'the notebook’s name' : name.trim();
+  const location =
+    folder && leaf ? `${folder}${folder.endsWith('/') ? '' : '/'}${leaf}` : folder || leaf;
   return (
     <div className="bg-secondary flex h-full flex-col">
       <div className="drag h-14 shrink-0" />
@@ -97,9 +102,8 @@ export function Welcome({ error: initialError, onOpened, onCancel }: Props) {
           </>
         )}
         <div className="text-muted-foreground mt-4 flex items-center gap-4 text-[13px]">
-          <span className="min-w-0 flex-1 truncate" title={parent ?? fallback}>
-            {parent ?? fallback}
-            {joining ? ' / the notebook’s name' : name.trim() && ` / ${name.trim()}`}
+          <span className="min-w-0 flex-1 truncate" title={location}>
+            {location}
           </span>
           <button
             type="button"
