@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Host, listBackups, restoreBackup } from './host';
 import {
@@ -11,6 +11,7 @@ import {
   drawQr,
   invitationLink,
   isTailscale,
+  parseArgs,
   place,
   reachableAt,
   readConfig,
@@ -28,23 +29,28 @@ const me =
       ? 'npx opsidian'
       : 'opsidian';
 
-const BOOLEAN = new Set(['follow', 'f', 'delete-data', 'help', 'h', 'version', 'v']);
-const flags = new Map<string, string>();
-const words: string[] = [];
-const argv = process.argv.slice(2);
-for (let position = 0; position < argv.length; position++) {
-  const word = argv[position]!;
-  const flag = word.match(/^--?([a-z-]+)$/)?.[1];
-  if (!flag) words.push(word);
-  else if (BOOLEAN.has(flag)) flags.set(flag, '');
-  else flags.set(flag, argv[++position] ?? '');
-}
+const { flags, words } = parseArgs(process.argv.slice(2));
 
 const where = place();
 const when = (time: number) => new Date(time).toLocaleString();
 const fail = (text: string): never => {
   throw new Error(text);
 };
+/** A whole number from a flag, or the fallback; anything else is refused before it is saved. */
+const whole = (name: string, fallback: number, low: number, high: number): number => {
+  const given = flags.get(name);
+  if (given === undefined) return fallback;
+  const value = Number(given);
+  if (!Number.isInteger(value) || value < low || value > high)
+    fail(`--${name} takes a whole number from ${low} to ${high}.`);
+  return value;
+};
+/** Where backups go and how, from the flags over what was set before. */
+const backupFrom = (folder: string, before?: Config['backup']): NonNullable<Config['backup']> => ({
+  folder: resolve(folder),
+  keep: whole('keep', before?.keep ?? 14, 1, 1000),
+  hour: whole('hour', before?.hour ?? 3, 0, 23),
+});
 const HELP = `Opsidian ${VERSION}: a host for your notebooks, so every device syncs through it.
 
   ${me} host start            Run the host in the background, now and after restarts
@@ -101,10 +107,15 @@ async function withHost<T>(work: (host: Host) => T | Promise<T>): Promise<T> {
 /** The address a device is given. In Docker the host cannot see its own, so it is told. */
 async function deviceAddress(): Promise<string> {
   if (process.env.OPSIDIAN_ADDRESS) return process.env.OPSIDIAN_ADDRESS;
+  if (existsSync('/.dockerenv'))
+    fail(
+      'Inside Docker the host cannot see the address devices reach it at.\n' +
+        'Run the container with -e OPSIDIAN_ADDRESS=100.x.y.z:4810 (the server’s Tailscale address).',
+    );
   const config = await readConfig(where);
   return reachableAt({
     address: flags.get('address') ?? config?.address ?? '0.0.0.0',
-    port: Number(flags.get('port') ?? config?.port ?? DEFAULT_PORT),
+    port: whole('port', config?.port ?? DEFAULT_PORT, 1, 65535),
   });
 }
 
@@ -122,11 +133,12 @@ function backupLine(config: Config): string {
 async function start(): Promise<void> {
   const manager = needService();
   const before = await readConfig(where);
-  const port = Number(flags.get('port') ?? before?.port ?? DEFAULT_PORT);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) fail('--port takes a number.');
+  const port = whole('port', before?.port ?? DEFAULT_PORT, 1, 65535);
 
-  // An address given now is kept; one chosen before is kept while it still exists.
+  // An address given with --address is kept until another is given. One chosen here is chosen
+  // again each time, so a Mac that fell back to its home network moves to Tailscale once it has it.
   let address = flags.get('address');
+  let manual = address !== undefined || before?.manual === true;
   let note: string | undefined;
   if (address === 'all') {
     address = '0.0.0.0';
@@ -134,8 +146,14 @@ async function start(): Promise<void> {
       'The host listens on every address. It has no sign-in of its own: make sure a firewall keeps it off the open internet.';
   } else if (!address) {
     const found = addresses();
-    if (before && found.some((each) => each.ip === before.address)) address = before.address;
+    if (
+      manual &&
+      before &&
+      (before.address === '0.0.0.0' || found.some((each) => each.ip === before.address))
+    )
+      address = before.address;
     else {
+      manual = false;
       const chosen = chooseAddress(found, process.platform);
       if ('error' in chosen) return fail(chosen.error);
       address = chosen.ip;
@@ -144,18 +162,22 @@ async function start(): Promise<void> {
   }
 
   const config: Config = { ...before, port, address };
+  if (manual) config.manual = true;
+  else delete config.manual;
   const folder = flags.get('backup');
-  if (folder)
-    config.backup = {
-      folder: resolve(folder),
-      keep: Number(flags.get('keep') ?? before?.backup?.keep ?? 14),
-      hour: Number(flags.get('hour') ?? before?.backup?.hour ?? 3),
-    };
+  if (folder) config.backup = backupFrom(folder, before?.backup);
+  else if (flags.has('keep') || flags.has('hour'))
+    config.backup = backupFrom(
+      before?.backup?.folder ?? fail('--keep and --hour go with --backup FOLDER.'),
+      before?.backup,
+    );
 
   const reach = reachableAt(config);
   // Something already answering, while ours is not running, is another host: most likely the
   // Opsidian app on this Mac.
-  if (!(await manager.state()).running && (await answers(reach)))
+  const moving =
+    !(await manager.state()).running || before?.port !== port || before.address !== address;
+  if (moving && (await answers(reach)))
     fail(
       `Another Opsidian host is already using port ${port} here, perhaps the Opsidian app.\n` +
         `Turn hosting off there, or start this one with --port ${port + 1}.`,
@@ -269,11 +291,7 @@ async function backup(): Promise<void> {
   }
   let target = config?.backup;
   if (what !== 'now') {
-    target = {
-      folder: resolve(what!),
-      keep: Number(flags.get('keep') ?? target?.keep ?? 14),
-      hour: Number(flags.get('hour') ?? target?.hour ?? 3),
-    };
+    target = backupFrom(what!, target);
     // A host set up with `start` takes up the schedule; one run some other way backs up once.
     if (config) {
       await writeConfig(where, { ...config, backup: target });
@@ -289,28 +307,38 @@ async function restore(): Promise<void> {
   const config = await readConfig(where);
   const name = words.at(-1);
   const folder = words.length > 1 ? resolve(words[0]!) : config?.backup?.folder;
-  if (!name || !folder) fail(`Say which: ${me} host restore BACKUP, or restore FOLDER BACKUP`);
-  const manager = service(where);
-  const running = !('missing' in manager) && (await manager.state()).running;
-  if (running) await (manager as Service).remove();
+  if (!name || !folder)
+    return fail(`Say which: ${me} host restore BACKUP, or restore FOLDER BACKUP`);
+  const data = flags.get('data') ?? where.data;
+  const found = service(where);
+  const manager = 'missing' in found ? undefined : found;
+  const managed = (await manager?.state())?.running === true;
+  // A host this program does not manage, such as `host run` in Docker or a terminal, must be
+  // stopped by whoever started it: its data is about to be replaced underneath it.
+  const port = config?.port ?? DEFAULT_PORT;
+  const live = [`127.0.0.1:${port}`, ...(config ? [reachableAt(config)] : [])];
+  if (!managed && (await Promise.all(live.map(answers))).some(Boolean))
+    fail('The host is running. Stop it first (Ctrl+C, or docker stop), then restore.');
+  if (managed) await manager!.remove();
   try {
-    // What the host holds now is backed up first, so a restore can itself be undone.
-    if (existsSync(`${where.data}/host.sqlite`)) {
-      const keep = (config?.backup?.keep ?? 14) + 1;
-      const safety = await withHost((host) => host.backup(folder!, keep));
+    // What the host holds now is backed up first, so a restore can itself be undone. Nothing is
+    // pruned by this copy, so it can never push out the backup being restored.
+    if (existsSync(join(data, 'host.sqlite'))) {
+      const keep = (await listBackups(folder)).length + 1;
+      const safety = await withHost((host) => host.backup(folder, keep));
       console.log(`Backed up what the host held first, as ${safety.name}.`);
     }
-    await restoreBackup(flags.get('data') ?? where.data, folder!, name!);
+    await restoreBackup(data, folder, name);
     console.log('Restored. Devices catch up by themselves.');
   } finally {
-    if (running) await (manager as Service).install();
+    if (managed) await manager!.install();
   }
 }
 
 /** Runs the host in this process until it is told to stop. This is what the service runs. */
 async function runHere(): Promise<void> {
   const config = await readConfig(where);
-  const port = Number(flags.get('port') ?? config?.port ?? DEFAULT_PORT);
+  const port = whole('port', config?.port ?? DEFAULT_PORT, 1, 65535);
   const address = flags.get('address') ?? config?.address ?? '0.0.0.0';
   const data = flags.get('data') ?? where.data;
   const host = new Host({ dataDir: data });

@@ -11,7 +11,7 @@ Use Node 24 and pnpm 12.4.1, then `pnpm install`.
 - `pnpm dev:mobile`: bundle the shared editor locally and start Expo for a development build.
 - `pnpm build:mobile-editor` followed by `pnpm --filter @opsidian/mobile exec expo run:ios --device`: create/install the iOS development app with Xcode and signing configured (see [signing](../apps/mobile/README.md#signing)). Rebuild the editor bundle after editing shared editor code; restart Metro if the generated module is cached.
 
-No host, account, network service, or subscription is required to edit. The website/download flow, multi-note vault management, sync, and App Store packaging are later work.
+No host, account, network service, or subscription is required to edit. The website/download flow, multi-note vault management, sync, and TestFlight packaging are later work.
 
 > The desktop sections below describe the milestone 1 prototype. The desktop app has since moved to a real notebook folder; see [desktop-notebook.md](desktop-notebook.md). The mobile sections and the iPhone acceptance list are current.
 

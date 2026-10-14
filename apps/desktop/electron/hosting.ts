@@ -6,6 +6,7 @@ import qrcode from 'qrcode-generator';
 import type { BackupInfo, HostingInfo, Invitation } from '@opsidian/core';
 import type { SyncService, Vault } from '@opsidian/notebook';
 import { listBackups, type Host } from '../../host/src/host';
+import { invitationLink } from '../../host/src/home';
 import type { HostReply, HostRequest } from './host-worker';
 
 interface Saved {
@@ -282,7 +283,7 @@ export class Hosting {
       notebook,
     });
     const address = addresses(this.saved.port)[0]?.address ?? `127.0.0.1:${this.saved.port}`;
-    const link = `opsidian://connect?host=${encodeURIComponent(address)}&code=${encodeURIComponent(code)}`;
+    const link = invitationLink(address, code);
     const drawn = qrcode(0, 'M');
     drawn.addData(link);
     drawn.make();

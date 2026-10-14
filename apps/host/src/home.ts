@@ -23,12 +23,31 @@ export interface Config {
   port: number;
   /** The one address the host listens on, chosen when it was started. */
   address: string;
+  /** Whether the address was given with --address, rather than chosen here. */
+  manual?: boolean;
   backup?: { folder: string; keep: number; hour: number };
   /** The last scheduled backup that did not work, until one does. */
   failed?: { at: number; message: string };
 }
 
 export const DEFAULT_PORT = 4810;
+
+const BOOLEAN = new Set(['follow', 'f', 'delete-data', 'help', 'h', 'version', 'v']);
+
+/** Splits a command line into words and flags; `--port 4811` and `--port=4811` are the same. */
+export function parseArgs(argv: string[]): { flags: Map<string, string>; words: string[] } {
+  const flags = new Map<string, string>();
+  const words: string[] = [];
+  for (let position = 0; position < argv.length; position++) {
+    const word = argv[position]!;
+    const match = word.match(/^--?([a-z][a-z-]*)(?:=(.*))?$/);
+    if (!match) words.push(word);
+    else if (match[2] !== undefined) flags.set(match[1]!, match[2]);
+    else if (BOOLEAN.has(match[1]!)) flags.set(match[1]!, '');
+    else flags.set(match[1]!, argv[++position] ?? '');
+  }
+  return { flags, words };
+}
 
 export async function readConfig(where: Place): Promise<Config | undefined> {
   try {

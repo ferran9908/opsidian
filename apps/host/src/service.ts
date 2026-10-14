@@ -111,9 +111,18 @@ class Launchd implements Service {
   async install() {
     await mkdir(dirname(this.file), { recursive: true });
     await writeFile(this.file, launchdPlist(this.where));
-    // Loading it again is how launchd picks up a changed definition or a new program.
+    // Loading it again is how launchd picks up a changed definition or a new program. Unloading
+    // finishes after the command returns, and loading before then fails, so it is waited for.
     await run('launchctl', ['bootout', `${this.target}/${LABEL}`]).catch(() => {});
+    for (let tries = 0; tries < 50 && (await this.loaded()); tries++)
+      await new Promise((done) => setTimeout(done, 100));
     await run('launchctl', ['bootstrap', this.target, this.file]);
+  }
+  private async loaded() {
+    return run('launchctl', ['print', `${this.target}/${LABEL}`]).then(
+      () => true,
+      () => false,
+    );
   }
   async remove() {
     await run('launchctl', ['bootout', `${this.target}/${LABEL}`]).catch(() => {});

@@ -4,6 +4,7 @@ import {
   drawQr,
   invitationLink,
   isTailscale,
+  parseArgs,
   place,
   reachableAt,
 } from '../apps/host/src/home';
@@ -96,5 +97,29 @@ describe('an invitation in the terminal', () => {
       expect(line.startsWith('\x1b[30;47m')).toBe(true);
       expect(line.replace(/\x1b\[[\d;]*m/g, '')).toHaveLength(width);
     }
+  });
+});
+
+describe('the command line', () => {
+  it('reads --flag value and --flag=value alike, and leaves words in order', () => {
+    const { flags, words } = parseArgs([
+      'host',
+      'invite',
+      'My',
+      'Notes',
+      '--port=4811',
+      '--minutes',
+      '5',
+    ]);
+    expect(words).toEqual(['host', 'invite', 'My', 'Notes']);
+    expect(flags.get('port')).toBe('4811');
+    expect(flags.get('minutes')).toBe('5');
+  });
+
+  it('does not take the next word for a switch', () => {
+    const { flags, words } = parseArgs(['host', 'logs', '-f', 'extra', '--delete-data']);
+    expect(flags.has('f')).toBe(true);
+    expect(flags.has('delete-data')).toBe(true);
+    expect(words).toEqual(['host', 'logs', 'extra']);
   });
 });
