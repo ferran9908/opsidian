@@ -282,8 +282,20 @@ app.on('will-quit', () => {
     ],
   );
   pass('two folders with the same name became two notebooks, and each kept its own');
+
+  // Quitting while hosting must end the app, not just close its window. The window holds its
+  // close until the open note is saved, and holding it cancels the quit on its own.
+  assert.equal((await hosting()).keepRunning, true);
   finished = true;
-  app.exit(0);
+  const stuck = setTimeout(() => {
+    console.error('FAIL quitting while hosting closed the window but left the app running');
+    process.exit(1);
+  }, 15000);
+  app.on('will-quit', () => {
+    clearTimeout(stuck);
+    pass('quitting while hosting quit the app, after the window had saved');
+  });
+  app.quit();
 })().catch((error) => {
   console.error(`FAIL ${error.stack ?? error}`);
   app.exit(1);
