@@ -29,6 +29,8 @@ The Mac app is packaged with electron-builder (`apps/desktop/electron-builder.ym
 
    This builds the app, signs it, sends it to Apple for notarisation (a few minutes), and publishes `v<version>` on GitHub with both `.dmg` files, both `.zip` files and `latest-mac.yml`.
 
+   The `.dmg` files are named without the version, `Opsidian-arm64.dmg` and `Opsidian-x64.dmg`, so `https://github.com/ferran9908/opsidian/releases/latest/download/Opsidian-arm64.dmg` always downloads the newest. The `.zip` files keep the version, for the updater.
+
 3. Commit the version change.
 
 `pnpm package:mac` does the same without publishing, into `apps/desktop/release/`. Without credentials it makes an unsigned app, which runs only on the Mac that built it.

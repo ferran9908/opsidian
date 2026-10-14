@@ -28,6 +28,9 @@ mac:
   notarize: true
 dmg:
   title: Opsidian ${version}
+  # No version in the name, so github.com/…/releases/latest/download/Opsidian-arm64.dmg always
+  # gives the newest. The zip files the updater uses keep theirs.
+  artifactName: Opsidian-${arch}.${ext}
 artifactName: Opsidian-${version}-${arch}.${ext}
 publish:
   provider: github
