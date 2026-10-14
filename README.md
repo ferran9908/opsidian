@@ -44,3 +44,7 @@ Workspace dependencies should use `workspace:*`. Add dependencies when their imp
 - [Decision log and open questions](docs/decisions.md)
 
 Open acceptance gate: validate the shared editor on a real iPhone.
+
+## Licence
+
+Code is available under the [MIT License](LICENSE-MIT) or the [Apache License 2.0](LICENSE-APACHE), at your choice. Documentation and design, including the logo, are dedicated to the public domain under [CC0 1.0](LICENSE-CC0). See [LICENSE](LICENSE) for details.

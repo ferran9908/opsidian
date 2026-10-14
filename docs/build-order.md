@@ -12,7 +12,7 @@ Build a minimal Electron app and an Expo development app with the shared CodeMir
 
 Implement the Paper interface, light/dark/system themes, vault creation/opening, note/folder operations, autosave, external-edit reconciliation, search, backlinks, attachments, trash, and durable save recovery.
 
-**Exit gate:** Writer is usable as a daily Mac notebook. Saved work survives restarts and tested crashes. External edits are detected without silently replacing unsaved content. Other editors can still use the vault.
+**Exit gate:** Opsidian is usable as a daily Mac notebook. Saved work survives restarts and tested crashes. External edits are detected without silently replacing unsaved content. Other editors can still use the vault.
 
 ## 3. Make two desktop clients sync reliably
 
@@ -34,7 +34,7 @@ Package the Mac host and document/package VPS deployment. Add invitations, conne
 
 ## 6. Release
 
-Ship signed desktop builds and updates. Test iPhone builds through TestFlight and prepare the App Store release. Publish downloads and setup guidance at `ferran.sh/writer` when release work is authorized.
+Ship signed desktop builds and updates. Test iPhone builds through TestFlight. An App Store release is not planned for now. Publish downloads and setup guidance at `ferran.sh/opsidian` when release work is authorized.
 
 **Exit gate:** Someone outside the development setup can install, connect, write, sync, and update. Verify database/vault migrations preserve content and support recovery.
 

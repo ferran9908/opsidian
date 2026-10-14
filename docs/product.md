@@ -9,8 +9,8 @@ The product is not agent-first. AI assistance may be added later. Free sync mean
 ## Platforms and entry point
 
 - Desktop app first, initially macOS.
-- iPhone companion distributed through the App Store after TestFlight validation.
-- `ferran.sh/writer` is the intended download/setup entry point. A full browser notes client is not in the current plan.
+- iPhone companion distributed through TestFlight. An App Store release is not planned for now.
+- `ferran.sh/opsidian` is the intended download/setup entry point. A full browser notes client is not in the current plan.
 - A notebook can begin as a folder on the current machine or connect to a vault hosted on a VPS or Tailscale-reachable device.
 - Remote notebooks keep a local working copy; editing never depends on a live network mount.
 
