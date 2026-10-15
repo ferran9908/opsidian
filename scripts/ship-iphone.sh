@@ -31,9 +31,12 @@ if [ "$finished" -gt 0 ]; then
 fi
 
 reason=""
-if [ "$finished" -eq 0 ] && [ "$active" -eq 0 ]; then
+if [ -n "${FORCE_BUILD:-}" ] && [ "$active" -eq 0 ]; then
+  # Run by hand: build again, whatever happened to earlier builds (for example, one failed).
+  reason="asked for by hand"
+elif [ "$finished" -eq 0 ] && [ "$active" -eq 0 ]; then
   if [ "$errored" -gt 0 ]; then
-    summary "❌ The build for fingerprint \`$hash\` failed. Fix it, then run the Release workflow by hand."
+    summary "❌ The build for fingerprint \`$hash\` failed. Fix it, then run the Release workflow by hand, which builds again."
     exit 1
   fi
   reason="no build has native fingerprint $hash"
