@@ -237,7 +237,7 @@ export function UpdateSettings() {
         `${note?.text ?? 'Opsidian checks for a new version when it opens and every four hours.'}`
       );
   return (
-    <div className="border-border flex items-start justify-between gap-6 border-t pt-5">
+    <div className="border-border flex items-start justify-between gap-6 border-t py-4">
       <div className="min-w-0 flex-1 space-y-1">
         <p className="text-sm font-medium">Opsidian {version}</p>
         <div className="text-muted-foreground text-[13px] leading-5">{line}</div>

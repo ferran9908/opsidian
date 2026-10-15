@@ -8,19 +8,33 @@ import type {
   SyncInfo,
 } from '@opsidian/core';
 import type { ThemePreference } from '@opsidian/theme';
+import type { EditorMode } from '@opsidian/editor';
 import { bridge, message } from './bridge';
 import { syncLabel } from './SyncDialog';
 import { UpdateSettings } from './updates';
+import { defaultMode, setDefaultMode } from './preferences';
 import { Button } from '@/components/ui/button';
 
-export type SettingsSection = 'sync' | 'devices' | 'backups' | 'check' | 'appearance' | 'updates';
-const SECTIONS: [SettingsSection, string][] = [
-  ['sync', 'Sync'],
-  ['devices', 'Devices'],
-  ['backups', 'Backups'],
-  ['check', 'Connection check'],
-  ['appearance', 'Appearance'],
-  ['updates', 'Updates'],
+export type SettingsSection =
+  'general' | 'editor' | 'appearance' | 'sync' | 'devices' | 'backups' | 'check';
+/** The sections down the left, in Obsidian's two kinds: how the app works, and sync. */
+const GROUPS: [string, [SettingsSection, string][]][] = [
+  [
+    'Options',
+    [
+      ['general', 'General'],
+      ['editor', 'Editor'],
+      ['appearance', 'Appearance'],
+    ],
+  ],
+  [
+    'Sync',
+    [
+      ['sync', 'Sync'],
+      ['devices', 'Devices'],
+      ['backups', 'Backups'],
+    ],
+  ],
 ];
 
 const size = (bytes: number) =>
@@ -54,13 +68,15 @@ function Heading(props: {
   action?: ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-6">
-      <div className="space-y-2">
-        <div className="flex items-center gap-3">
-          {props.dot && <span className={`size-3 rounded-full ${props.dot}`} />}
-          <h2 className="text-[26px] leading-8 font-bold tracking-tight">{props.title}</h2>
-        </div>
-        {props.sub && <p className="text-muted-foreground text-[15px] leading-6">{props.sub}</p>}
+    <div className="flex items-start justify-between gap-6 pb-1">
+      <div className="space-y-1.5">
+        <h2 className="text-xl leading-7 font-bold">{props.title}</h2>
+        {props.sub && (
+          <p className="text-muted-foreground flex items-center gap-2 text-[13px] leading-5">
+            {props.dot && <span className={`size-2 shrink-0 rounded-full ${props.dot}`} />}
+            {props.sub}
+          </p>
+        )}
       </div>
       {props.action}
     </div>
@@ -71,6 +87,22 @@ const Label = ({ children }: { children: ReactNode }) => (
     {children}
   </h3>
 );
+/** One setting, as Obsidian lays it out: what it is on the left, its control on the right. */
+function Row(props: { name: ReactNode; description?: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="border-border flex items-center justify-between gap-6 border-t py-4">
+      <div className="min-w-0 flex-1 space-y-1">
+        <p className="text-sm font-medium">{props.name}</p>
+        {props.description && (
+          <div className="text-muted-foreground text-[13px] leading-5">{props.description}</div>
+        )}
+      </div>
+      {props.children}
+    </div>
+  );
+}
+const select =
+  'border-border bg-secondary h-8 shrink-0 rounded-md border px-2 text-[13px] outline-none';
 const Line = ({ children }: { children: ReactNode }) => (
   <div className="border-border flex min-h-11 items-center justify-between gap-4 border-t py-2 text-sm last:border-b">
     {children}
@@ -291,7 +323,7 @@ export function Settings(props: Props) {
     props.notebook;
   const invite = (
     <Button className="shrink-0" onClick={() => setInviting(true)}>
-      Invite a device
+      Add a device
     </Button>
   );
   const hostOnly = (what: string) => (
@@ -306,6 +338,25 @@ export function Settings(props: Props) {
     </p>
   );
 
+  const checkRow = (
+    <Row
+      name="Connection check"
+      description="Something not arriving? This finds what is in the way."
+    >
+      <Button variant="secondary" onClick={() => props.onSection('check')}>
+        Run check
+      </Button>
+    </Row>
+  );
+  const back = (
+    <button
+      className="text-muted-foreground hover:text-foreground -mt-1 text-[13px]"
+      onClick={() => props.onSection('sync')}
+    >
+      ‹ Sync
+    </button>
+  );
+
   let body: ReactNode;
   if (!hosting) body = <p className="text-muted-foreground">Loading…</p>;
   else if (section === 'sync')
@@ -313,8 +364,8 @@ export function Settings(props: Props) {
       <>
         <Heading
           dot="bg-success"
-          title="This Mac is hosting"
-          sub={`${count(hosting.devices.length, 'device')} · ${syncLabel(sync)}`}
+          title="Sync"
+          sub={`This Mac is the host · ${count(hosting.devices.length, 'device')} · ${syncLabel(sync)}`}
           action={invite}
         />
         <section>
@@ -365,26 +416,26 @@ export function Settings(props: Props) {
             </Button>
           </div>
         )}
-        <label className="flex items-center justify-between gap-6 text-sm">
-          <span>
-            Keep hosting when the window is closed
-            <span className="text-muted-foreground block text-[13px]">
-              Opsidian stays in the menu bar. Once installed, it also starts when you log in.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            role="switch"
-            className="accent-primary size-5"
-            checked={hosting.keepRunning}
-            onChange={(event) => run(() => bridge.setKeepRunning(event.target.checked))}
-          />
-        </label>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">This Mac must be awake for devices to sync.</span>
-          <button className="text-destructive" onClick={() => setConfirm({ kind: 'stop' })}>
-            Stop hosting…
-          </button>
+        <div>
+          <Row
+            name={<label htmlFor="keep-running">Keep hosting when the window is closed</label>}
+            description="Opsidian stays in the menu bar. Once installed, it also starts when you log in."
+          >
+            <input
+              id="keep-running"
+              type="checkbox"
+              role="switch"
+              className="accent-primary size-5"
+              checked={hosting.keepRunning}
+              onChange={(event) => run(() => bridge.setKeepRunning(event.target.checked))}
+            />
+          </Row>
+          {sync.connected && checkRow}
+          <Row name="Stop hosting" description="This Mac must be awake for devices to sync.">
+            <Button variant="secondary" onClick={() => setConfirm({ kind: 'stop' })}>
+              Stop hosting…
+            </Button>
+          </Row>
         </div>
       </>
     ) : sync.connected && own ? (
@@ -412,16 +463,17 @@ export function Settings(props: Props) {
           Everything the host holds is still on this Mac. Your devices pick up where they left off
           when it is turned on again.
         </p>
+        <div>{checkRow}</div>
       </>
     ) : sync.connected ? (
       <>
         <Heading
           dot={sync.state === 'synced' ? 'bg-success' : 'bg-faint'}
-          title={syncLabel(sync)}
+          title="Sync"
           sub={
             sync.message && sync.state !== 'synced'
-              ? sync.message
-              : `“${props.notebook}” syncs through a host on another machine.`
+              ? `${syncLabel(sync)}. ${sync.message}`
+              : `${syncLabel(sync)} · “${props.notebook}” syncs through a host on another machine.`
           }
         />
         <section>
@@ -438,51 +490,55 @@ export function Settings(props: Props) {
             <span>{sync.device}</span>
           </Line>
         </section>
-        <div className="flex items-center justify-between text-sm">
-          <button className="text-link" onClick={() => props.onSection('check')}>
-            Check the connection
-          </button>
-          <button className="text-destructive" onClick={() => run(() => bridge.disconnect())}>
-            Stop syncing here
-          </button>
+        <div>
+          {checkRow}
+          <Row
+            name="Stop syncing here"
+            description="Every note stays on this Mac and on the host. You can join again later."
+          >
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() => run(() => bridge.disconnect())}
+            >
+              Stop syncing
+            </Button>
+          </Row>
         </div>
       </>
     ) : (
       <>
         <Heading
+          dot="bg-faint"
           title="Sync"
-          sub={`“${props.notebook}” lives only on this Mac. To see it on your other devices, one machine has to host it.`}
+          sub={`Sync is off. “${props.notebook}” lives only on this Mac; to see it on your other devices, one machine has to host it.`}
         />
         {hosting.error && (
           <p role="alert" className="text-destructive text-sm leading-5">
             {hosting.error}
           </p>
         )}
-        <div className="border-primary flex items-center justify-between gap-6 rounded-xl border-2 px-5 py-5">
-          <div className="space-y-1.5">
-            <p className="font-semibold">Host it on this Mac</p>
-            <p className="text-muted-foreground text-sm leading-[21px]">
-              Best if this Mac stays on. Your devices sync through it, at home or over Tailscale.
-            </p>
-          </div>
-          <Button
-            className="shrink-0"
-            disabled={busy}
-            onClick={() => run(() => bridge.startHosting().then(setHosting))}
+        <div>
+          <Row
+            name="Host on this Mac"
+            description="Best if this Mac stays on. Your devices sync through it, at home or over Tailscale."
           >
-            Turn on hosting
-          </Button>
-        </div>
-        <div className="border-border flex items-center justify-between gap-6 rounded-xl border px-5 py-5">
-          <div className="space-y-1.5">
-            <p className="font-semibold">Connect to a host that already exists</p>
-            <p className="text-muted-foreground text-sm leading-[21px]">
-              Another Mac or a server is hosting. You need an invitation from it.
-            </p>
-          </div>
-          <Button variant="secondary" className="shrink-0" onClick={props.onConnect}>
-            Enter an invitation
-          </Button>
+            <Button
+              className="shrink-0"
+              disabled={busy}
+              onClick={() => run(() => bridge.startHosting().then(setHosting))}
+            >
+              Turn on hosting
+            </Button>
+          </Row>
+          <Row
+            name="Join a host"
+            description="Another Mac or a server is hosting already. You need an invitation from it."
+          >
+            <Button variant="secondary" className="shrink-0" onClick={props.onConnect}>
+              Enter an invitation
+            </Button>
+          </Row>
         </div>
         <p className="text-muted-foreground text-[13px] leading-5">
           Prefer a server that is always on? See docs/hosting.md. Your notes are never stored by
@@ -694,6 +750,7 @@ export function Settings(props: Props) {
     const failed = checks?.find((each) => each.state === 'failed');
     body = !sync.connected ? (
       <>
+        {back}
         <Heading title="Connection check" />
         <p className="text-muted-foreground text-[15px] leading-6">
           This notebook is not connected to a host, so there is nothing to check.{' '}
@@ -704,6 +761,7 @@ export function Settings(props: Props) {
       </>
     ) : (
       <>
+        {back}
         <Heading
           dot={!checks ? 'bg-faint' : failed ? 'bg-destructive' : 'bg-success'}
           title={
@@ -760,32 +818,66 @@ export function Settings(props: Props) {
         </p>
       </>
     );
-  } else if (section === 'updates')
+  } else if (section === 'general')
     body = (
       <>
-        <Heading
-          title="Updates"
-          sub="New versions come from GitHub, and install when you restart."
-        />
-        <UpdateSettings />
+        <Heading title="General" />
+        <div>
+          <UpdateSettings />
+          <Row
+            name="Help"
+            description="How Opsidian works, how to host, and what to do when sync stops."
+          >
+            <Button variant="secondary" onClick={() => void bridge.openHelp()}>
+              Open
+            </Button>
+          </Row>
+        </div>
+      </>
+    );
+  else if (section === 'editor')
+    body = (
+      <>
+        <Heading title="Editor" />
+        <div>
+          <Row
+            name={<label htmlFor="default-view">Default view for notes</label>}
+            description="How a note opens. ⌘E switches between reading and editing, and ⋯ on a note turns Source mode on and off."
+          >
+            <select
+              id="default-view"
+              className={select}
+              defaultValue={defaultMode()}
+              onChange={(event) => setDefaultMode(event.target.value as EditorMode)}
+            >
+              <option value="live">Live Preview</option>
+              <option value="source">Source mode</option>
+              <option value="reading">Reading view</option>
+            </select>
+          </Row>
+        </div>
       </>
     );
   else
     body = (
       <>
-        <Heading title="Appearance" sub="Light, dark, or whatever this Mac is set to." />
-        <div role="radiogroup" aria-label="Theme" className="flex gap-2.5">
-          {(['system', 'light', 'dark'] as const).map((each) => (
-            <Button
-              key={each}
-              role="radio"
-              aria-checked={props.theme.preference === each}
-              variant={props.theme.preference === each ? 'default' : 'secondary'}
-              onClick={() => props.theme.set(each)}
+        <Heading title="Appearance" />
+        <div>
+          <Row
+            name={<label htmlFor="theme">Theme</label>}
+            description="Light, dark, or whatever this Mac is set to."
+          >
+            <select
+              id="theme"
+              className={select}
+              value={props.theme.preference}
+              onChange={(event) => props.theme.set(event.target.value as ThemePreference)}
             >
-              {each === 'system' ? 'Match this Mac' : each === 'light' ? 'Light' : 'Dark'}
-            </Button>
-          ))}
+              <option value="system">Match this Mac</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </Row>
         </div>
       </>
     );
@@ -800,20 +892,29 @@ export function Settings(props: Props) {
         aria-label="Settings"
         className="border-border bg-background text-foreground relative flex h-[min(640px,90vh)] w-[min(960px,94vw)] overflow-hidden rounded-xl border shadow-2xl"
       >
-        <nav className="border-border bg-sidebar text-sidebar-foreground flex w-[220px] shrink-0 flex-col gap-0.5 border-r px-3 py-7 text-sm">
-          <p className="px-3 pb-3 text-xs font-semibold tracking-[0.08em]">SETTINGS</p>
-          {SECTIONS.map(([id, label]) => (
-            <button
-              key={id}
-              aria-current={section === id ? 'page' : undefined}
-              className={`rounded-md px-3 py-2 text-left ${section === id ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium' : ''}`}
-              onClick={() => props.onSection(id)}
-            >
-              {label}
-            </button>
+        <nav className="border-border bg-sidebar text-sidebar-foreground flex w-[220px] shrink-0 flex-col gap-px border-r px-2.5 py-6 text-[13.5px]">
+          {GROUPS.map(([group, sections]) => (
+            <div key={group} className="flex flex-col gap-px pb-4">
+              <p className="text-faint px-2.5 pb-1.5 text-[11.5px] font-semibold tracking-[0.06em] uppercase">
+                {group}
+              </p>
+              {sections.map(([id, label]) => {
+                const current = section === id || (id === 'sync' && section === 'check');
+                return (
+                  <button
+                    key={id}
+                    aria-current={current ? 'page' : undefined}
+                    className={`rounded-md px-2.5 py-1.5 text-left ${current ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium' : 'hover:bg-sidebar-accent/60'}`}
+                    onClick={() => props.onSection(id)}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           ))}
         </nav>
-        <div className="flex-1 space-y-5 overflow-y-auto px-12 py-10">
+        <div className="flex-1 space-y-5 overflow-y-auto px-10 py-8">
           {error && (
             <p role="alert" className="text-destructive text-sm leading-5">
               {error}

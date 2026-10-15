@@ -1,27 +1,32 @@
 import { useRef, useState, type DragEvent, type ReactNode } from 'react';
 import {
+  ArrowDownUp,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
   ChevronsUpDown,
+  CircleHelp,
   FilePlus2,
-  FileText,
-  Folder,
   FolderInput,
   FolderPlus,
   FolderSearch,
+  PanelLeft,
   Pencil,
-  Plus,
-  Search,
+  Settings,
+  SquarePen,
   Trash2,
 } from 'lucide-react';
+import { noteFolder, noteTitle, type VaultInfo, type VaultTree } from '@opsidian/core';
 import {
-  noteFolder,
-  noteTitle,
-  type SyncInfo,
-  type VaultInfo,
-  type VaultTree,
-} from '@opsidian/core';
-import { syncLabel } from './SyncDialog';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -49,16 +54,26 @@ interface Props {
   onTrash(path: string): void;
   onReveal(path: string): void;
   onShowTrash(): void;
-  sync: SyncInfo;
-  onShowSync(): void;
-  onFind(): void;
   onSwitch(): void;
+  sort: TreeSort;
+  onSort(sort: TreeSort): void;
+  onCollapseAll(): void;
+  onHide(): void;
+  onHelp(): void;
+  onSettings(): void;
 }
 
+/** How the files are ordered: folders first, then notes, by name either way round. */
+export type TreeSort = 'name' | 'name-desc';
+
 const row =
-  'group flex h-[30px] w-full items-center gap-2 rounded-md pr-2 text-left text-[13px] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground';
+  'group flex h-7 w-full items-center gap-1 rounded-[5px] pr-2 text-left text-[13.5px] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground';
+const icon =
+  'no-drag text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground flex size-7 items-center justify-center rounded-md';
+/** Each level of the tree steps in this far, and draws its guide line there. */
+const STEP = 16;
 const field =
-  'border-ring bg-background text-foreground h-[30px] min-w-0 flex-1 rounded-md border px-2 text-[13px] outline-none';
+  'border-ring bg-background text-foreground h-7 min-w-0 flex-1 rounded-md border px-2 text-[13.5px] outline-none';
 const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const isNote = (path: string) => /\.md$/i.test(path);
 
@@ -84,7 +99,13 @@ function NameField(props: { label: string; initial?: string; onDone(name?: strin
 }
 
 export function Sidebar(props: Props) {
-  const { vault, tree, active, expanded, sync } = props;
+  const { vault, tree, active, expanded, sort } = props;
+  const order = (a: string, b: string) =>
+    sort === 'name-desc'
+      ? b.localeCompare(a, undefined, { numeric: true })
+      : a.localeCompare(b, undefined, { numeric: true });
+  const named = (paths: string[], folder: string, title: (path: string) => string) =>
+    paths.filter((path) => noteFolder(path) === folder).sort((a, b) => order(title(a), title(b)));
   const [renaming, setRenaming] = useState<string | null>(null);
   // The folder a new folder is being named in; '' is the top level.
   const [creating, setCreating] = useState<string | null>(null);
@@ -153,10 +174,21 @@ export function Sidebar(props: Props) {
       }}
     />
   );
+  /** The guide lines down the left of a folder's contents, one per level, like Obsidian. */
+  const guides = (depth: number) =>
+    Array.from({ length: depth }, (_unused, level) => (
+      <span
+        key={level}
+        aria-hidden
+        className="border-sidebar-border absolute top-0 bottom-0 border-l"
+        style={{ left: 15 + level * STEP }}
+      />
+    ));
   const children = (folder: string, depth: number): ReactNode => (
     <>
       {creating === folder && (
-        <li className="flex py-px" style={{ paddingLeft: 8 + depth * 14 }}>
+        <li className="relative flex py-px" style={{ paddingLeft: 8 + depth * STEP }}>
+          {guides(depth)}
           <NameField
             label="Folder name"
             onDone={(name) => {
@@ -166,144 +198,163 @@ export function Sidebar(props: Props) {
           />
         </li>
       )}
-      {tree.folders
-        .filter((path) => noteFolder(path) === folder)
-        .map((path) => (
-          <li key={path} {...drop(path)}>
+      {named(tree.folders, folder, nameOf).map((path) => (
+        <li key={path} {...drop(path)}>
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
+              <div
+                className={cn(
+                  row,
+                  'relative',
+                  target === path && 'bg-sidebar-accent ring-ring ring-1',
+                )}
+                style={{ paddingLeft: 6 + depth * STEP }}
+                data-folder={path}
+                {...(renaming === path ? {} : drag(path))}
+              >
+                {guides(depth)}
+                {renaming === path ? (
+                  renameField(path)
+                ) : (
+                  <>
+                    <button
+                      className="flex min-w-0 flex-1 items-center gap-1 self-stretch text-left"
+                      aria-expanded={expanded.has(path)}
+                      onClick={() => props.onToggle(path)}
+                    >
+                      <span className="text-faint flex w-4 shrink-0 justify-center">
+                        {expanded.has(path) ? (
+                          <ChevronDown size={14} />
+                        ) : (
+                          <ChevronRight size={14} />
+                        )}
+                      </span>
+                      <span className="truncate">{nameOf(path)}</span>
+                    </button>
+                    <button
+                      aria-label={`New note in ${path}`}
+                      title="New note here"
+                      className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                      onClick={() => props.onNewNote(path)}
+                    >
+                      <SquarePen size={14} />
+                    </button>
+                  </>
+                )}
+              </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem onSelect={() => props.onNewNote(path)}>
+                <FilePlus2 /> New note
+              </ContextMenuItem>
+              <ContextMenuItem
+                onSelect={() => {
+                  if (!expanded.has(path)) props.onToggle(path);
+                  setCreating(path);
+                }}
+              >
+                <FolderPlus /> New folder
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              {shared(path)}
+            </ContextMenuContent>
+          </ContextMenu>
+          {expanded.has(path) && <ul>{children(path, depth + 1)}</ul>}
+        </li>
+      ))}
+      {named(tree.notes, folder, noteTitle).map((path) => (
+        <li key={path} className="relative">
+          {guides(depth)}
+          {renaming === path ? (
+            <div className="flex py-px" style={{ paddingLeft: 26 + depth * STEP }}>
+              {renameField(path)}
+            </div>
+          ) : (
             <ContextMenu>
               <ContextMenuTrigger asChild>
-                <div
-                  className={cn(row, target === path && 'bg-sidebar-accent ring-ring ring-1')}
-                  style={{ paddingLeft: 8 + depth * 14 }}
-                  data-folder={path}
-                  {...(renaming === path ? {} : drag(path))}
-                >
-                  {renaming === path ? (
-                    renameField(path)
-                  ) : (
-                    <>
-                      <button
-                        className="flex min-w-0 flex-1 items-center gap-2 self-stretch text-left"
-                        aria-expanded={expanded.has(path)}
-                        onClick={() => props.onToggle(path)}
-                      >
-                        {expanded.has(path) ? (
-                          <ChevronDown size={14} className="shrink-0" />
-                        ) : (
-                          <ChevronRight size={14} className="shrink-0" />
-                        )}
-                        <Folder size={15} className="shrink-0" />
-                        <span className="truncate">{nameOf(path)}</span>
-                      </button>
-                      <button
-                        aria-label={`New note in ${path}`}
-                        title="New note here"
-                        className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                        onClick={() => props.onNewNote(path)}
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </>
+                <button
+                  className={cn(
+                    row,
+                    path === active &&
+                      'bg-sidebar-accent text-sidebar-accent-foreground font-medium',
                   )}
-                </div>
-              </ContextMenuTrigger>
-              <ContextMenuContent>
-                <ContextMenuItem onSelect={() => props.onNewNote(path)}>
-                  <FilePlus2 /> New note
-                </ContextMenuItem>
-                <ContextMenuItem
-                  onSelect={() => {
-                    if (!expanded.has(path)) props.onToggle(path);
-                    setCreating(path);
-                  }}
+                  style={{ paddingLeft: 26 + depth * STEP }}
+                  aria-current={path === active ? 'page' : undefined}
+                  data-note={path}
+                  onClick={() => props.onOpen(path)}
+                  {...drag(path)}
                 >
-                  <FolderPlus /> New folder
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                {shared(path)}
-              </ContextMenuContent>
+                  <span className="truncate">{noteTitle(path)}</span>
+                </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent>{shared(path)}</ContextMenuContent>
             </ContextMenu>
-            {expanded.has(path) && <ul>{children(path, depth + 1)}</ul>}
-          </li>
-        ))}
-      {tree.notes
-        .filter((path) => noteFolder(path) === folder)
-        .map((path) => (
-          <li key={path}>
-            {renaming === path ? (
-              <div className="flex py-px" style={{ paddingLeft: 30 + depth * 14 }}>
-                {renameField(path)}
-              </div>
-            ) : (
-              <ContextMenu>
-                <ContextMenuTrigger asChild>
-                  <button
-                    className={cn(
-                      row,
-                      path === active && 'bg-sidebar-accent text-sidebar-accent-foreground',
-                    )}
-                    style={{ paddingLeft: 30 + depth * 14 }}
-                    aria-current={path === active ? 'page' : undefined}
-                    data-note={path}
-                    onClick={() => props.onOpen(path)}
-                    {...drag(path)}
-                  >
-                    <FileText size={15} className="shrink-0" />
-                    <span className="truncate">{noteTitle(path)}</span>
-                  </button>
-                </ContextMenuTrigger>
-                <ContextMenuContent>{shared(path)}</ContextMenuContent>
-              </ContextMenu>
-            )}
-          </li>
-        ))}
+          )}
+        </li>
+      ))}
     </>
   );
   return (
     <aside className="border-sidebar-border bg-sidebar text-sidebar-foreground flex w-[260px] shrink-0 flex-col border-r max-[980px]:w-[220px] max-[650px]:hidden">
-      <div className="drag h-12 shrink-0" />
-      <button
-        className="hover:bg-sidebar-accent mx-3 flex items-center gap-3 rounded-md px-2 py-1.5 text-left"
-        title="Switch notebook"
-        onClick={props.onSwitch}
+      <div className="drag flex h-11 shrink-0 items-center justify-end px-2.5">
+        <button
+          aria-label="Hide sidebar"
+          title="Hide sidebar"
+          className={icon}
+          onClick={props.onHide}
+        >
+          <PanelLeft size={17} />
+        </button>
+      </div>
+      <div
+        className="flex h-9 shrink-0 items-center justify-center gap-1.5"
+        aria-label="File actions"
       >
-        <span className="border-link h-8 w-7 shrink-0 rounded border border-l-4" />
-        <span className="min-w-0 flex-1">
-          <strong className="text-sidebar-accent-foreground block truncate text-[15px] font-semibold">
-            {vault.name}
-          </strong>
-          <span className="block text-xs">
-            {sync.connected ? 'Synced notebook' : 'Local notebook'}
-          </span>
-        </span>
-        <ChevronsUpDown size={14} className="shrink-0" />
-      </button>
-      <button
-        className="border-sidebar-border bg-background mx-4 mt-4 flex h-9 items-center gap-2.5 rounded-md border px-3 text-[13px]"
-        onClick={props.onFind}
-      >
-        <Search size={15} />
-        <span className="flex-1 text-left">Find a note</span>
-        <kbd className="font-sans text-xs">⌘ K</kbd>
-      </button>
-      <button
-        className="text-sidebar-accent-foreground hover:bg-sidebar-accent mx-3 mt-3 flex h-9 items-center gap-2.5 rounded-md px-3 text-[13px] font-medium"
-        onClick={() => props.onNewNote('')}
-      >
-        <Plus size={16} />
-        <span className="flex-1 text-left">New note</span>
-        <kbd className="text-sidebar-foreground font-sans text-xs font-normal">⌘ N</kbd>
-      </button>
-      <div className="mt-5 flex items-center px-5 pb-1">
-        <span className="flex-1 text-[11px] tracking-[0.09em]">NOTES</span>
-        <button aria-label="New folder" title="New folder" onClick={() => setCreating('')}>
-          <FolderPlus size={15} />
+        <button
+          aria-label="New note"
+          title="New note (⌘N)"
+          className={icon}
+          onClick={() => props.onNewNote('')}
+        >
+          <SquarePen size={17} />
+        </button>
+        <button
+          aria-label="New folder"
+          title="New folder"
+          className={icon}
+          onClick={() => setCreating('')}
+        >
+          <FolderPlus size={17} />
+        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button aria-label="Sort" title="Change sort order" className={icon}>
+              <ArrowDownUp size={17} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="center">
+            <DropdownMenuRadioGroup
+              value={sort}
+              onValueChange={(value) => props.onSort(value as TreeSort)}
+            >
+              <DropdownMenuRadioItem value="name">Name (A to Z)</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="name-desc">Name (Z to A)</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <button
+          aria-label="Collapse all"
+          title="Collapse all"
+          className={icon}
+          onClick={props.onCollapseAll}
+        >
+          <ChevronsDownUp size={17} />
         </button>
       </div>
       <nav
         aria-label="Notes"
         className={cn(
-          'min-h-0 flex-1 overflow-auto px-3 pb-3',
+          'min-h-0 flex-1 overflow-auto px-2 pt-1.5 pb-3',
           target === '' && 'bg-sidebar-accent/50',
         )}
         {...drop('')}
@@ -315,37 +366,45 @@ export function Sidebar(props: Props) {
           </p>
         )}
       </nav>
-      <div className="border-sidebar-border mx-4 border-t py-3 text-xs">
-        <button
-          className="hover:bg-sidebar-accent hover:text-sidebar-accent-foreground -mx-2 mb-2 flex h-[30px] w-[calc(100%+16px)] items-center gap-2 rounded-md px-2 text-[13px]"
-          onClick={props.onShowTrash}
-        >
-          <Trash2 size={15} /> Trash
+      <div className="border-sidebar-border flex h-12 shrink-0 items-center gap-0.5 border-t px-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label="Notebook"
+              title={vault.location}
+              className="hover:bg-sidebar-accent flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 text-left"
+            >
+              <span className="text-sidebar-accent-foreground truncate text-[13.5px] font-semibold">
+                {vault.name}
+              </span>
+              <ChevronsUpDown size={13} className="text-faint shrink-0" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" className="w-60">
+            <DropdownMenuLabel className="truncate" title={vault.location}>
+              {vault.location}
+            </DropdownMenuLabel>
+            <DropdownMenuItem onSelect={props.onSwitch}>Open another notebook…</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={props.onShowTrash}>
+              <Trash2 /> Trash
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => props.onReveal('')}>
+              <FolderSearch /> Show in Finder
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <button aria-label="Help" title="Help" className={icon} onClick={props.onHelp}>
+          <CircleHelp size={17} />
         </button>
         <button
-          aria-label="Sync"
-          title={sync.connected ? 'Sync details' : 'Set up sync'}
-          className="hover:bg-sidebar-accent text-sidebar-accent-foreground -mx-2 flex h-[30px] w-[calc(100%+16px)] items-center gap-2 rounded-md px-2 text-[13px]"
-          onClick={props.onShowSync}
+          aria-label="Settings"
+          title="Settings (⌘,)"
+          className={icon}
+          onClick={props.onSettings}
         >
-          <span
-            className={cn(
-              'size-1.5 shrink-0 rounded-full',
-              !sync.connected || sync.state === 'synced'
-                ? 'bg-success'
-                : sync.state === 'syncing'
-                  ? 'bg-link animate-pulse'
-                  : 'bg-destructive',
-            )}
-          />
-          <span role="status" className="min-w-0 flex-1 truncate text-left">
-            {syncLabel(sync)}
-          </span>
-          {!sync.connected && <span className="text-sidebar-foreground text-xs">Set up sync</span>}
+          <Settings size={17} />
         </button>
-        <p className="mt-1.5 truncate" title={vault.location}>
-          {vault.location}
-        </p>
       </div>
     </aside>
   );

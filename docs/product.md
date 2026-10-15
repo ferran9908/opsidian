@@ -34,7 +34,7 @@ On iPhone, bundle the editor locally inside a WebView hosted by a native app. Pr
 
 ## Main desktop experience
 
-A compact sidebar contains the notebook switcher, search, New Note, and the folder/note list. The editor gets most of the window. Backlinks appear beneath the note. Local saving and host sync have separate statuses.
+The layout follows Obsidian's. The sidebar is the file tree, with four small buttons above it (new note, new folder, sort, collapse all) and, at its foot, the notebook's name (switch notebooks, trash, show in Finder), help and Settings. The editor gets the rest of the window: back and forward, where the note is, reading view and a ⋯ menu for the note. There is no formatting toolbar; formatting is by shortcut, Markdown and the text's right-click menu. Backlinks appear beneath the note. A status bar in the bottom corner holds the word count and sync; saving speaks up only when it fails.
 
 Current design proposals include one notebook open at a time, Command-K quick search, Command-N new note, and immediate writing without a creation dialog. Whether a note's first line becomes its filename/title remains to be specified; changes must not accidentally trigger repeated renames.
 

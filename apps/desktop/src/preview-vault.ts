@@ -151,6 +151,12 @@ export const previewVault: VaultBridge = {
   downloadUpdate: async () => {},
   restartToUpdate: async () => {},
   appVersion: async () => 'preview',
+  openHelp: async () => {
+    window.open('https://github.com/ferran9908/opsidian#readme', '_blank');
+  },
+  clipboard: async (action) => {
+    document.execCommand(action);
+  },
   onUpdate: () => () => {},
   onUpdateCheckRequested: () => () => {},
 };

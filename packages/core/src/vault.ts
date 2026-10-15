@@ -196,6 +196,10 @@ export interface VaultBridge {
   downloadUpdate(): Promise<void>;
   restartToUpdate(): Promise<void>;
   appVersion(): Promise<string>;
+  /** Opens the guide to Opsidian in the browser. */
+  openHelp(): Promise<void>;
+  /** Cut, copy or paste where the cursor is, as the Edit menu would. */
+  clipboard(action: 'cut' | 'copy' | 'paste'): Promise<void>;
   onUpdate(callback: (update: AppUpdate) => void): () => void;
   /** The app menu's Check for Updates…, asking the window to check where it can be seen. */
   onUpdateCheckRequested(callback: () => void): () => void;

@@ -37,6 +37,15 @@ const text = (name) => (existsSync(note(name)) ? readFileSync(note(name), 'utf8'
   const title = () => evaluate('document.querySelector(\'[aria-label="Note title"]\')?.value');
   const click = (label) =>
     evaluate(`document.querySelector('[aria-label=${JSON.stringify(label)}]').click()`);
+  // Radix menus open on pointer down, as a mouse press does; a bare click() does not.
+  const pick = async (trigger, item) => {
+    await evaluate(
+      `document.querySelector('[aria-label=${JSON.stringify(trigger)}]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))`,
+    );
+    const find = `[...document.querySelectorAll('[role^="menuitem"]')].find((entry) => entry.textContent.trim().startsWith(${JSON.stringify(item)}))`;
+    await waitFor(() => evaluate(`Boolean(${find})`), `${item} in the menu`);
+    await evaluate(`${find}.click()`);
+  };
   const key = (keyCode, modifiers = []) => {
     web.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
     web.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
@@ -142,9 +151,7 @@ const text = (name) => (existsSync(note(name)) ? readFileSync(note(name), 'utf8'
   await waitFor(() => text('Weekend plans') === 'Walk by the water.', 'first save');
 
   // Link completion offers real notes; links navigate and show up as backlinks.
-  await evaluate(
-    "[...document.querySelectorAll('aside button')].find((b) => b.textContent.includes('New note')).click()",
-  );
+  await click('New note');
   await waitFor(() => existsSync(note('Untitled')), 'second note');
   await name('Sunday');
   for (const keyCode of '[[Week') {
@@ -210,7 +217,22 @@ const text = (name) => (existsSync(note(name)) ? readFileSync(note(name), 'utf8'
   );
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [imagePath] });
   await replace('Picture\n\n');
-  await click('Attach image');
+  // Formatting and attaching live in the text's right-click menu, as in Obsidian.
+  await evaluate(`(() => {
+    const content = document.querySelector('.cm-content');
+    const { left, top } = content.getBoundingClientRect();
+    content.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: left + 10, clientY: top + 10 }));
+  })()`);
+  await waitFor(
+    () =>
+      evaluate(
+        `[...document.querySelectorAll('[role="menuitem"]')].some((entry) => entry.textContent.trim() === 'Attach image')`,
+      ),
+    'the right-click menu',
+  );
+  await evaluate(
+    `[...document.querySelectorAll('[role="menuitem"]')].find((entry) => entry.textContent.trim() === 'Attach image').click()`,
+  );
   await waitFor(() => text('Sunday').includes('](attachments/'), 'image link');
   await blur();
   await waitFor(
@@ -246,9 +268,7 @@ const text = (name) => (existsSync(note(name)) ? readFileSync(note(name), 'utf8'
   await waitFor(() => present('.op-task'), 'task box');
   await evaluate("document.querySelector('.op-task').click()");
   await waitFor(() => text('Sunday').includes('- [x]'), 'task toggle');
-  await evaluate(
-    "Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Source').click()",
-  );
+  await pick('More options', 'Source mode');
   await waitFor(async () => !(await present('.op-task')), 'source mode');
   assert.match(
     await evaluate("document.querySelector('.cm-content').textContent"),
@@ -300,9 +320,7 @@ const text = (name) => (existsSync(note(name)) ? readFileSync(note(name), 'utf8'
   console.log('PASS external edit reload, conflicting edit preserved');
 
   // Lists, quotes and embeds are drawn; renaming a note rewrites the links to it.
-  await evaluate(
-    "Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Live Preview').click()",
-  );
+  await pick('More options', 'Source mode');
   await replace(
     'See [[Weekend plans]] and ![[Weekend plans]].\n\n- one\n- two\n\n> quoted\n\n![[pasted IMAGE.png]]',
   );
@@ -428,18 +446,16 @@ const text = (name) => (existsSync(note(name)) ? readFileSync(note(name), 'utf8'
   console.log('PASS typing during a rename, preview survives odd input');
 
   await openFromSidebar('Brand new');
-  await click('Move note to trash');
+  await pick('More options', 'Move to trash');
   await waitFor(() => existsSync(join(vault, '.trash', 'Brand new.md')), 'trash');
   assert.equal(existsSync(note('Brand new')), false);
-  await evaluate(
-    "[...document.querySelectorAll('aside button')].find((b) => b.textContent.trim() === 'Trash').click()",
-  );
+  await pick('Notebook', 'Trash');
   await waitFor(() => present('[aria-label="Restore Brand new"]'), 'trash list');
   await click('Restore Brand new');
   await waitFor(() => existsSync(note('Brand new')), 'restored note');
   await waitFor(async () => (await title()) === 'Brand new', 'restored note opens');
   await click('Close');
-  await click('Move note to trash');
+  await pick('More options', 'Move to trash');
   await waitFor(() => !existsSync(note('Brand new')), 'trash again');
   await openFromSidebar('Sunday');
   await replace('# Close flush\n\nLast keystroke survives.');

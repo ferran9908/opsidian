@@ -3,16 +3,15 @@ import type React from 'react';
 import {
   ArrowUpRight,
   Bold,
-  Check,
+  Clipboard,
+  Copy,
   Heading2,
   ImagePlus,
   Italic,
   Link2,
   List,
   ListTodo,
-  Redo2,
-  RotateCcw,
-  Undo2,
+  Scissors,
 } from 'lucide-react';
 import {
   createEditor,
@@ -32,19 +31,25 @@ import {
   type SaveStatus,
 } from '@opsidian/core';
 import { bridge, message } from './bridge';
+import type { NoteStatus } from './StatusBar';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 
-const commands = [
-  ['undo', Undo2, 'Undo'],
-  ['redo', Redo2, 'Redo'],
-  ['heading', Heading2, 'Heading'],
-  ['bold', Bold, 'Bold'],
-  ['italic', Italic, 'Italic'],
-  ['bullet', List, 'Bullet list'],
-  ['task', ListTodo, 'Checklist'],
-  ['link', Link2, 'Link a note'],
+/** What right-clicking the text offers, in Obsidian's place for formatting. */
+const formatting = [
+  ['bold', Bold, 'Bold', '⌘B'],
+  ['italic', Italic, 'Italic', '⌘I'],
+  ['heading', Heading2, 'Heading', ''],
+  ['bullet', List, 'Bullet list', ''],
+  ['task', ListTodo, 'Checklist', ''],
 ] as const;
-const tool =
-  'text-muted-foreground hover:bg-accent hover:text-accent-foreground flex size-[30px] items-center justify-center rounded-md disabled:opacity-40';
+const shortcut = (keys: string) =>
+  keys ? <span className="text-muted-foreground ml-auto pl-6 text-xs">{keys}</span> : null;
 const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
 
 export interface NoteEditorHandle {
@@ -82,6 +87,8 @@ interface Props {
   /** Called after this editor added a file to the notebook. */
   onChanged(): void;
   onNotice(text: string): void;
+  /** Word count and saving, for the status bar. */
+  onStatus(status: NoteStatus): void;
 }
 
 export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEditor(props, ref) {
@@ -270,6 +277,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
     // One editor per mounted note: the parent remounts this component to open another.
   }, []);
 
+  useEffect(() => props.onStatus({ words, save: status }), [words, status]);
   useEffect(() => setTitle(noteTitle(path)), [path]);
   useEffect(() => editor.current?.setMode(mode), [mode]);
   useEffect(() => {
@@ -320,40 +328,16 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
     })().catch((reason) => props.onNotice(message(reason)));
   }
   const command = (name: EditorCommand) => editor.current?.command(name);
+  const reading = mode === 'reading';
+  /** The Edit menu's own cut, copy and paste, with the text focused so they act on it. */
+  const clip = (action: 'cut' | 'copy' | 'paste') => {
+    editor.current?.view.focus();
+    void bridge.clipboard(action).catch((reason) => props.onNotice(message(reason)));
+  };
 
   return (
     <>
-      <div
-        className="flex min-h-[44px] shrink-0 items-center gap-1 px-7"
-        role="toolbar"
-        aria-label="Formatting"
-      >
-        {commands.map(([name, Icon, label]) => (
-          <button
-            key={name}
-            disabled={!loaded}
-            aria-label={label}
-            title={label}
-            className={tool}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => command(name)}
-          >
-            <Icon size={17} />
-          </button>
-        ))}
-        <span className="bg-border mx-1.5 h-[18px] w-px" />
-        <button
-          disabled={!loaded}
-          aria-label="Attach image"
-          title="Attach image"
-          className={tool}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => void attach()}
-        >
-          <ImagePlus size={17} />
-        </button>
-      </div>
-      <div className="flex-1 overflow-auto px-[max(32px,calc((100%-700px)/2))] pt-6 max-[650px]:px-6">
+      <div className="flex-1 overflow-auto px-[max(32px,calc((100%-700px)/2))] pt-10 pb-12 max-[650px]:px-6">
         {error ? (
           <p role="alert" className="text-destructive text-sm">
             {error}
@@ -363,6 +347,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
             ref={titleField}
             value={title}
             aria-label="Note title"
+            readOnly={reading}
             spellCheck={false}
             className="mb-[0.5em] w-full bg-transparent text-[25.888px] leading-[1.2] font-bold tracking-[-0.015em] outline-none"
             onChange={(event) => setTitle(event.target.value)}
@@ -379,7 +364,41 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
             }}
           />
         )}
-        <div ref={root} onPasteCapture={receive} onDropCapture={receive} />
+        <ContextMenu modal={false}>
+          <ContextMenuTrigger asChild disabled={reading || !loaded}>
+            <div ref={root} onPasteCapture={receive} onDropCapture={receive} />
+          </ContextMenuTrigger>
+          <ContextMenuContent
+            className="w-56"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              editor.current?.view.focus();
+            }}
+          >
+            <ContextMenuItem onSelect={() => clip('cut')}>
+              <Scissors /> Cut {shortcut('⌘X')}
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => clip('copy')}>
+              <Copy /> Copy {shortcut('⌘C')}
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => clip('paste')}>
+              <Clipboard /> Paste {shortcut('⌘V')}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            {formatting.map(([name, Icon, label, keys]) => (
+              <ContextMenuItem key={name} onSelect={() => command(name)}>
+                <Icon /> {label} {shortcut(keys)}
+              </ContextMenuItem>
+            ))}
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => command('link')}>
+              <Link2 /> Link a note {shortcut('[[')}
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => void attach()}>
+              <ImagePlus /> Attach image
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         {loaded && backlinks.length > 0 && (
           <section className="border-border mb-16 border-t pt-6" aria-label="Linked from">
             <h2 className="text-muted-foreground text-xs tracking-[0.04em]">
@@ -406,35 +425,6 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
           </section>
         )}
       </div>
-      <footer className="border-border text-muted-foreground flex min-h-[38px] shrink-0 items-center justify-between gap-6 border-t px-8 text-xs">
-        <div role="status" className="flex min-w-0 items-center gap-2">
-          {status.state === 'error' ? (
-            <>
-              <span className="text-destructive truncate">{status.message}</span>
-              <button
-                className="hover:text-foreground flex shrink-0 items-center gap-1"
-                onClick={() => void saves.current?.flush().catch(() => {})}
-              >
-                <RotateCcw size={13} /> Retry save
-              </button>
-            </>
-          ) : (
-            <>
-              <Check size={14} />
-              {!loaded
-                ? 'Opening…'
-                : status.state === 'saving'
-                  ? 'Saving…'
-                  : window.opsidian
-                    ? 'Saved on this Mac'
-                    : 'Saved in browser preview'}
-            </>
-          )}
-        </div>
-        <span className="whitespace-nowrap">
-          {words} {words === 1 ? 'word' : 'words'} · Markdown
-        </span>
-      </footer>
     </>
   );
 });
