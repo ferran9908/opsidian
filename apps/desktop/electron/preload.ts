@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('opsidian', {
   saveImage: call('note:image-data'),
   backlinks: call('note:backlinks'),
   search: call('vault:search'),
+  tags: call('vault:tags'),
   importImage: call('note:image'),
   imageUrl: (path: string) =>
     `opsidian://vault/${path.split('/').map(encodeURIComponent).join('/')}`,

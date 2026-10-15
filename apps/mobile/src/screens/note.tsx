@@ -183,6 +183,7 @@ export function Note(props: { path: string; heading?: string }) {
       refresh(result.rewritten);
       return result.path;
     },
+    tags: async () => vault.tags(),
     async createNote(folder, name) {
       const made = await vault.createNote(text(folder), text(name, 200));
       refresh();

@@ -233,6 +233,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
             return heading ? headingSection(content, heading) : content;
           },
           embedStamp: () => latest.current.version,
+          tagSuggestions: () => bridge.tags(),
           onChange: (content) => {
             saves.current?.update(content);
             clearTimeout(counting);

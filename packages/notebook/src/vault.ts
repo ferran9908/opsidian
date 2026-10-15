@@ -235,6 +235,10 @@ export class Vault {
   search(query: string): SearchResult[] {
     return this.index.search(query);
   }
+  /** Every tag in the notebook, with how many notes carry it, for suggestions. */
+  tags(): { name: string; count: number }[] {
+    return this.index.tags();
+  }
 
   /** When each note last changed on this device, in milliseconds. */
   modified(): Map<string, number> {

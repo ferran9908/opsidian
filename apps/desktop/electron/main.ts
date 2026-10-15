@@ -277,6 +277,7 @@ async function start() {
   });
   handle('note:backlinks', (path) => open().backlinks(text(path)));
   handle('vault:search', (query) => open().search(text(query, 200)));
+  handle('vault:tags', () => open().tags());
   handle('note:reveal', async (path) => shell.showItemInFolder(await open().file(text(path))));
   handle('note:image', async () => {
     const result = await dialog.showOpenDialog(window!, {

@@ -312,3 +312,424 @@
     font-size: 16px;
   }
 }
+
+/* Properties: the YAML at the top of a note, drawn as rows of name and value. */
+.op-properties {
+  position: relative;
+  margin: 0 0 22px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--border);
+  font:
+    14px/20px -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  cursor: default;
+}
+.op-properties button,
+.op-properties input {
+  font: inherit;
+  color: inherit;
+}
+.op-prop-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted-foreground) !important;
+  font-size: 12px !important;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.op-prop-chevron {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.15s;
+}
+.op-properties-folded .op-prop-chevron {
+  transform: rotate(-90deg);
+}
+.op-properties-folded .op-prop-rows {
+  display: none;
+}
+.op-properties-folded {
+  padding-bottom: 6px;
+}
+.op-prop,
+.op-prop-adder {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+}
+.op-prop-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 160px;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+.op-prop-key {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.op-prop-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.op-prop-value {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 0;
+}
+.op-prop-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  margin-left: -6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  outline: none;
+}
+.op-prop-input::placeholder {
+  color: var(--faint);
+}
+.op-prop-input:hover {
+  background: var(--accent);
+}
+.op-prop-input:focus {
+  border-color: var(--ring);
+  background: var(--background);
+}
+.op-prop-check {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--ring);
+}
+.op-prop-date {
+  padding: 3px 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+.op-prop-date:hover,
+.op-prop-date[aria-expanded='true'] {
+  background: var(--accent);
+}
+.op-prop-empty,
+.op-prop-raw {
+  color: var(--faint) !important;
+}
+.op-prop-raw {
+  white-space: pre-wrap;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+}
+.op-prop-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  opacity: 0;
+}
+.op-prop:hover .op-prop-remove,
+.op-prop:focus-within .op-prop-remove {
+  opacity: 1;
+}
+.op-prop-remove:hover {
+  background: var(--accent);
+}
+.op-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.op-chip-tag {
+  border: 0;
+  border-radius: 12px;
+  background: rgb(138 92 245 / 0.12);
+  color: var(--link);
+}
+.op-chip-remove {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-right: -3px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: rgb(138 92 245 / 0.18);
+  cursor: pointer;
+}
+.op-chip-remove .op-prop-icon {
+  width: 10px;
+  height: 10px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+.op-chip:hover .op-chip-remove {
+  display: inline-flex;
+}
+.op-chip-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px dashed var(--faint);
+  border-radius: 12px;
+  background: none;
+  cursor: pointer;
+  opacity: 0;
+}
+.op-chip-add .op-prop-icon {
+  width: 12px;
+  height: 12px;
+}
+.op-prop:hover .op-chip-add,
+.op-chip-add:focus,
+.op-prop-value:not(:has(.op-chip)) .op-chip-add {
+  opacity: 1;
+}
+.op-chip-field {
+  border: 1.5px solid var(--ring);
+  background: var(--background);
+}
+.op-chip-input {
+  width: 110px;
+  padding: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  color: inherit;
+  font-size: 13px !important;
+}
+.op-tag-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 2px);
+  left: 0;
+  width: 248px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--popover);
+  box-shadow: 0 10px 30px #0000001f;
+}
+.op-tag-option {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: pre;
+}
+.op-tag-option[aria-selected='true'] {
+  background: rgb(138 92 245 / 0.1);
+}
+.op-tag-count {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.op-tag-new {
+  color: var(--muted-foreground);
+}
+.op-tag-new .op-tag-name {
+  color: var(--link);
+}
+.op-tag-divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+.op-prop-add {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint) !important;
+  cursor: pointer;
+}
+.op-prop-add:hover {
+  color: var(--muted-foreground) !important;
+}
+.op-prop-new {
+  flex: 0 1 220px;
+  margin-left: 22px;
+}
+.op-prop-note {
+  margin-left: 10px;
+  color: var(--destructive);
+  font-size: 13px;
+}
+
+/* The date picker, beside the value. */
+.op-picker-layer {
+  position: absolute;
+  z-index: 30;
+  top: 100%;
+  left: 154px;
+}
+.op-picker {
+  width: 276px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--popover);
+  box-shadow: 0 12px 34px #0000001f;
+}
+.op-picker-month {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 8px;
+}
+.op-picker-title {
+  font-weight: 600;
+}
+.op-picker-nav {
+  display: flex;
+  gap: 6px;
+}
+.op-picker-step {
+  display: flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+.op-picker-step:hover {
+  background: var(--accent);
+}
+.op-picker-step svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--muted-foreground);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.op-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  row-gap: 2px;
+}
+.op-picker-weekday {
+  padding: 6px 0;
+  text-align: center;
+  color: var(--faint);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.op-picker-day {
+  justify-self: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: none;
+  font-size: 13px !important;
+  cursor: pointer;
+}
+.op-picker-day:hover {
+  background: var(--accent);
+}
+.op-picker-outside {
+  color: var(--faint) !important;
+}
+.op-picker-today {
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+.op-picker-chosen,
+.op-picker-chosen:hover {
+  background: var(--ring);
+  color: #fff !important;
+  font-weight: 600;
+}
+.op-picker-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.op-picker-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.op-picker-link,
+.op-picker-quiet {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 13px !important;
+  cursor: pointer;
+}
+.op-picker-link {
+  color: var(--link) !important;
+}
+.op-picker-quiet {
+  color: var(--muted-foreground) !important;
+}
+.op-picker-time {
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  font-size: 13px !important;
+}

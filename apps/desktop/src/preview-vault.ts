@@ -112,6 +112,7 @@ export const previewVault: VaultBridge = {
   },
   backlinks: async (path) => index.backlinks(path),
   search: async (query) => index.search(query),
+  tags: async () => index.tags(),
   importImage: async () => null,
   imageUrl: () => undefined,
   reveal: async () => {},

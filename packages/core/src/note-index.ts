@@ -7,6 +7,7 @@ import {
   retargetLinks,
   type WikiLink,
 } from './links';
+import { noteTags } from './frontmatter';
 
 export interface Backlink {
   path: string;
@@ -31,13 +32,21 @@ function excerptAround(content: string, from: number, to: number): string {
 
 /** Rebuildable in-memory index of a vault's notes: link graph and text search. */
 export class NoteIndex {
-  private readonly notes = new Map<string, { content: string; lower: string; links: WikiLink[] }>();
+  private readonly notes = new Map<
+    string,
+    { content: string; lower: string; links: WikiLink[]; tags: string[] }
+  >();
   /** Rebuilt lazily whenever the set of note paths changes. */
   private resolver: ((target: string) => string | undefined) | undefined;
 
   set(path: string, content: string): void {
     if (!this.notes.has(path)) this.resolver = undefined;
-    this.notes.set(path, { content, lower: content.toLowerCase(), links: parseLinks(content) });
+    this.notes.set(path, {
+      content,
+      lower: content.toLowerCase(),
+      links: parseLinks(content),
+      tags: noteTags(content),
+    });
   }
   delete(path: string): void {
     if (this.notes.delete(path)) this.resolver = undefined;
@@ -54,6 +63,15 @@ export class NoteIndex {
   }
   content(path: string): string | undefined {
     return this.notes.get(path)?.content;
+  }
+  /** Every tag in the notebook, with how many notes carry it, most used first. */
+  tags(): { name: string; count: number }[] {
+    const counts = new Map<string, number>();
+    for (const note of this.notes.values())
+      for (const tag of note.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    return [...counts]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }
   paths(): string[] {
     return [...this.notes.keys()].sort((a, b) => a.localeCompare(b));
