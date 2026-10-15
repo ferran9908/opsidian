@@ -172,4 +172,6 @@ jobs:
         if: steps.expo.outputs.ready == 'true'
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          # A run started by hand always builds, so a failed build can be tried again.
+          FORCE_BUILD: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
         run: scripts/ship-iphone.sh

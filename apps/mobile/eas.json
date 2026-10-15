@@ -6,7 +6,7 @@
   },
   "build": {
     "production": {
-      "corepack": true,
+      "pnpm": "12.4.1",
       "node": "24.18.1",
       "channel": "production",
       "environment": "production",
