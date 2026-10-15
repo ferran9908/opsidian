@@ -99,8 +99,12 @@ async function keepAside(copy: string, holds: string) {
     if ('revision' in result) saved = typed;
   }
 }
+/** Settles when a rename of this note has finished; saves wait for it, to land on the new name. */
+let moving: Promise<void> = Promise.resolve();
+
 /** Saves one snapshot. A string result is what the file holds instead. */
 async function write(content: string): Promise<void | string> {
+  await moving;
   const path = target;
   // Trashed while this edit was waiting: there is no note left to write it to.
   if (path === null) return;
@@ -156,7 +160,7 @@ function show(opening: Opening) {
   revision = opening.revision;
   notes = opening.notes;
   resolve = linkResolver(notes);
-  element('title').textContent = noteTitle(opening.path);
+  title.textContent = noteTitle(opening.path);
   element('loading').hidden = true;
   element('editor').textContent = '';
   saves = new SaveQueue(opening.content, write, report);
@@ -200,7 +204,57 @@ function show(opening: Opening) {
   else element('page').scrollTop = 0;
   report({ state: 'saved' });
   words();
+  // A new, empty note opens on its name, ready to be typed over, as on the Mac.
+  if (!opening.content && /^Untitled( \d+)?$/.test(noteTitle(opening.path))) selectTitle();
 }
+
+/**
+ * The title is the note's name, edited in place. Return or leaving it renames the note; an
+ * empty or unchanged name puts the old one back. The rename itself is the app's, so links to
+ * the note are rewritten and the change syncs, as from the note's menu.
+ */
+const title = element('title');
+function selectTitle() {
+  title.focus();
+  const range = document.createRange();
+  range.selectNodeContents(title);
+  const selection = getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+async function rename() {
+  const from = target;
+  if (from === null) return;
+  const name = (title.textContent ?? '').replace(/\s+/g, ' ').trim();
+  if (!name || name === noteTitle(from)) {
+    title.textContent = noteTitle(from);
+    return;
+  }
+  // What was typed is saved under the old name first; saves begun after this wait for the new.
+  await saves?.flush().catch(() => {});
+  let done = () => {};
+  moving = new Promise((settle) => (done = settle));
+  try {
+    const next = await call<string>('rename', from, name);
+    if (target === from) target = next;
+    title.textContent = noteTitle(next);
+  } catch (reason) {
+    title.textContent = noteTitle(from);
+    tell('notice', { text: reason instanceof Error ? reason.message : String(reason) });
+  } finally {
+    done();
+  }
+}
+title.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  title.blur();
+});
+title.addEventListener('focus', () => tell('editing', { value: true }));
+title.addEventListener('blur', () => {
+  tell('editing', { value: false });
+  void rename();
+});
 function setEditing(value: boolean) {
   element('bar').hidden = !value;
   tell('editing', { value });
@@ -232,12 +286,12 @@ window.OpsidianHost = {
       } else if (message.event === 'changed') void reload(message.path).catch(() => {});
       else if (message.event === 'moved') {
         target = message.path;
-        if (message.path) element('title').textContent = noteTitle(message.path);
+        if (message.path) title.textContent = noteTitle(message.path);
       } else if (message.event === 'mode') editor?.setMode(message.mode);
       else if (message.event === 'insert') {
         editor?.insert(message.text);
         void saves?.flush().catch(() => {});
-      } else if (message.event === 'blur') editor?.view.contentDOM.blur();
+      } else if (message.event === 'blur') (document.activeElement as HTMLElement | null)?.blur();
       else if (message.event === 'flush') {
         const done = (error?: string) => post({ session, answer: message.ask, error });
         (saves?.flush() ?? Promise.resolve()).then(

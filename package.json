@@ -27,6 +27,7 @@
     "build:host": "pnpm --filter opsidian build",
     "test:sync": "pnpm build:desktop && pnpm build:host && node scripts/test-sync.mjs",
     "ios": "pnpm build:mobile-editor && pnpm --filter @opsidian/mobile exec expo run:ios --device --configuration Release",
+    "test:mobile-editor": "pnpm build:mobile-editor && node scripts/test-mobile-editor.mjs",
     "test:hosting": "pnpm build:desktop && node scripts/test-hosting.mjs",
     "icons": "pnpm --filter @opsidian/desktop exec electron ../../scripts/render-icons.cjs"
   },

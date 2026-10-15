@@ -172,6 +172,16 @@ export function Note(props: { path: string; heading?: string }) {
       if ('conflict' in result) refresh();
       return result;
     },
+    /** The title, edited in place: the same rename as the note's menu, links and sync included. */
+    async rename(from, name) {
+      const result = await vault.rename(text(from), text(name, 200));
+      refresh(result.rewritten);
+      if (path.current === from) {
+        path.current = result.path;
+        navigation.replace({ name: 'note', path: result.path });
+      }
+      return result.path;
+    },
     async createNote(folder, name) {
       const made = await vault.createNote(text(folder), text(name, 200));
       refresh();
