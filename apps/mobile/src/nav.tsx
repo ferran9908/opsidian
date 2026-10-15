@@ -3,11 +3,10 @@ import type { NoteVersion, SyncInfo } from '@opsidian/core';
 import type { Colors } from './ui';
 
 export type Route =
-  | { name: 'home' }
-  | { name: 'folder'; path: string }
-  | { name: 'all' }
-  | { name: 'note'; path: string; heading?: string }
+  /** The notes themselves: the open note, the files drawer, and the bar at the bottom. */
+  | { name: 'notes' }
   | { name: 'search' }
+  | { name: 'settings' }
   | { name: 'trash' }
   | { name: 'sync' }
   | { name: 'connect' }
@@ -22,12 +21,26 @@ export interface Navigation {
   replace(route: Route): void;
   /** What the back button should say. */
   back: string;
+  /** Opens a note, as a step back and forward can return to, over whatever else is showing. */
+  openNote(path: string, heading?: string): void;
+  /** The open note was renamed or moved: the same note, somewhere else. */
+  replaceNote(path: string): void;
+  /** The open note is gone: shows the one before it, if any. */
+  dropNote(): void;
+  /** Goes back (-1) or forward (1) through the notes opened. */
+  step(by: -1 | 1): void;
+  canStep(by: -1 | 1): boolean;
 }
 export const NavigationContext = createContext<Navigation>({
   push() {},
   pop() {},
   replace() {},
   back: '‹ Back',
+  openNote() {},
+  replaceNote() {},
+  dropNote() {},
+  step() {},
+  canStep: () => false,
 });
 export const useNavigation = () => useContext(NavigationContext);
 
@@ -52,9 +65,9 @@ export function parseInvitation(link: string): { host: string; code: string } | 
 
 /** The one-line summary of sync shown under the notebook's name. */
 export function syncLine(info: SyncInfo, colors: Colors): { color: string; text: string } {
-  if (!info.connected) return { color: colors.faint, text: 'Only on this iPhone · Connect' };
+  if (!info.connected) return { color: colors.faint, text: 'Sync is off' };
   if (info.held) return { color: '#d98a00', text: 'Sync is waiting for you' };
-  if (info.state === 'synced') return { color: colors.success, text: 'In step with the host' };
+  if (info.state === 'synced') return { color: colors.success, text: 'Synced' };
   if (info.state === 'offline') {
     const waiting = info.waiting
       ? ` · ${info.waiting} ${info.waiting === 1 ? 'change' : 'changes'} waiting`

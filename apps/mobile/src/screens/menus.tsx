@@ -131,6 +131,8 @@ export function ItemMenu(props: {
   before?: () => Promise<void>;
   /** Where the item went: its new path, or null once trashed. */
   onMoved?: (path: string | null) => void;
+  /** Called as Version history opens over everything else. */
+  onHistory?: () => void;
   /** Extra rows shown above the destructive one. */
   children?: React.ReactNode;
 }) {
@@ -179,10 +181,14 @@ export function ItemMenu(props: {
               <Row
                 title="Version history"
                 chevron
-                onPress={() => {
-                  props.onClose();
-                  navigation.push({ name: 'history', path });
-                }}
+                onPress={() =>
+                  void ready().then((saved) => {
+                    if (!saved) return;
+                    props.onClose();
+                    props.onHistory?.();
+                    navigation.push({ name: 'history', path });
+                  })
+                }
               />
             ) : null}
             {note ? (

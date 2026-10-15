@@ -158,6 +158,15 @@ app.whenReady().then(async () => {
     await open('Untitled 3.md', 'already written\n');
     assert.equal(await run(`document.activeElement === document.getElementById('title')`), false);
     pass('a new, empty Untitled note opens with its name selected; a written one does not');
+
+    await open('Read me.md', 'Just reading.\n');
+    await run(`window.OpsidianHost.receive({ event: 'mode', mode: 'reading' })`);
+    assert.equal(await run(`document.getElementById('title').isContentEditable`), false);
+    assert.equal(await run(`document.querySelector('.cm-content').isContentEditable`), false);
+    await run(`window.OpsidianHost.receive({ event: 'mode', mode: 'live' })`);
+    assert.equal(await run(`document.getElementById('title').isContentEditable`), true);
+    assert.equal(await run(`document.querySelector('.cm-content').isContentEditable`), true);
+    pass('reading view locks the name and the text, and editing unlocks both');
     app.exit(0);
   } catch (error) {
     console.error(`FAIL ${error.stack ?? error}`);

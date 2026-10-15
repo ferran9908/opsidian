@@ -24,7 +24,8 @@ import { headingOffset } from '@opsidian/core';
 import { createSearchPanel } from './search-panel';
 import { livePreview, isCodeAt, type PreviewOptions } from './live-preview';
 
-export type EditorMode = 'live' | 'source';
+/** Live Preview and Source edit the note; Reading shows it as it reads, with no editing. */
+export type EditorMode = 'live' | 'source' | 'reading';
 export type EditorCommand =
   'bold' | 'italic' | 'heading' | 'bullet' | 'task' | 'link' | 'undo' | 'redo';
 export interface EditorOptions extends PreviewOptions {
@@ -77,6 +78,12 @@ export function createEditor(options: EditorOptions) {
   const suggestions = () =>
     typeof options.suggestions === 'function' ? options.suggestions() : options.suggestions;
   let currentMode = options.mode ?? 'live';
+  const modeExtensions = (value: EditorMode) =>
+    value === 'source'
+      ? []
+      : value === 'reading'
+        ? [livePreview(preview), EditorView.editable.of(false), EditorState.readOnly.of(true)]
+        : livePreview(preview);
   const source = (context: CompletionContext) => {
     const match = context.matchBefore(/\[\[[^\]\n]*/);
     if (!match || isCodeAt(view, match.from)) return null;
@@ -153,7 +160,7 @@ export function createEditor(options: EditorOptions) {
           )
             options.onChange(update.state.doc.toString());
         }),
-        mode.of(options.mode === 'source' ? [] : livePreview(preview)),
+        mode.of(modeExtensions(currentMode)),
       ],
     }),
   });
@@ -206,12 +213,12 @@ export function createEditor(options: EditorOptions) {
     command,
     setMode(value: EditorMode) {
       currentMode = value;
-      view.dispatch({ effects: mode.reconfigure(value === 'live' ? livePreview(preview) : []) });
+      view.dispatch({ effects: mode.reconfigure(modeExtensions(value)) });
     },
     /** Redraws previews after images or the set of existing notes changed. */
     refresh() {
-      if (currentMode === 'live')
-        view.dispatch({ effects: mode.reconfigure(livePreview(preview)) });
+      if (currentMode !== 'source')
+        view.dispatch({ effects: mode.reconfigure(modeExtensions(currentMode)) });
     },
     /**
      * Replaces the text with a version loaded from elsewhere. Only the part that differs is
