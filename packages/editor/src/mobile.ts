@@ -198,6 +198,7 @@ function show(opening: Opening) {
     onSave: () => void saves?.flush().catch(() => {}),
   });
   editor = made;
+  lockTitle(opening.mode);
   made.view.contentDOM.addEventListener('focus', () => setEditing(true));
   made.view.contentDOM.addEventListener('blur', () => setEditing(false));
   if (opening.heading) made.scrollToHeading(opening.heading);
@@ -279,6 +280,11 @@ title.addEventListener('blur', () => {
   tell('editing', { value: false });
   void renameNow(true);
 });
+/** In reading view the name cannot be edited either, as on the Mac. */
+function lockTitle(mode: EditorMode) {
+  if (mode === 'reading' && document.activeElement === title) title.blur();
+  title.contentEditable = mode === 'reading' ? 'false' : 'plaintext-only';
+}
 function setEditing(value: boolean) {
   element('bar').hidden = !value;
   tell('editing', { value });
@@ -311,8 +317,10 @@ window.OpsidianHost = {
       else if (message.event === 'moved') {
         target = message.path;
         if (message.path) title.textContent = noteTitle(message.path);
-      } else if (message.event === 'mode') editor?.setMode(message.mode);
-      else if (message.event === 'insert') {
+      } else if (message.event === 'mode') {
+        editor?.setMode(message.mode);
+        lockTitle(message.mode);
+      } else if (message.event === 'insert') {
         editor?.insert(message.text);
         void saves?.flush().catch(() => {});
       } else if (message.event === 'blur') (document.activeElement as HTMLElement | null)?.blur();
