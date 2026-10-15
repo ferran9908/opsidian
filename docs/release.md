@@ -57,6 +57,26 @@ Updating requires the new version to be signed by the same team as the installed
 
 The window waits, before closing, only for what has said it has work to save: the editor, while it is open. Every other screen closes at once. A page that has stopped answering gets ten seconds. `pnpm test:desktop` quits from the welcome screen, the editor with unsaved typing, Settings, and a stopped page, and requires the app to end each time.
 
+## iPhone
+
+Builds are made by EAS (Expo's build service) and sent to TestFlight; changes that touch only JavaScript reach installed apps over the air. The `iphone` job in `.github/workflows/release.yml` runs `scripts/ship-iphone.sh` after every push that changes the app (`apps/mobile`, the shared packages, the editor's page):
+
+- The **fingerprint** is a hash of the app's native side (`runtimeVersion: { policy: 'fingerprint' }` in `app.config.ts`).
+- If a finished TestFlight build has the same fingerprint, the change is **sent over the air** (`eas update`, channel `production`). Apps pick it up the next time they open.
+- If none has it, the native side changed: a **new build** is made and submitted to TestFlight (`eas build --auto-submit`). Build numbers are kept by EAS and count up by themselves. While that build runs, over-the-air updates wait for the next push.
+- Raising `version` in `app.config.ts` also makes a new build.
+
+The job runs on Linux, as T3 Code's does, because the fingerprint must be worked out the same way as on EAS. Without an `EXPO_TOKEN` secret it is skipped with a note.
+
+### Once
+
+1. **An Expo account,** and on this Mac: `npx eas-cli login`. Then `cd apps/mobile && npx eas-cli init` makes the EAS project; put its id in `projectId` in `app.config.ts`.
+2. **The app in App Store Connect:** Apps → + → New App, iOS, named Opsidian Notes (the store name; "Opsidian" was taken, and the name under the icon stays Opsidian), bundle ID `sh.ferran.opsidian.app` (`sh.ferran.opsidian` belongs to another team; register it under Certificates, IDs & Profiles → Identifiers first if it is not offered), any SKU. Put its Apple ID (the number under App Information) in `eas.json` as `submit.production.ios.ascAppId`.
+3. **Signing, held by EAS:** `cd apps/mobile && npx eas-cli credentials -p ios`, profile `production`. Sign in with Apple and let EAS make the distribution certificate and provisioning profile. Under App Store Connect API Key, add the same key the Mac app notarises with, so EAS can submit builds.
+4. **A token for CI:** expo.dev → Account settings → Access tokens → Create, then `gh secret set EXPO_TOKEN -R ferran9908/opsidian` and paste it.
+
+The next push that changes the app then makes the first TestFlight build. In App Store Connect → TestFlight, add yourself to an internal group to get every build at once; a public link for others needs Apple's beta review of the first build of each version.
+
 ## The app's own data
 
 Settings, hosting data and device credentials are in `~/Library/Application Support/Opsidian`, for an installed copy and for `pnpm dev:desktop` alike. Notebooks are wherever their folders are.

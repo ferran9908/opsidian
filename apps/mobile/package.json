@@ -8,7 +8,8 @@
   "scripts": {
     "start": "expo start --dev-client",
     "ios": "expo run:ios",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "eas-build-post-install": "cd ../.. && node scripts/build-mobile-editor.mjs"
   },
   "dependencies": {
     "@noble/hashes": "^2.4.0",
@@ -27,6 +28,7 @@
     "expo-network": "~57.0.2",
     "expo-secure-store": "~57.0.4",
     "expo-status-bar": "~57.0.1",
+    "expo-updates": "~57.0.26",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",

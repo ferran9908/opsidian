@@ -42,6 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       mac: ${{ steps.filter.outputs.mac }}
+      iphone: ${{ steps.filter.outputs.iphone }}
     steps:
       - uses: actions/checkout@v5
       - id: filter
@@ -53,6 +54,13 @@ jobs:
               - 'apps/host/src/**'
               - 'packages/**'
               - 'design/logo/**'
+              - 'pnpm-lock.yaml'
+              - '.github/workflows/release.yml'
+            iphone:
+              - 'apps/mobile/**'
+              - 'packages/**'
+              - 'scripts/build-mobile-editor.mjs'
+              - 'scripts/ship-iphone.sh'
               - 'pnpm-lock.yaml'
               - '.github/workflows/release.yml'
 
@@ -127,3 +135,41 @@ jobs:
       - name: Clean up the key
         if: always()
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+  iphone:
+    name: iPhone app
+    needs: [check, changes]
+    # A manual run always ships; a push only when something the app is built from changed.
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.iphone == 'true'
+    # Linux, as T3 Code does: the fingerprint must be worked out the same way as on EAS.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Expo token is set
+        id: expo
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        # Until EAS is set up, the iPhone app is skipped with a note instead of failing every run.
+        run: |
+          if [ -n "$EXPO_TOKEN" ]; then echo "ready=true" >> "$GITHUB_OUTPUT"; else
+            echo "::warning::No EXPO_TOKEN secret, so the iPhone app was not shipped. See docs/release.md, iPhone."
+          fi
+      - if: steps.expo.outputs.ready == 'true'
+        uses: actions/checkout@v5
+      - if: steps.expo.outputs.ready == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.expo.outputs.ready == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - if: steps.expo.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile
+      # The editor's offline page is generated, not committed; an over-the-air update carries it.
+      - if: steps.expo.outputs.ready == 'true'
+        run: pnpm build:mobile-editor
+      - name: Send over the air, or build for TestFlight
+        if: steps.expo.outputs.ready == 'true'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: scripts/ship-iphone.sh
