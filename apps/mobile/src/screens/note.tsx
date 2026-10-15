@@ -175,11 +175,12 @@ export function Note(props: { path: string; heading?: string }) {
     /** The title, edited in place: the same rename as the note's menu, links and sync included. */
     async rename(from, name) {
       const result = await vault.rename(text(from), text(name, 200));
-      refresh(result.rewritten);
+      // The new path first, so the lists never look for the note where it no longer is.
       if (path.current === from) {
         path.current = result.path;
         navigation.replace({ name: 'note', path: result.path });
       }
+      refresh(result.rewritten);
       return result.path;
     },
     async createNote(folder, name) {

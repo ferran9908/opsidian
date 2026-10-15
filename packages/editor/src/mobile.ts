@@ -209,11 +209,15 @@ function show(opening: Opening) {
 }
 
 /**
- * The title is the note's name, edited in place. Return or leaving it renames the note; an
- * empty or unchanged name puts the old one back. The rename itself is the app's, so links to
- * the note are rewritten and the change syncs, as from the note's menu.
+ * The title is the note's name, edited in place and saved as it is typed, like the note itself:
+ * a moment after typing stops, the note is renamed. The rename is the app's, so links to the note
+ * are rewritten and the change syncs, as from the note's menu. While typing, a name that cannot
+ * be used yet (empty, taken, or with a slash) is left alone; on leaving the title it is refused
+ * with a notice and the note keeps its name.
  */
 const title = element('title');
+/** How long after the last keystroke the note is renamed. */
+const RENAME_AFTER = 800;
 function selectTitle() {
   title.focus();
   const range = document.createRange();
@@ -222,12 +226,18 @@ function selectTitle() {
   selection?.removeAllRanges();
   selection?.addRange(range);
 }
-async function rename() {
+const typedName = () => (title.textContent ?? '').replace(/\s+/g, ' ').trim();
+/** Shows the note's name, unless it is being typed, so the cursor is never moved under a finger. */
+function showName(path: string) {
+  if (document.activeElement !== title) title.textContent = noteTitle(path);
+}
+/** Renames the note to what the title says. `final` is leaving the title: the last word on it. */
+async function rename(final: boolean) {
   const from = target;
   if (from === null) return;
-  const name = (title.textContent ?? '').replace(/\s+/g, ' ').trim();
+  const name = typedName();
   if (!name || name === noteTitle(from)) {
-    title.textContent = noteTitle(from);
+    if (final) title.textContent = noteTitle(from);
     return;
   }
   // What was typed is saved under the old name first; saves begun after this wait for the new.
@@ -237,14 +247,28 @@ async function rename() {
   try {
     const next = await call<string>('rename', from, name);
     if (target === from) target = next;
-    title.textContent = noteTitle(next);
+    showName(next);
   } catch (reason) {
-    title.textContent = noteTitle(from);
-    tell('notice', { text: reason instanceof Error ? reason.message : String(reason) });
+    if (final) {
+      title.textContent = noteTitle(target ?? from);
+      tell('notice', { text: reason instanceof Error ? reason.message : String(reason) });
+    }
   } finally {
     done();
   }
 }
+/** One rename at a time, in order: a later one starts from where the one before left the note. */
+let renaming: Promise<void> = Promise.resolve();
+let pause: ReturnType<typeof setTimeout> | undefined;
+const renameNow = (final: boolean) => {
+  clearTimeout(pause);
+  renaming = renaming.then(() => rename(final));
+  return renaming;
+};
+title.addEventListener('input', () => {
+  clearTimeout(pause);
+  pause = setTimeout(() => void renameNow(false), RENAME_AFTER);
+});
 title.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter') return;
   event.preventDefault();
@@ -253,7 +277,7 @@ title.addEventListener('keydown', (event) => {
 title.addEventListener('focus', () => tell('editing', { value: true }));
 title.addEventListener('blur', () => {
   tell('editing', { value: false });
-  void rename();
+  void renameNow(true);
 });
 function setEditing(value: boolean) {
   element('bar').hidden = !value;
@@ -323,7 +347,9 @@ element('attach').onclick = () => {
 };
 element('dismiss-keyboard').onclick = () => editor?.view.contentDOM.blur();
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) void saves?.flush().catch(() => {});
+  if (!document.hidden) return;
+  void saves?.flush().catch(() => {});
+  if (document.activeElement === title) void renameNow(false);
 });
 window.addEventListener('pagehide', () => void saves?.flush().catch(() => {}));
 tell('ready');
