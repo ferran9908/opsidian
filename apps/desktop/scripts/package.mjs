@@ -80,7 +80,6 @@ if (!signed) {
 
 await build({
   publish: publish ? 'always' : 'never',
-  config: signed ? undefined : { mac: { notarize: false } },
 });
 
 // Only now, with every file uploaded, does the release become public and the newest.

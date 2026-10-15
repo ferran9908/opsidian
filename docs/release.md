@@ -29,6 +29,8 @@ The version is `<major>.<minor>.<run number>`: `<major>.<minor>` comes from `app
 
 Releases run one at a time, in push order, and a running one is never cancelled.
 
+Notarising is done by `apps/desktop/packaging/notarize.cjs`, after signing: it submits the app to Apple and waits, then staples Apple's ticket to it. Stapling reaches Apple's ticket service, which sometimes drops the connection, so it is tried six times over about five minutes. If it still fails the release goes ahead with a warning: the app is notarised either way, and macOS checks with Apple online the first time it is opened. A failed notarisation stops the release.
+
 ### Secrets
 
 CI signs with five GitHub Actions secrets: `CSC_LINK` and `CSC_KEY_PASSWORD` (the Developer ID certificate as a `.p12`, and its password), and `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` (the notarisation key). After the setup above, run once from the repository root:
