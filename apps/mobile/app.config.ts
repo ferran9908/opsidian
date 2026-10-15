@@ -2,11 +2,18 @@ import type { ExpoConfig } from 'expo/config';
 
 // Signing is per developer: set these in apps/mobile/.env.local (see .env.example).
 const appleTeamId = process.env.APPLE_TEAM_ID;
-const bundleIdentifier = process.env.IOS_BUNDLE_IDENTIFIER || 'sh.ferran.opsidian';
+const bundleIdentifier = process.env.IOS_BUNDLE_IDENTIFIER || 'sh.ferran.opsidian.app';
+/**
+ * The EAS project that builds the app for TestFlight and serves its over-the-air updates. Set
+ * by `eas init`; until then the app is built without updates. See docs/release.md.
+ */
+const projectId: string | undefined = '42735d88-872d-44b2-84fa-8f4e030bce66';
 
 const config: ExpoConfig = {
   name: 'Opsidian',
   slug: 'opsidian',
+  // The Expo account the EAS project belongs to.
+  owner: 'ferran9908',
   version: '0.1.0',
   scheme: 'opsidian',
   orientation: 'default',
@@ -27,6 +34,15 @@ const config: ExpoConfig = {
       ITSAppUsesNonExemptEncryption: false,
     },
   },
+  // An update made over the air only reaches builds with the same native code: the fingerprint
+  // is a hash of it, and a change to native code needs a new build through TestFlight instead.
+  runtimeVersion: { policy: 'fingerprint' },
+  ...(projectId
+    ? {
+        updates: { url: `https://u.expo.dev/${projectId}` },
+        extra: { eas: { projectId } },
+      }
+    : {}),
   plugins: [
     'expo-document-picker',
     'expo-secure-store',
