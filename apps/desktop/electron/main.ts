@@ -277,7 +277,11 @@ async function start() {
   });
   handle('note:backlinks', (path) => open().backlinks(text(path)));
   handle('vault:search', (query) => open().search(text(query, 200)));
-  handle('note:reveal', async (path) => shell.showItemInFolder(await open().file(text(path))));
+  // The empty path is the notebook itself, opened as a Finder window.
+  handle('note:reveal', async (path) => {
+    if (text(path) === '') return void (await shell.openPath(open().root));
+    shell.showItemInFolder(await open().file(text(path)));
+  });
   handle('note:image', async () => {
     const result = await dialog.showOpenDialog(window!, {
       properties: ['openFile'],
@@ -366,6 +370,12 @@ async function start() {
   handle('updates:download', () => updates.download());
   handle('updates:restart', () => updates.restart());
   handle('app:version', () => app.getVersion());
+  handle('app:help', () => shell.openExternal('https://github.com/ferran9908/opsidian#readme'));
+  handle('edit:clipboard', (action) => {
+    if (action === 'cut') window?.webContents.cut();
+    else if (action === 'copy') window?.webContents.copy();
+    else if (action === 'paste') window?.webContents.paste();
+  });
   ipcMain.on('window:guard', (event, on: unknown) => {
     if (event.sender !== window?.webContents) return;
     guards = Math.max(0, guards + (on === true ? 1 : -1));

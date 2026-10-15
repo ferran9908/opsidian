@@ -47,6 +47,15 @@ const signalled = (name) =>
   };
   const click = (label) =>
     evaluate(`document.querySelector('[aria-label=${JSON.stringify(label)}]').click()`);
+  // Radix menus open on pointer down, as a mouse press does; a bare click() does not.
+  const pick = async (trigger, item) => {
+    await evaluate(
+      `document.querySelector('[aria-label=${JSON.stringify(trigger)}]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))`,
+    );
+    const find = `[...document.querySelectorAll('[role^="menuitem"]')].find((entry) => entry.textContent.trim().startsWith(${JSON.stringify(item)}))`;
+    await waitFor(() => evaluate(`Boolean(${find})`), `${item} in the menu`);
+    await evaluate(`${find}.click()`);
+  };
   const button = (text) =>
     evaluate(
       `[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === ${JSON.stringify(text)}).click()`,
@@ -56,7 +65,8 @@ const signalled = (name) =>
     await waitFor(() => evaluate(`document.activeElement?.id === ${JSON.stringify(id)}`), id);
     await web.insertText(value);
   };
-  const status = () => evaluate('document.querySelector(\'aside [role="status"]\')?.textContent');
+  const status = () =>
+    evaluate('document.querySelector(\'[aria-label="Sync status"]\')?.textContent');
   const sidebarHas = (name) =>
     evaluate(
       `[...document.querySelectorAll('nav [data-note]')].some((row) => row.textContent.trim() === ${JSON.stringify(name)})`,
@@ -99,7 +109,7 @@ const signalled = (name) =>
     () => evaluate("document.body.textContent.includes('No note is open')"),
     'empty state',
   );
-  assert.equal(await status(), 'On this Mac');
+  assert.equal(await status(), 'Sync is off');
   key('N', ['meta']);
   await waitFor(() => existsSync(join(vault, 'Untitled.md')), 'new note');
   await waitFor(
@@ -117,12 +127,43 @@ const signalled = (name) =>
   await waitFor(() => readFileSync(note, 'utf8') === original, 'first save');
 
   // Connect the local notebook to the host with an invitation.
-  await click('Sync');
+  // Sync is off, so the status bar leads to Settings, and from there to the invitation.
+  await click('Sync status');
+  await waitFor(
+    () => evaluate("document.body.textContent.includes('Enter an invitation')"),
+    'the sync settings',
+  );
+  await button('Enter an invitation');
+  await waitFor(() => evaluate("Boolean(document.getElementById('sync-host'))"), 'the join form');
   await fill('sync-host', host);
   await fill('sync-code', code);
   await button('Connect');
   await waitFor(async () => (await status()) === 'Synced', 'first sync');
-  await click('Close');
+  // Joined, the form closes itself.
+  await waitFor(
+    async () => !(await evaluate("Boolean(document.getElementById('sync-host'))")),
+    'the join form to close',
+  );
+  // The status bar's Synced opens the details, and Escape puts them away.
+  await click('Sync status');
+  await waitFor(
+    () =>
+      evaluate(
+        "document.querySelector('[data-slot=\"popover-content\"]')?.textContent.includes('Sync settings…')",
+      ),
+    'the sync details',
+  );
+  assert.ok(
+    await evaluate(
+      `document.querySelector('[data-slot="popover-content"]').textContent.includes(${JSON.stringify(host.replace(/^https?:\/\//, ''))})`,
+    ),
+  );
+  key('Escape');
+  await waitFor(
+    async () =>
+      !(await evaluate('Boolean(document.querySelector(\'[data-slot="popover-content"]\'))')),
+    'the sync details to close',
+  );
   signal('connected');
   console.log('PASS connected a local notebook to the host with an invitation');
 
@@ -167,7 +208,7 @@ const signalled = (name) =>
   console.log('PASS simultaneous edits to one note were combined, with no extra copy');
 
   // History lists who changed what, and an old version can be brought back.
-  await click('Version history');
+  await pick('More options', 'Version history');
   await waitFor(
     () =>
       evaluate(
@@ -200,7 +241,7 @@ const signalled = (name) =>
   const web = BrowserWindow.getAllWindows()[0]?.webContents;
   const seen = await web
     ?.executeJavaScript(
-      "[document.querySelector('aside [role=\"status\"]')?.textContent, document.querySelector('[role=\"dialog\"]')?.textContent, document.querySelector('[role=\"alert\"]')?.textContent].join(' | ')",
+      "[document.querySelector('[aria-label=\"Sync status\"]')?.textContent, document.querySelector('[role=\"dialog\"]')?.textContent, document.querySelector('[role=\"alert\"]')?.textContent].join(' | ')",
     )
     .catch(() => '');
   console.error(`On screen: ${seen}`);

@@ -52,9 +52,10 @@ app.on('will-quit', () => {
     'the notebook',
   );
   await click('Settings');
-  await waitFor(() => shows('Host it on this Mac'), 'the sync settings');
+  await button('Sync');
+  await waitFor(() => shows('Host on this Mac'), 'the sync settings');
   await button('Turn on hosting');
-  await waitFor(() => shows('This Mac is hosting'), 'hosting to start');
+  await waitFor(() => shows('This Mac is the host'), 'hosting to start');
   await waitFor(
     async () => (await hosting()).notebooks[0]?.files === 1,
     'the notebook on the host',
@@ -77,10 +78,11 @@ app.on('will-quit', () => {
     'the notebook again',
   );
   await click('Settings');
-  await waitFor(() => shows('This Mac is hosting'), 'hosting still on');
+  await button('Sync');
+  await waitFor(() => shows('This Mac is the host'), 'hosting still on');
   pass('hosting carries on with the window closed, and the window comes back');
 
-  await button('Invite a device');
+  await button('Add a device');
   await waitFor(
     () => evaluate("Boolean(document.getElementById('invite-code')?.textContent)"),
     'an invitation',
@@ -170,7 +172,8 @@ app.on('will-quit', () => {
   assert.equal((await whoami(paired.token)).status, 200);
   pass('backed up, restored, and this Mac sent back what it wrote since');
 
-  await button('Connection check');
+  await button('Sync');
+  await button('Run check');
   await waitFor(() => shows('Everything is connected'), 'a good connection check').catch(
     async (error) => {
       console.error(await evaluate("document.querySelector('[role=dialog]').innerText"));
@@ -202,7 +205,7 @@ app.on('will-quit', () => {
   await waitFor(() => shows('Stop hosting on this Mac?'), 'the stop question');
   await button('Stop hosting');
   await waitFor(async () => !(await hosting()).hosting, 'hosting to stop');
-  await button('Connection check');
+  await button('Run check');
   await waitFor(() => shows('This Mac cannot sync right now'), 'a failed connection check', 400);
   assert.deepEqual(
     await evaluate(
@@ -214,7 +217,7 @@ app.on('will-quit', () => {
   await button('Sync');
   await waitFor(() => shows('Hosting is off'), 'the way back to hosting');
   await button('Turn on hosting');
-  await waitFor(() => shows('This Mac is hosting'), 'hosting to start again');
+  await waitFor(() => shows('This Mac is the host'), 'hosting to start again');
   assert.equal((await hosting()).devices.filter((device) => device.self).length, 1);
   assert.equal((await hosting()).notebooks[0].files, 2);
   pass('hosting turns back on with everything it held, and no second copy of this Mac');

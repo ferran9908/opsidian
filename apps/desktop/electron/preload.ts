@@ -73,6 +73,8 @@ contextBridge.exposeInMainWorld('opsidian', {
   downloadUpdate: call('updates:download'),
   restartToUpdate: call('updates:restart'),
   appVersion: call('app:version'),
+  openHelp: call('app:help'),
+  clipboard: call('edit:clipboard'),
   onUpdate: subscribe('updates:state'),
   onUpdateCheckRequested: subscribe('updates:check-requested'),
   closeFailed: call('window:close-failed'),

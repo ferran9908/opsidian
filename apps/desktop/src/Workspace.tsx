@@ -2,15 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  BookOpen,
+  Check,
+  Code,
+  Ellipsis,
+  FolderInput,
   FolderSearch,
   History,
-  Monitor,
-  Moon,
   PanelLeft,
-  Sun,
+  Pencil,
   Trash2,
   X,
-  Settings as SettingsIcon,
 } from 'lucide-react';
 import type { EditorMode } from '@opsidian/editor';
 import {
@@ -31,7 +33,16 @@ import { TrashDialog } from './TrashDialog';
 import { SyncDialog } from './SyncDialog';
 import { Settings, type SettingsSection } from './Settings';
 import { HistoryDialog } from './HistoryDialog';
-import { Sidebar } from './Sidebar';
+import { Sidebar, type TreeSort } from './Sidebar';
+import { StatusBar, type NoteStatus } from './StatusBar';
+import { defaultMode } from './preferences';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -39,8 +50,6 @@ interface Props {
   theme: ReturnType<typeof useTheme>;
   onSwitch(): void;
 }
-const icon =
-  'no-drag text-muted-foreground hover:bg-accent hover:text-accent-foreground flex size-8 items-center justify-center rounded-md disabled:opacity-40 disabled:hover:bg-transparent';
 
 export function Workspace({ vault, theme, onSwitch }: Props) {
   const storageKey = `opsidian-session:${vault.location}`;
@@ -57,7 +66,14 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
   const [syncOpen, setSyncOpen] = useState(false);
   const [settings, setSettings] = useState<SettingsSection>();
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [mode, setMode] = useState<EditorMode>('live');
+  const [mode, setMode] = useState<EditorMode>(defaultMode);
+  // What editing mode to go back to when leaving reading view.
+  const editing = useRef<EditorMode>(defaultMode() === 'reading' ? 'live' : defaultMode());
+  const [sort, setSort] = useState<TreeSort>(() =>
+    localStorage.getItem('opsidian.tree.sort') === 'name-desc' ? 'name-desc' : 'name',
+  );
+  const [noteStatus, setNoteStatus] = useState<NoteStatus>();
+  const renaming = useRef(false);
   const [notice, setNotice] = useState('');
   const [version, setVersion] = useState(0);
   const editor = useRef<NoteEditorHandle>(null);
@@ -192,7 +208,10 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
         setFinding(true);
       } else if (key === ',') {
         event.preventDefault();
-        setSettings((open) => open ?? 'sync');
+        setSettings((open) => open ?? 'general');
+      } else if (key === 'e' && open) {
+        event.preventDefault();
+        toggleReading();
       }
     };
     window.addEventListener('keydown', keys);
@@ -270,8 +289,15 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
     }
   }
 
+  function toggleReading() {
+    if (mode === 'reading') return setMode(editing.current);
+    editing.current = mode;
+    setMode('reading');
+  }
+  const icon =
+    'no-drag text-muted-foreground hover:bg-accent hover:text-accent-foreground flex size-7 items-center justify-center rounded-md disabled:opacity-40 disabled:hover:bg-transparent';
+
   if (!tree) return null;
-  const ThemeIcon = theme.preference === 'system' ? Monitor : theme.dark ? Moon : Sun;
   return (
     <div className="flex h-full">
       {sidebar && (
@@ -301,30 +327,38 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
           onTrash={(path) => void trash(path)}
           onReveal={(path) => void bridge.reveal(path).catch(fail)}
           onShowTrash={() => setTrashOpen(true)}
-          sync={sync}
-          onShowSync={() => setSyncOpen(true)}
-          onFind={() => setFinding(true)}
           onSwitch={onSwitch}
+          sort={sort}
+          onSort={(next) => {
+            setSort(next);
+            localStorage.setItem('opsidian.tree.sort', next);
+          }}
+          onCollapseAll={() => setExpanded(new Set())}
+          onHide={() => setSidebar(false)}
+          onHelp={() => void bridge.openHelp().catch(fail)}
+          onSettings={() => setSettings('general')}
         />
       )}
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="relative flex min-w-0 flex-1 flex-col">
         <header
           className={cn(
-            'drag border-border flex h-12 shrink-0 items-center gap-1 border-b pr-4',
-            sidebar ? 'pl-3' : 'pl-[84px]',
+            'drag flex h-11 shrink-0 items-center gap-0.5 pr-2.5',
+            sidebar ? 'pl-2.5' : 'pl-[84px]',
           )}
         >
-          <button
-            aria-label="Toggle sidebar"
-            title="Toggle sidebar"
-            className={icon}
-            onClick={() => setSidebar(!sidebar)}
-          >
-            <PanelLeft size={17} />
-          </button>
+          {!sidebar && (
+            <button
+              aria-label="Show sidebar"
+              title="Show sidebar"
+              className={icon}
+              onClick={() => setSidebar(true)}
+            >
+              <PanelLeft size={17} />
+            </button>
+          )}
           <button
             aria-label="Back"
-            title="Back"
+            title="Back (⌥⌘←)"
             className={icon}
             disabled={trail.at <= 0}
             onClick={() => step(-1)}
@@ -333,89 +367,97 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
           </button>
           <button
             aria-label="Forward"
-            title="Forward"
+            title="Forward (⌥⌘→)"
             className={icon}
             disabled={trail.at >= trail.paths.length - 1}
             onClick={() => step(1)}
           >
             <ArrowRight size={17} />
           </button>
-          <div className="text-muted-foreground min-w-0 flex-1 truncate px-3 text-[13px]">
-            {open &&
-              [...(noteFolder(open.path) ? noteFolder(open.path).split('/') : [vault.name])].map(
-                (part, position) => (
-                  <span key={position}>
-                    {part}
-                    <span className="text-faint px-2">/</span>
-                  </span>
-                ),
-              )}
-            {open && <span className="text-foreground">{noteTitle(open.path)}</span>}
+          <div
+            aria-label="Where this note is"
+            className="text-muted-foreground flex min-w-0 flex-1 justify-center truncate px-3 text-[13.5px]"
+          >
+            {open && (
+              <span className="truncate">
+                {noteFolder(open.path) &&
+                  noteFolder(open.path)
+                    .split('/')
+                    .map((part, position) => (
+                      <span key={position}>
+                        {part}
+                        <span className="text-faint px-1.5">/</span>
+                      </span>
+                    ))}
+                <span className="text-foreground">{noteTitle(open.path)}</span>
+              </span>
+            )}
           </div>
           {open && (
             <>
-              <div
-                className="no-drag border-border flex shrink-0 rounded-md border p-0.5"
-                aria-label="Editing mode"
+              <button
+                aria-label={mode === 'reading' ? 'Edit' : 'Reading view'}
+                title={mode === 'reading' ? 'Edit (⌘E)' : 'Reading view (⌘E)'}
+                className={icon}
+                onClick={toggleReading}
               >
-                {(['live', 'source'] as const).map((value) => (
-                  <button
-                    key={value}
-                    aria-pressed={mode === value}
-                    className={cn(
-                      'text-muted-foreground rounded px-2.5 py-1 text-xs',
-                      mode === value && 'bg-accent text-accent-foreground',
-                    )}
-                    onClick={() => setMode(value)}
-                  >
-                    {value === 'live' ? 'Live Preview' : 'Source'}
+                {mode === 'reading' ? <Pencil size={17} /> : <BookOpen size={17} />}
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button aria-label="More options" title="More options" className={icon}>
+                    <Ellipsis size={17} />
                   </button>
-                ))}
-              </div>
-              {sync.connected && (
-                <button
-                  aria-label="Version history"
-                  title="Version history"
-                  className={icon}
-                  onClick={() => setHistoryOpen(true)}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="w-56"
+                  onCloseAutoFocus={(event) => {
+                    // Rename hands focus to the title instead of back to the button.
+                    if (!renaming.current) return;
+                    renaming.current = false;
+                    event.preventDefault();
+                    editor.current?.focusTitle();
+                  }}
                 >
-                  <History size={17} />
-                </button>
-              )}
-              <button
-                aria-label="Show in Finder"
-                title="Show in Finder"
-                className={icon}
-                onClick={() => void bridge.reveal(open.path).catch(fail)}
-              >
-                <FolderSearch size={17} />
-              </button>
-              <button
-                aria-label="Move note to trash"
-                title="Move note to trash"
-                className={icon}
-                onClick={() => void trash(open.path)}
-              >
-                <Trash2 size={17} />
-              </button>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      const next = mode === 'source' ? 'live' : 'source';
+                      editing.current = next;
+                      setMode(next);
+                    }}
+                  >
+                    <Code /> <span className="flex-1">Source mode</span>
+                    {mode === 'source' && <Check className="text-primary" />}
+                  </DropdownMenuItem>
+                  {sync.connected && (
+                    <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+                      <History /> Version history
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      if (mode === 'reading') setMode(editing.current);
+                      renaming.current = true;
+                    }}
+                  >
+                    <Pencil /> Rename
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setMoving(open.path)}>
+                    <FolderInput /> Move to…
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void bridge.reveal(open.path).catch(fail)}>
+                    <FolderSearch /> Show in Finder
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onSelect={() => void trash(open.path)}>
+                    <Trash2 /> Move to trash
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </>
           )}
-          <button
-            aria-label={`Theme: ${theme.preference}`}
-            title={`Theme: ${theme.preference}. Click to cycle.`}
-            className={icon}
-            onClick={theme.cycle}
-          >
-            <ThemeIcon size={17} />
-          </button>
-          <button
-            aria-label="Settings"
-            title="Settings (⌘,)"
-            className={icon}
-            onClick={() => setSettings('sync')}
-          >
-            <SettingsIcon size={17} />
-          </button>
         </header>
         {notice && (
           <div role="alert" className="bg-secondary flex items-center gap-4 px-8 py-3 text-[13px]">
@@ -441,6 +483,7 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
             onRename={(name) => relocate(open.path, () => bridge.rename(open.path, name))}
             onChanged={() => void refresh().catch(fail)}
             onNotice={setNotice}
+            onStatus={setNoteStatus}
           />
         ) : (
           <div className="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-5">
@@ -455,6 +498,12 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
             </div>
           </div>
         )}
+        <StatusBar
+          note={open ? noteStatus : undefined}
+          sync={sync}
+          onRetrySave={() => void editor.current?.flush().catch(() => {})}
+          onSyncSettings={() => setSettings('sync')}
+        />
       </main>
       {finding && (
         <QuickSwitcher
