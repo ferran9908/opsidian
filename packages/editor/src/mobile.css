@@ -91,3 +91,173 @@ footer {
 [hidden] {
   display: none !important;
 }
+
+/* Properties, sized for a thumb. Nothing waits for a hover that a finger cannot make. */
+.op-properties {
+  font-size: 15px;
+  margin-bottom: 18px;
+  padding-bottom: 10px;
+}
+.op-prop,
+.op-prop-adder {
+  min-height: 42px;
+}
+.op-prop-name {
+  width: 104px;
+  gap: 10px;
+}
+.op-chip {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 14px;
+}
+.op-chip-tag {
+  border-radius: 14px;
+}
+.op-chip-add {
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  opacity: 1;
+}
+.op-chip-remove {
+  display: inline-flex;
+}
+.op-prop-remove {
+  display: none;
+}
+.op-prop:focus-within .op-prop-remove {
+  display: flex;
+  opacity: 1;
+}
+.op-chip-input {
+  font-size: 16px !important;
+}
+.op-prop-input {
+  font-size: 16px;
+}
+.op-tag-menu {
+  width: min(260px, 100%);
+}
+.op-tag-option {
+  height: 40px;
+}
+
+/* The date sheet, from the bottom of the screen. */
+.op-picker-sheet-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-end;
+  background: rgb(0 0 0 / 0.28);
+}
+.op-picker-sheet {
+  width: 100%;
+  padding: 8px 20px calc(24px + env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: 14px 14px 0 0;
+  background: var(--background);
+  box-shadow: none;
+  font:
+    17px/22px -apple-system,
+    sans-serif;
+  color: var(--foreground);
+}
+.op-sheet-grabber {
+  width: 36px;
+  height: 5px;
+  margin: 0 auto 6px;
+  border-radius: 3px;
+  background: var(--border);
+}
+.op-sheet-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+}
+.op-sheet-top button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+}
+.op-sheet-clear {
+  color: var(--muted-foreground);
+}
+.op-sheet-title {
+  font-weight: 600;
+}
+.op-sheet-done {
+  color: var(--link);
+  font-weight: 600 !important;
+}
+.op-picker-sheet .op-picker-month {
+  padding: 10px 0;
+}
+.op-picker-sheet .op-picker-step {
+  width: 36px;
+  height: 36px;
+}
+.op-picker-sheet .op-picker-step svg {
+  width: 20px;
+  height: 20px;
+  stroke: var(--link);
+  stroke-width: 1.7;
+}
+.op-picker-sheet .op-picker-weekday {
+  font-size: 12px;
+}
+.op-picker-sheet .op-picker-day {
+  width: 42px;
+  height: 42px;
+  border-radius: 21px;
+  font-size: 19px !important;
+  color: var(--foreground);
+}
+.op-picker-sheet .op-picker-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.op-sheet-time {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+}
+.op-switch {
+  appearance: none;
+  position: relative;
+  width: 51px;
+  height: 31px;
+  margin: 0;
+  border-radius: 16px;
+  background: var(--border);
+  transition: background 0.2s;
+}
+.op-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.15);
+  transition: transform 0.2s;
+}
+.op-switch:checked {
+  background: var(--success);
+}
+.op-switch:checked::after {
+  transform: translateX(20px);
+}
+.op-picker-sheet .op-picker-time {
+  align-self: flex-start;
+  font-size: 17px !important;
+  padding: 6px 10px;
+}

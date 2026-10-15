@@ -21,6 +21,7 @@ const APP = `(() => {
       if (files.has(to)) throw new Error('A note named “' + name + '” is already here.');
       files.set(to, files.get(from) ?? ''); files.delete(from); return to;
     },
+    tags: () => [{ name: 'travel', count: 2 }, { name: 'trips', count: 1 }],
   };
   window.ReactNativeWebView = { postMessage(value) {
     const message = JSON.parse(value);
@@ -35,7 +36,7 @@ const APP = `(() => {
 
 app.whenReady().then(async () => {
   // Shown and focused: a window without focus gets no focus or blur events, as a phone would.
-  const win = new BrowserWindow({ width: 400, height: 800 });
+  const win = new BrowserWindow({ width: 390, height: 844 });
   const web = win.webContents;
   const run = (code) => web.executeJavaScript(code);
   const open = async (path, content, others = {}) => {
@@ -158,6 +159,65 @@ app.whenReady().then(async () => {
     await open('Untitled 3.md', 'already written\n');
     assert.equal(await run(`document.activeElement === document.getElementById('title')`), false);
     pass('a new, empty Untitled note opens with its name selected; a written one does not');
+
+    // Properties, as a phone shows them.
+    const NOTE = '---\ntags:\n  - journal\ndate: 2026-09-28\nshared: true\n---\nA walk.\n';
+    await open('Walk.md', NOTE);
+    assert.equal(await run(`document.querySelectorAll('.op-prop').length`), 3);
+    assert.equal(
+      await run(`document.querySelector('.cm-content').textContent.includes('tags:')`),
+      false,
+    );
+    await delay(200);
+    await win.webContents
+      .capturePage()
+      .then((image) =>
+        require('node:fs').writeFileSync(
+          require('node:path').join(require('node:os').tmpdir(), 'op-mobile-properties.png'),
+          image.toPNG(),
+        ),
+      );
+    pass('a note shows its properties as a panel, not as YAML');
+
+    await run(`document.querySelector('.op-prop-type-tags .op-chip-add').click()`);
+    await delay(100);
+    await web.insertText('tr');
+    await delay(300);
+    assert.match(await run(`document.querySelector('.op-tag-menu').textContent`), /#travel2 notes/);
+    await run(
+      `document.querySelector('.op-tag-option').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`,
+    );
+    await delay(300);
+    await run(`document.activeElement.blur()`);
+    await delay(400);
+    assert.match((await files())['Walk.md'], /tags:\n  - journal\n  - travel\ndate/);
+    pass("a tag is added from the notebook's tags, as a line of its own");
+
+    await run(`document.querySelector('.op-prop-type-date .op-prop-date').click()`);
+    await delay(200);
+    assert.equal(await run(`!!document.querySelector('body > .op-picker-sheet-layer')`), true);
+    await win.webContents
+      .capturePage()
+      .then((image) =>
+        require('node:fs').writeFileSync(
+          require('node:path').join(require('node:os').tmpdir(), 'op-mobile-date.png'),
+          image.toPNG(),
+        ),
+      );
+    await run(
+      `[...document.querySelectorAll('.op-picker-day')].find((d) => d.textContent === '3').click()`,
+    );
+    await delay(200);
+    await run(`document.querySelector('.op-sheet-done').click()`);
+    await delay(400);
+    assert.equal(await run(`!!document.querySelector('.op-picker-sheet-layer')`), false);
+    assert.match((await files())['Walk.md'], /date: 2026-09-03\n/);
+    pass('a date is picked from a sheet at the bottom of the screen');
+
+    await run(`document.querySelector('.op-prop-type-checkbox .op-prop-check').click()`);
+    await delay(400);
+    assert.match((await files())['Walk.md'], /shared: false\n/);
+    pass('a checkbox property is ticked and unticked in place');
     app.exit(0);
   } catch (error) {
     console.error(`FAIL ${error.stack ?? error}`);

@@ -191,6 +191,9 @@ function show(opening: Opening) {
         .catch(() => {})
         .then(() => tell('link', { target: name, heading })),
     loadEmbed: (name, heading) => call<string | undefined>('embed', target, name, heading),
+    // On a phone a date is picked from a sheet at the bottom, and tags come from the app.
+    picker: 'sheet',
+    tagSuggestions: () => call<{ name: string; count: number }[]>('tags'),
     onChange: (content) => {
       saves?.update(content);
       words();

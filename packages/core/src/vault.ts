@@ -151,6 +151,8 @@ export interface VaultBridge {
   emptyTrash(): Promise<boolean>;
   backlinks(path: string): Promise<Backlink[]>;
   search(query: string): Promise<SearchResult[]>;
+  /** Every tag in the notebook, with how many notes carry it. */
+  tags(): Promise<{ name: string; count: number }[]>;
   /** Copies a chosen image into the vault and returns its vault-relative path. */
   importImage(): Promise<string | null>;
   /** Stores pasted or dropped image bytes in the vault and returns the vault-relative path. */

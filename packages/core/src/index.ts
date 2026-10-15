@@ -6,6 +6,7 @@ export { NoteIndex, type Backlink, type SearchResult } from './note-index';
 export * from './vault';
 export { mergeText } from './merge';
 export * from './update';
+export * from './frontmatter';
 
 export const MAX_NOTE_LENGTH = 2_000_000;
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;

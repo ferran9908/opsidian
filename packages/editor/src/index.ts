@@ -20,14 +20,15 @@ import {
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
-import { headingOffset } from '@opsidian/core';
+import { headingOffset, stripFrontmatter } from '@opsidian/core';
 import { createSearchPanel } from './search-panel';
 import { livePreview, isCodeAt, type PreviewOptions } from './live-preview';
+import { properties, type PropertyOptions } from './properties';
 
 export type EditorMode = 'live' | 'source';
 export type EditorCommand =
   'bold' | 'italic' | 'heading' | 'bullet' | 'task' | 'link' | 'undo' | 'redo';
-export interface EditorOptions extends PreviewOptions {
+export interface EditorOptions extends PreviewOptions, PropertyOptions {
   parent: HTMLElement;
   content: string;
   /** Note names offered after `[[`. A function is read each time, so the list can change. */
@@ -54,7 +55,8 @@ function renderMarkdown(parent: HTMLElement, content: string, options: PreviewOp
   const view = new EditorView({
     parent,
     state: EditorState.create({
-      doc: content,
+      // An embedded note shows its text; its properties belong to it, not to this note.
+      doc: stripFrontmatter(content),
       extensions: [
         markdown({ extensions: [GFM] }),
         highlighting,
@@ -74,6 +76,8 @@ export function createEditor(options: EditorOptions) {
     ...options,
     renderEmbed: (parent, content) => renderMarkdown(parent, content, options),
   };
+  // Live Preview: formatting drawn in place, and the properties as a panel at the top.
+  const live = () => [livePreview(preview), properties(options)];
   const suggestions = () =>
     typeof options.suggestions === 'function' ? options.suggestions() : options.suggestions;
   let currentMode = options.mode ?? 'live';
@@ -153,7 +157,7 @@ export function createEditor(options: EditorOptions) {
           )
             options.onChange(update.state.doc.toString());
         }),
-        mode.of(options.mode === 'source' ? [] : livePreview(preview)),
+        mode.of(options.mode === 'source' ? [] : live()),
       ],
     }),
   });
@@ -206,12 +210,11 @@ export function createEditor(options: EditorOptions) {
     command,
     setMode(value: EditorMode) {
       currentMode = value;
-      view.dispatch({ effects: mode.reconfigure(value === 'live' ? livePreview(preview) : []) });
+      view.dispatch({ effects: mode.reconfigure(value === 'live' ? live() : []) });
     },
     /** Redraws previews after images or the set of existing notes changed. */
     refresh() {
-      if (currentMode === 'live')
-        view.dispatch({ effects: mode.reconfigure(livePreview(preview)) });
+      if (currentMode === 'live') view.dispatch({ effects: mode.reconfigure(live()) });
     },
     /**
      * Replaces the text with a version loaded from elsewhere. Only the part that differs is

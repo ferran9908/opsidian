@@ -28,7 +28,9 @@ The product is not agent-first. AI assistance may be added later. Free sync mean
 
 Default to Obsidian-style Live Preview: formatted content renders inline, with syntax exposed near the editing cursor. Also provide Source mode and Reading view.
 
-The shared editor should support headings, lists, checkboxes, emphasis, code, links, and inline images. Note suggestions appear after `[[`. Full Obsidian syntax compatibility is not promised: aliases, embeds, heading/block references, tables, frontmatter, and other extensions need an explicit compatibility matrix before implementation claims.
+The shared editor should support headings, lists, checkboxes, emphasis, code, links, and inline images. Note suggestions appear after `[[`. Full Obsidian syntax compatibility is not promised: aliases, embeds, heading/block references, tables, and other extensions need an explicit compatibility matrix before implementation claims.
+
+Properties (frontmatter) are supported as Obsidian writes them: a YAML block at the top of a note, shown in Live Preview as a Properties panel of names and values. Text, numbers, checkboxes, dates (with an optional time), lists and tags are edited in place; tags are chips with suggestions from the notebook's tags, and dates have a picker (a sheet from the bottom on the iPhone). Editing a property rewrites only its own lines, so the rest of the YAML stays as written; anything else YAML can say is kept and shown as written, to be edited in Source mode.
 
 On iPhone, bundle the editor locally inside a WebView hosted by a native app. Provide a keyboard toolbar for formatting, links, attachments, undo/redo, and keyboard dismissal. Validate dictation, autocorrect, touch selection, cursor visibility, composition input, and app suspension early.
 
