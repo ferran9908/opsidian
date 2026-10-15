@@ -106,6 +106,52 @@ app.whenReady().then(async () => {
     assert.deepEqual(await files(), { 'Renamed.md': 'typed just before old\n' });
     pass('typing not yet saved when the title changes moves with the note');
 
+    await open('Draft.md', 'body\n');
+    const focused = () => run(`document.activeElement === document.getElementById('title')`);
+    await run(`(() => { const t = document.getElementById('title'); t.focus();
+      const r = document.createRange(); r.selectNodeContents(t); getSelection().removeAllRanges(); getSelection().addRange(r); })()`);
+    const typedBefore = await renames();
+    for (const letter of 'Weekly') {
+      await web.insertText(letter);
+      await delay(60);
+    }
+    assert.deepEqual(Object.keys(await files()), ['Draft.md']);
+    await delay(1200);
+    assert.deepEqual(await files(), { 'Weekly.md': 'body\n' });
+    assert.equal(await renames(), typedBefore + 1);
+    assert.equal(await focused(), true);
+    assert.equal(await title(), 'Weekly');
+    await web.insertText(' review');
+    await delay(1200);
+    assert.deepEqual(await files(), { 'Weekly review.md': 'body\n' });
+    assert.equal(await title(), 'Weekly review');
+    assert.equal(await focused(), true);
+    pass(
+      'the note is renamed a moment after typing stops, once per pause, without leaving the title',
+    );
+
+    const noticesBefore = (await notices()).length;
+    await web.insertText('/');
+    await delay(1200);
+    assert.equal(await title(), 'Weekly review/');
+    assert.deepEqual(Object.keys(await files()), ['Weekly review.md']);
+    assert.equal((await notices()).length, noticesBefore);
+    await run(`window.OpsidianHost.receive({ event: 'blur' })`);
+    await delay(300);
+    assert.equal(await title(), 'Weekly review');
+    assert.match((await notices()).at(-1), /cannot contain/);
+    pass(
+      'a name that cannot be used stays as typed, quietly, until the title is left, then is refused',
+    );
+
+    await run(`(() => { const t = document.getElementById('title'); t.focus();
+      const r = document.createRange(); r.selectNodeContents(t); getSelection().removeAllRanges(); getSelection().addRange(r); })()`);
+    await web.insertText('Done at once');
+    await run(`window.OpsidianHost.receive({ event: 'blur' })`);
+    await delay(300);
+    assert.deepEqual(await files(), { 'Done at once.md': 'body\n' });
+    pass('Done renames at once, without waiting for the pause');
+
     await open('Untitled 2.md', '');
     assert.equal(await run(`document.activeElement === document.getElementById('title')`), true);
     assert.equal(await run(`getSelection().toString()`), 'Untitled 2');
