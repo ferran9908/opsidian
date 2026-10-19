@@ -46,4 +46,4 @@ Initial performance targets from planning are provisional: under 100 ms for typi
 
 ## Later
 
-Local knowledge graph, whole-vault graph, AI assistance, ChatGPT subscription integration, plugins, canvas, and real-time collaboration are outside these milestones.
+A fuller graph (tag nodes, attachments, time-lapse), AI assistance, ChatGPT subscription integration, plugins, canvas, and real-time collaboration are outside these milestones. The local graph is in the desktop app; see [graph](graph.md).

@@ -9,11 +9,19 @@ import {
 
 // A browser-only stand-in for `pnpm dev:preview`. The Electron app never uses it, and it
 // keeps notes in localStorage rather than as files.
-const KEY = 'opsidian-preview-vault';
+const KEY = 'opsidian-preview-vault-v2';
 const seed: Record<string, string> = {
   'A slower kind of Sunday.md': initialMarkdown.replace(/^# .*\n\n/, ''),
-  'A place for little things.md': 'Small things worth keeping.\n',
-  'Travel/Weekend plans.md': 'See [[A slower kind of Sunday]] for the mood.\n',
+  'A place for little things.md':
+    'Small things worth keeping. See [[A slower kind of Sunday]] and [[Travel/Weekend plans]]. Also [[Lanterns]].\n',
+  'Travel/Weekend plans.md':
+    'See [[A slower kind of Sunday]] for the mood. Maybe [[Travel/Japan]].\n',
+  'Travel/Japan.md':
+    'From [[Travel/Weekend plans]]. Food in [[Travel/Tokyo]] and [[Travel/Kyoto]].\n',
+  'Travel/Tokyo.md': 'Back to [[Travel/Japan]]. A book from [[Books to read]].\n',
+  'Travel/Kyoto.md': 'Gardens. Linked from [[Travel/Japan]].\n',
+  'Books to read.md': 'Started after [[A slower kind of Sunday]]. Ask [[Travel/Tokyo]].\n',
+  'Orphan thought.md': 'Nothing points here, and this points nowhere.\n',
 };
 const stored = localStorage.getItem(KEY);
 const notes = new Map<string, string>(Object.entries(stored ? JSON.parse(stored) : seed));
@@ -112,6 +120,7 @@ export const previewVault: VaultBridge = {
   },
   backlinks: async (path) => index.backlinks(path),
   search: async (query) => index.search(query),
+  graph: async () => index.graph(),
   importImage: async () => null,
   imageUrl: () => undefined,
   reveal: async () => {},

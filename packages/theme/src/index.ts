@@ -32,6 +32,13 @@ export const themes = {
     faint: '#ababab',
     success: '#08b94e',
     selection: 'rgb(138 92 245 / 0.2)',
+    graphNode: '#222222',
+    graphNodeUnresolved: '#ababab',
+    graphNodeActive: '#8a5cf5',
+    graphNodeHighlight: '#8a5cf5',
+    graphLink: '#d4d4d4',
+    graphLinkHighlight: '#8a5cf5',
+    graphLabel: '#5c5c5c',
   },
   dark: {
     background: '#1e1e1e',
@@ -64,6 +71,13 @@ export const themes = {
     faint: '#666666',
     success: '#44cf6e',
     selection: 'rgb(138 92 245 / 0.33)',
+    graphNode: '#dadada',
+    graphNodeUnresolved: '#666666',
+    graphNodeActive: '#a68af9',
+    graphNodeHighlight: '#a68af9',
+    graphLink: '#3f3f3f',
+    graphLinkHighlight: '#a68af9',
+    graphLabel: '#b3b3b3',
   },
 } as const;
 

@@ -11,6 +11,7 @@ Milestone 2, last updated 2026-10-13. The desktop app works on a real folder of 
 - **Links.** `[[Name]]`, `[[Name|alias]]`, `[[Name#Heading]]` and `[[#Heading]]`. Completion after `[[` offers the notebook's notes. Clicking a link opens the note and, with a heading, scrolls to it. A link to a note that does not exist is drawn dashed and creates the note when followed. Dragging a note from the sidebar into the text inserts a link to it.
 - **Embeds.** `![[Note]]` and `![[Note#Heading]]` show the note or section in place, read-only. `![[photo.png]]` shows an image found by name anywhere in the notebook.
 - **Backlinks.** Each note lists the notes that link to it, with the linking line.
+- **Local graph.** The constellation button above the note, or `⌘G`, shows the open note and the notes linked to it. Depth is 1–3 hops, both ways. Hover lights a note's neighbours; click opens a note, or creates it when the target does not exist yet. Settings on the right match Obsidian's forces and display sliders and are remembered. See [graph](graph.md).
 - **Find.** `⌘K`, `⌘O` or `⌘P` searches note names and text, and can create a note from the query. Back and forward with the arrows above the note or `⌘⌥←` / `⌘⌥→`.
 - **Images.** Paste or drop an image into a note, or choose **Attach image** from the text's right-click menu. Images are stored in `attachments/` under a readable name (`Pasted image.png`, or the original file name) and served to the editor through `opsidian://vault/…` rather than loaded into memory. PNG, JPEG, GIF and WebP up to 25 MB.
 - **Trash.** Notes and folders go to the notebook's `.trash` folder, which Obsidian also uses. **Trash**, in the menu under the notebook's name, lists what is there and restores an item to where it was, recreating its folder if needed and choosing a free name if the old one is taken. **Empty trash** moves the contents to the Mac's Trash after a confirmation.
@@ -45,7 +46,7 @@ Paths are notebook-relative. Hidden entries (`.obsidian`, `.git`, `.trash`) and 
 | Rename a note, rewriting links in five | 130 ms |
 | Rename a folder of 100 notes           | 70 ms  |
 
-On these numbers the in-memory index is enough, so the planned SQLite index is not needed for a notebook this size. It rebuilds on every launch, which would become noticeable somewhere well beyond this.
+On these numbers the in-memory index is enough, so the planned SQLite index is not needed for a notebook this size. It rebuilds on every launch, which would become noticeable somewhere well beyond this. The same fixture also builds the link graph in one pass and lets the force layout settle; those budgets live in `tests/vault-scale.test.ts` and stay off the typing path. See [graph](graph.md).
 
 `pnpm bench:desktop` prints paste and typing timings for 96 KB and 1 MB notes.
 
@@ -60,5 +61,5 @@ On these numbers the in-memory index is enough, so the planned SQLite index is n
 
 ## Checks
 
-- `pnpm check` runs formatting, typechecks and the behavioural tests: link parsing, resolution and rewriting, the index, the save queue, and the vault on a real temporary folder (conflicts, deletion while editing, renames and moves with link rewriting, folders, trash and restore, images, symlink and path escapes, external changes, the 5,000-note measurement).
+- `pnpm check` runs formatting, typechecks and the behavioural tests: link parsing, resolution and rewriting, the index, the graph builder, the save queue, and the vault on a real temporary folder (conflicts, deletion while editing, renames and moves with link rewriting, folders, trash and restore, images, symlink and path escapes, external changes, the 5,000-note measurement including graph build and layout settle).
 - `pnpm test:desktop` drives the production Electron build end to end: creating, renaming, linking, navigating, searching, attaching and pasting images, embeds, folders by menu and by drag, heading links, external edits, conflicts, trash and restore, and close-and-reopen. It then runs the crash test: the app is killed outright three times while typing and saving, and each time the note on disk must be a whole earlier version, hold everything typed more than 1.5 s before the kill, and reopen for further editing.

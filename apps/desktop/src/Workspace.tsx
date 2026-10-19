@@ -11,6 +11,7 @@ import {
   History,
   PanelLeft,
   Pencil,
+  Share2,
   Trash2,
   X,
 } from 'lucide-react';
@@ -35,6 +36,7 @@ import { Settings, type SettingsSection } from './Settings';
 import { HistoryDialog } from './HistoryDialog';
 import { Sidebar, type TreeSort } from './Sidebar';
 import { StatusBar, type NoteStatus } from './StatusBar';
+import { GraphView } from './graph/GraphView';
 import { defaultMode } from './preferences';
 import {
   DropdownMenu,
@@ -72,6 +74,8 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
   const [sort, setSort] = useState<TreeSort>(() =>
     localStorage.getItem('opsidian.tree.sort') === 'name-desc' ? 'name-desc' : 'name',
   );
+  const [graphOpen, setGraphOpen] = useState(false);
+  const [graphMounted, setGraphMounted] = useState(false);
   const [noteStatus, setNoteStatus] = useState<NoteStatus>();
   const renaming = useRef(false);
   const [notice, setNotice] = useState('');
@@ -209,6 +213,9 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
       } else if (key === ',') {
         event.preventDefault();
         setSettings((open) => open ?? 'general');
+      } else if (key === 'g') {
+        event.preventDefault();
+        toggleGraph();
       } else if (key === 'e' && open) {
         event.preventDefault();
         toggleReading();
@@ -293,6 +300,13 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
     if (mode === 'reading') return setMode(editing.current);
     editing.current = mode;
     setMode('reading');
+  }
+  function toggleGraph() {
+    if (graphOpen) return setGraphOpen(false);
+    void (editor.current?.flush() ?? Promise.resolve()).finally(() => {
+      setGraphMounted(true);
+      setGraphOpen(true);
+    });
   }
   const icon =
     'no-drag text-muted-foreground hover:bg-accent hover:text-accent-foreground flex size-7 items-center justify-center rounded-md disabled:opacity-40 disabled:hover:bg-transparent';
@@ -393,7 +407,15 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
               </span>
             )}
           </div>
-          {open && (
+          <button
+            aria-label={graphOpen ? 'Close graph' : 'Open graph'}
+            title={graphOpen ? 'Close graph (⌘G)' : 'Open local graph (⌘G)'}
+            className={cn(icon, graphOpen && 'text-foreground')}
+            onClick={toggleGraph}
+          >
+            <Share2 size={17} />
+          </button>
+          {open && !graphOpen && (
             <>
               <button
                 aria-label={mode === 'reading' ? 'Edit' : 'Reading view'}
@@ -467,7 +489,18 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
             </button>
           </div>
         )}
-        {open ? (
+        {graphMounted && (
+          <div className={graphOpen ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
+            <GraphView
+              center={open?.path ?? null}
+              version={version}
+              dark={theme.dark}
+              onOpen={(path) => void show(path).catch(fail)}
+              onCreate={(name) => void create('', name)}
+            />
+          </div>
+        )}
+        {graphOpen ? null : open ? (
           <NoteEditor
             key={open.visit}
             ref={editor}

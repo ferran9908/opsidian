@@ -3,6 +3,7 @@ export { initialMarkdown, noteSuggestions } from './sample';
 export * from './links';
 import { encodeDestination } from './links';
 export { NoteIndex, type Backlink, type SearchResult } from './note-index';
+export * from './graph';
 export * from './vault';
 export { mergeText } from './merge';
 export * from './update';

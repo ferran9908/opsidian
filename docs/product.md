@@ -18,7 +18,7 @@ The product is not agent-first. AI assistance may be added later. Free sync mean
 
 - Markdown notes and ordinary folders.
 - Autosave, offline editing, and honest local-save/sync status.
-- Search, `[[wiki links]]`, and backlinks.
+- Search, `[[wiki links]]`, backlinks, and a local graph of the open note.
 - Images and file attachments.
 - Renames, deletion recovery, revision history, and recoverable sync conflicts.
 - Light, dark, and system appearance.
@@ -46,4 +46,4 @@ Tailscale hosts require the client device to have suitable network access. An Op
 
 ## Deferred
 
-Graph view (start with a local graph later), agents, ChatGPT/Codex integration, plugins, canvas, browser editing, and real-time collaborative cursors. Future agents should work through the same file/revision pipeline.
+A fuller graph (tag nodes, attachments, time-lapse), agents, ChatGPT/Codex integration, plugins, canvas, browser editing, and real-time collaborative cursors. Future agents should work through the same file/revision pipeline. The local graph is in the desktop app; see [graph](graph.md).
