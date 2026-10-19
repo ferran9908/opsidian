@@ -14,7 +14,7 @@ Captured from the planning conversation on 2026-09-28.
 | Free self-hosted sync                     | The host can be the current Mac, a VPS, or a Tailscale-reachable machine.                               |
 | Local copies on every client              | Editing remains usable offline or while the host sleeps.                                                |
 | Paper design with light and dark modes    | Three desktop flows have been designed and positively received.                                         |
-| Graph and AI later                        | Neither is required to deliver reliable note-taking.                                                    |
+| Graph and AI later                        | Neither was required to deliver reliable note-taking. The local graph is now built; AI is still later.  |
 
 ## Current technical baseline
 
@@ -98,6 +98,15 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **An invitation is also a link,** `opsidian://connect`, shown as a QR code. Scanning or opening it only fills in the form.
 - **The connection check never sends a device's credential to an address** until that address has answered as an Opsidian host.
 - **Not built:** signed and packaged apps, automatic updates (milestone 6); pruning old history; backing up from a Mac that is not the host.
+
+## Local graph — 2026-10-19
+
+- **Local first.** The open note and a 1–3 hop neighbourhood, both directions. A toggle shows the whole notebook on the same view. A separate global-graph product is not the first job.
+- **One snapshot from the index.** `NoteIndex.graph()` walks every note once, using the same resolver as the editor. Per-note `backlinks()` would have been quadratic and could have drifted.
+- **Unresolved targets are nodes.** They can be hidden, and clicking one creates the note, matching a dashed wiki link.
+- **Worker, then freeze.** d3-force runs off the typing path. When the layout settles, the worker and the draw loop sleep. Display sliders redraw only.
+- **Canvas now, WebGL later.** A `GraphRenderer` interface keeps that door open. Path is identity; a rename is a new node unless exactly one path left and one arrived.
+- **Still later:** tag and attachment nodes, time-lapse, hover previews, a mobile renderer, 3D.
 
 ## Future AI direction
 

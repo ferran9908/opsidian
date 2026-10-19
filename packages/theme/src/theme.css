@@ -42,6 +42,13 @@
   --color-faint: var(--faint);
   --color-success: var(--success);
   --color-selection: var(--selection);
+  --color-graph-node: var(--graph-node);
+  --color-graph-node-unresolved: var(--graph-node-unresolved);
+  --color-graph-node-active: var(--graph-node-active);
+  --color-graph-node-highlight: var(--graph-node-highlight);
+  --color-graph-link: var(--graph-link);
+  --color-graph-link-highlight: var(--graph-link-highlight);
+  --color-graph-label: var(--graph-label);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

@@ -10,6 +10,7 @@ import {
   type Backlink,
   type MoveResult,
   type NoteDocument,
+  type NoteGraph,
   type SaveResult,
   type SearchResult,
   type TrashEntry,
@@ -234,6 +235,9 @@ export class Vault {
   }
   search(query: string): SearchResult[] {
     return this.index.search(query);
+  }
+  graph(): NoteGraph {
+    return this.index.graph();
   }
 
   /** When each note last changed on this device, in milliseconds. */

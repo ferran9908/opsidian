@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   NoteIndex,
+  filterGraph,
   headingOffset,
   headingSection,
   linkResolver,
   linkTarget,
+  localGraph,
   retargetFiles,
   retargetLinks,
   vaultImageMarkdown,
@@ -89,6 +91,69 @@ describe('note index', () => {
     ]);
     expect(notes.search('coffee tea')).toEqual([]);
     expect(notes.search('   ')).toEqual([]);
+  });
+  it('builds a graph in one pass: degrees, unresolved nodes, no self-links or duplicate edges', () => {
+    const notes = new NoteIndex();
+    notes.set('Sunday.md', 'See [[Weekend plans]] and [[weekend plans|again]] and [[Sunday]].');
+    notes.set('Travel/Weekend plans.md', 'Walk. Also [[Missing]] and [[missing]].');
+    notes.set('Books.md', 'No links.');
+    notes.set('Loop.md', 'Points at [[Loop]] only.');
+    const graph = notes.graph();
+    expect(graph.edges).toEqual([
+      { from: 'Sunday.md', to: 'Travel/Weekend plans.md' },
+      { from: 'Travel/Weekend plans.md', to: 'Missing.md' },
+    ]);
+    const byPath = Object.fromEntries(graph.nodes.map((node) => [node.path, node]));
+    expect(byPath['Sunday.md']).toEqual({
+      path: 'Sunday.md',
+      title: 'Sunday',
+      exists: true,
+      inDegree: 0,
+      outDegree: 1,
+    });
+    expect(byPath['Travel/Weekend plans.md']).toMatchObject({
+      exists: true,
+      inDegree: 1,
+      outDegree: 1,
+    });
+    expect(byPath['Missing.md']).toEqual({
+      path: 'Missing.md',
+      title: 'Missing',
+      exists: false,
+      inDegree: 1,
+      outDegree: 0,
+    });
+    expect(byPath['Books.md']).toMatchObject({ exists: true, inDegree: 0, outDegree: 0 });
+    expect(byPath['Loop.md']).toMatchObject({ exists: true, inDegree: 0, outDegree: 0 });
+    expect(graph.nodes.some((node) => node.path === 'missing.md')).toBe(false);
+  });
+  it('walks both directions for a local graph and can hide orphans and missing files', () => {
+    const notes = new NoteIndex();
+    notes.set('A.md', '[[B]]');
+    notes.set('B.md', '[[C]] [[Ghost]]');
+    notes.set('C.md', '');
+    notes.set('Far.md', '[[C]]');
+    notes.set('Alone.md', '');
+    const graph = notes.graph();
+    expect(localGraph(graph, 'A.md', 1).nodes.map((node) => node.path)).toEqual(['A.md', 'B.md']);
+    expect(localGraph(graph, 'A.md', 2).nodes.map((node) => node.path)).toEqual([
+      'A.md',
+      'B.md',
+      'C.md',
+      'Ghost.md',
+    ]);
+    const depthTwo = localGraph(graph, 'A.md', 2);
+    expect(
+      filterGraph(depthTwo, { orphans: true, existingOnly: true }).nodes.map((n) => n.path),
+    ).toEqual(['A.md', 'B.md', 'C.md']);
+    expect(
+      filterGraph(graph, { orphans: false, existingOnly: true, keep: 'Alone.md' }).nodes.map(
+        (node) => node.path,
+      ),
+    ).toEqual(['A.md', 'Alone.md', 'B.md', 'C.md', 'Far.md']);
+    expect(
+      filterGraph(graph, { orphans: false, existingOnly: true }).nodes.map((node) => node.path),
+    ).toEqual(['A.md', 'B.md', 'C.md', 'Far.md']);
   });
 });
 

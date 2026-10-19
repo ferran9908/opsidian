@@ -10,7 +10,7 @@ Read README.md and docs/decisions.md before implementation. Consult the relevant
 - Sync uses a user-chosen host: the current Mac, a VPS, or a reachable Tailscale device.
 - No required central account or paid sync service.
 - Match Obsidian-style editing behavior; do not assume full plugin or format compatibility.
-- Graph view, AI, plugins, and simultaneous multiplayer editing are deferred.
+- AI, plugins, and simultaneous multiplayer editing are deferred. The local graph is in the desktop app.
 
 ## Engineering boundaries
 

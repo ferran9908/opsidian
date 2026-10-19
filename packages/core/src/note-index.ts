@@ -1,3 +1,4 @@
+import { buildNoteGraph, type NoteGraph } from './graph';
 import {
   linkResolver,
   linkTarget,
@@ -107,6 +108,14 @@ export class NoteIndex {
         result.push({ path: source, excerpt: excerptAround(note.content, link.from, link.to) });
     }
     return result.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  /**
+   * The notebook's link graph in one pass: every note, every unresolved target, and
+   * each unique directed edge. Self-links are dropped. Degrees count those edges.
+   */
+  graph(): NoteGraph {
+    return buildNoteGraph(this.notes, (target) => this.resolve(target));
   }
 
   /** Notes containing every word of `query`, title matches first. */

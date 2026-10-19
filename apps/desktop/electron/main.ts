@@ -277,6 +277,7 @@ async function start() {
   });
   handle('note:backlinks', (path) => open().backlinks(text(path)));
   handle('vault:search', (query) => open().search(text(query, 200)));
+  handle('vault:graph', () => open().graph());
   // The empty path is the notebook itself, opened as a Finder window.
   handle('note:reveal', async (path) => {
     if (text(path) === '') return void (await shell.openPath(open().root));

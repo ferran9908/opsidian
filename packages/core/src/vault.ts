@@ -1,3 +1,4 @@
+import type { NoteGraph } from './graph';
 import type { Backlink, SearchResult } from './note-index';
 import type { AppUpdate, UpdateCheck } from './update';
 
@@ -151,6 +152,8 @@ export interface VaultBridge {
   emptyTrash(): Promise<boolean>;
   backlinks(path: string): Promise<Backlink[]>;
   search(query: string): Promise<SearchResult[]>;
+  /** The notebook's link graph: notes, unresolved targets, and unique directed edges. */
+  graph(): Promise<NoteGraph>;
   /** Copies a chosen image into the vault and returns its vault-relative path. */
   importImage(): Promise<string | null>;
   /** Stores pasted or dropped image bytes in the vault and returns the vault-relative path. */
