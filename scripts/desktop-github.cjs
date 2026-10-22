@@ -9,6 +9,9 @@ const assert = require('node:assert/strict');
 const { fakeGitHub, USER } = require('./fake-github.cjs');
 
 const { OPSIDIAN_VAULT_DIR: vault, OPSIDIAN_GITHUB_ROOT: root } = process.env;
+// A Mac with nobody at it cannot answer the keychain's prompts, and the keychain call that
+// asks blocks the whole app; a stand-in keychain keeps the test unattended.
+app.commandLine.appendSwitch('use-mock-keychain');
 app.setPath('userData', process.env.OPSIDIAN_PROFILE_DIR);
 // Imported notebooks are made in Documents; a Mac finds it without looking at HOME.
 app.setPath('documents', join(process.env.OPSIDIAN_PROFILE_DIR, '..', 'Documents'));

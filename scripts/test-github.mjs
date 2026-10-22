@@ -24,6 +24,12 @@ try {
       env,
       stdio: 'inherit',
     });
+    // A hang, such as a prompt nobody can answer, fails the test instead of the whole run.
+    const limit = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error('The GitHub test took more than five minutes.'));
+    }, 5 * 60_000);
+    child.on('exit', () => clearTimeout(limit));
     child.on('error', reject);
     child.on('exit', (code) =>
       code === 0 ? resolve() : reject(new Error(`The GitHub test exited ${code}`)),
