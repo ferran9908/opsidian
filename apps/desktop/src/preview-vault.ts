@@ -154,6 +154,22 @@ export const previewVault: VaultBridge = {
   backUpNow: async () => ({ keep: 14, backups: [] }),
   restoreBackup: async () => ({ keep: 14, backups: [] }),
   onHosting: () => () => {},
+  github: async () => ({ mirrors: [] }),
+  signInToGitHub: async () => {
+    throw new Error('GitHub needs the Mac app.');
+  },
+  finishGitHubSignIn: async () => ({ mirrors: [] }),
+  cancelGitHubSignIn: async () => {},
+  signOutOfGitHub: async () => ({ mirrors: [] }),
+  githubRepositories: async () => [],
+  keepOnGitHub: async () => {
+    throw new Error('GitHub needs the Mac app.');
+  },
+  importFromGitHub: async () => {
+    throw new Error('GitHub needs the Mac app.');
+  },
+  syncGitHub: async () => ({ mirrors: [] }),
+  stopGitHub: async () => ({ mirrors: [] }),
   // The browser preview is never installed, so it never updates.
   updateState: async () => ({ kind: 'none' }),
   checkForUpdate: async () => 'dev',

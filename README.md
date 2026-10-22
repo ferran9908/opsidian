@@ -4,7 +4,7 @@ A Markdown-first desktop notebook with free, self-hosted sync and an eventual iP
 
 ## Status
 
-The desktop app is a local notebook over a folder of Markdown notes: notes and folders, wiki links that survive renames, embeds, backlinks, a local graph, search, pasted images, and a trash you can restore from. See [what the desktop notebook does](docs/desktop-notebook.md). The iPhone app holds the same notebook: browse, write, search, organise, attach photos, and sync. See [the iPhone app](docs/iphone.md); **it has been run in the simulator but not yet accepted on a real iPhone.** Sync works through a host you run yourself, either from the Mac app's settings or on a server; see [sync](docs/sync.md) and [hosting](docs/hosting.md).
+The desktop app is a local notebook over a folder of Markdown notes: notes and folders, wiki links that survive renames, embeds, backlinks, a local graph, search, pasted images, and a trash you can restore from. See [what the desktop notebook does](docs/desktop-notebook.md). The iPhone app holds the same notebook: browse, write, search, organise, attach photos, and sync. See [the iPhone app](docs/iphone.md); **it has been run in the simulator but not yet accepted on a real iPhone.** Sync works through a host you run yourself, either from the Mac app's settings or on a server; see [sync](docs/sync.md) and [hosting](docs/hosting.md). The host can also keep each notebook in a GitHub repository, in both directions, and make a notebook from one ([GitHub](docs/hosting.md#keeping-notebooks-on-github)).
 
 ## Get started
 
@@ -17,7 +17,7 @@ pnpm dev:desktop
 
 `pnpm dev:preview` opens a browser development preview. `pnpm ios` builds and installs the iPhone app on a connected phone; `pnpm dev:mobile` starts Expo for a development build. See [prototype setup, storage, and device checks](docs/editor-prototype.md).
 
-Run `pnpm check` for formatting, typechecks, and behavioral tests. Run `pnpm test:desktop` to drive the real Electron app end to end and then kill it mid-save to check nothing is lost, and `pnpm test:sync` to run it against a real host. `pnpm format` formats the repository.
+Run `pnpm check` for formatting, typechecks, and behavioral tests. Run `pnpm test:desktop` to drive the real Electron app end to end and then kill it mid-save to check nothing is lost, `pnpm test:sync` to run it against a real host, and `pnpm test:github` to drive its GitHub screens. `pnpm format` formats the repository.
 
 ## Workspace
 

@@ -108,6 +108,17 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Canvas now, WebGL later.** A `GraphRenderer` interface keeps that door open. Path is identity; a rename is a new node unless exactly one path left and one arrived.
 - **Still later:** tag and attachment nodes, time-lapse, hover previews, a mobile renderer, 3D.
 
+## GitHub — 2026-10-22
+
+- **A notebook can be kept in a GitHub repository, both ways.** Requested by the user, for an off-site copy that stays readable, and for starting a host from notes already on GitHub. Built for the headless host (Linux and macOS) and the Mac app.
+- **GitHub is a device, not a second sync protocol.** The host keeps a git checkout of the notebook in its data folder and syncs it with the same engine as the Mac and iPhone, through the host's own routes in-process. Around that, each round commits, merges what was pushed to GitHub, lets the engine send it on, and pushes. So merging, conflicted copies, the deletion guard and file identity are the ones sync already has. The alternative, writing files straight from the host's database into git, would have needed a second merge implementation.
+- **git merges; clashes are kept twice.** Where both sides changed the same lines, the notebook's version keeps the name and GitHub's is written beside it as `conflicted copy GitHub`. Nothing is force-pushed. A push that loses a race fetches, merges and tries again.
+- **The host does it, not a device.** It is always on, and it is the only place every change passes through. The host already keeps the full history, so the repository is a copy, not the backup of record.
+- **Sign-in is GitHub's device flow, with the `repo` scope.** Chosen for the smoothest setup on both a Mac and a headless server: a code to enter on github.com, nothing to paste or store by hand. A deploy key per repository was considered; it is safer in scope but asks the user to add a key on GitHub for each repository. Fine-grained tokens expire and must be pasted. A GitHub App would allow per-repository access but complicates making a new repository. The token is kept in the keychain on a Mac and in a file readable only by the user on a server, and is handed to git per command through a credential helper, so it is never written into git's configuration or the machine's own credential store.
+- **The system's git is used,** not a JavaScript implementation, for its merging and its handling of large repositories. A Mac without the command line tools is offered them by macOS the first time.
+- **Needs an OAuth app registered on GitHub** with the device flow enabled; its client id is in `apps/host/src/github.ts`. Until it is, the command line can sign in with a token (`gh auth token | opsidian host github login --with-token`).
+- **Not built:** Git LFS, choosing a branch other than the repository's default, and the iPhone app (which never hosts).
+
 ## Future AI direction
 
 Potential features: organize a messy thought, answer questions over notes with citations, and suggest related notes. A machine-hosted agent and supported Codex/ChatGPT sign-in were explored. No AI integration is committed for the initial milestones; re-check product access and integration documentation when that work begins.

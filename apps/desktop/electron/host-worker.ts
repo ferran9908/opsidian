@@ -1,5 +1,7 @@
 import { parentPort } from 'node:worker_threads';
 import { Host, restoreBackup } from '../../host/src/host';
+import { Mirrors } from '../../host/src/mirror';
+import type { GitHubAccount } from '../../host/src/github';
 
 /**
  * The Mac app's host, on a thread of its own. The host's database work is synchronous, and a
@@ -14,13 +16,21 @@ export type HostRequest =
   | { op: 'invite'; notebook: string }
   | { op: 'cancelInvitation'; id: string }
   | { op: 'revoke'; id: string }
-  | { op: 'backup'; folder: string; keep: number };
+  | { op: 'backup'; folder: string; keep: number }
+  | { op: 'account'; account: GitHubAccount | undefined }
+  | { op: 'mirrors' }
+  | { op: 'keep'; notebook: string; remote: string }
+  | { op: 'mirror'; notebook: string; confirm?: boolean }
+  | { op: 'unmirror'; notebook: string };
 
 export type HostReply =
   | { id: number; ok: true; value: unknown }
   | { id: number; ok: false; message: string; code?: string | undefined };
 
 let host: Host | undefined;
+let mirrors: Mirrors | undefined;
+/** The GitHub sign-in, handed over by the app, which keeps it in the keychain. */
+let account: GitHubAccount | undefined;
 
 async function handle(request: HostRequest): Promise<unknown> {
   if (request.op === 'open') {
@@ -33,11 +43,21 @@ async function handle(request: HostRequest): Promise<unknown> {
       throw reason;
     }
     host = opened;
+    // Notebooks kept on GitHub sync on this thread too, beside the host they belong to.
+    mirrors = new Mirrors({ host, dataDir: request.dataDir, account: async () => account });
+    mirrors.start();
     return;
   }
   if (request.op === 'close') {
+    await mirrors?.stop();
+    mirrors = undefined;
     await host?.close();
     host = undefined;
+    return;
+  }
+  if (request.op === 'account') {
+    account = request.account;
+    mirrors?.kick();
     return;
   }
   if (request.op === 'restore') {
@@ -51,6 +71,7 @@ async function handle(request: HostRequest): Promise<unknown> {
         notebooks: host.notebooks(),
         devices: host.devices(),
         invitations: host.invitations(),
+        mirrors: host.mirrors().map(({ token: _token, ...each }) => each),
       };
     case 'invite':
       return host.invite(request.notebook);
@@ -60,6 +81,15 @@ async function handle(request: HostRequest): Promise<unknown> {
       return host.revoke(request.id);
     case 'backup':
       return host.backup(request.folder, request.keep);
+    // What the app needs to show, without the copies' device credentials.
+    case 'mirrors':
+      return host.mirrors().map(({ token: _token, ...each }) => each);
+    case 'keep':
+      return mirrors!.connect(request.notebook, request.remote);
+    case 'mirror':
+      return mirrors!.sync(request.notebook, request.confirm);
+    case 'unmirror':
+      return mirrors!.disconnect(request.notebook);
   }
 }
 

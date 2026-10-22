@@ -1,11 +1,32 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { clipboard, safeStorage, shell } from 'electron';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import qrcode from 'qrcode-generator';
-import type { BackupInfo, HostingInfo, Invitation } from '@opsidian/core';
+import type {
+  BackupInfo,
+  GitHubInfo,
+  GitHubRepository,
+  HostingInfo,
+  Invitation,
+  RepositoryChoice,
+} from '@opsidian/core';
 import type { SyncService, Vault } from '@opsidian/notebook';
-import { listBackups, type Host } from '../../host/src/host';
+import { listBackups, type Host, type MirrorRecord } from '../../host/src/host';
+import {
+  createRepository,
+  findRepository,
+  finishSignIn,
+  parseRepository,
+  repositories,
+  repositoryLabel,
+  repositoryName,
+  startSignIn,
+  type DeviceCode,
+  type GitHubAccount,
+} from '../../host/src/github';
+import { gitVersion } from '../../host/src/mirror';
 import { invitationLink } from '../../host/src/home';
 import type { HostReply, HostRequest } from './host-worker';
 
@@ -106,6 +127,12 @@ interface Snapshot {
   notebooks: ReturnType<Host['notebooks']>;
   devices: ReturnType<Host['devices']>;
   invitations: ReturnType<Host['invitations']>;
+  mirrors: Omit<MirrorRecord, 'token'>[];
+}
+
+/** The GitHub sign-in, kept in the app's data with its token encrypted by the keychain. */
+interface SavedAccount extends Omit<GitHubAccount, 'token'> {
+  token: string;
 }
 
 /**
@@ -119,6 +146,10 @@ export class Hosting {
   private error: string | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   private work: Promise<unknown> = Promise.resolve();
+  private account: GitHubAccount | undefined;
+  private signingIn: { started: DeviceCode; abort: AbortController } | undefined;
+  /** Why git cannot be used, from the last time it was needed. */
+  private gitProblem: string | undefined;
 
   constructor(
     private readonly userData: string,
@@ -154,6 +185,7 @@ export class Hosting {
 
   /** Reads the settings and, if this Mac was hosting, starts hosting again. */
   async load(): Promise<void> {
+    this.account = await this.readAccount();
     try {
       const read = JSON.parse(await readFile(this.file, 'utf8')) as Partial<Saved>;
       this.saved = { ...fresh(), ...read, backup: { ...fresh().backup, ...read.backup } };
@@ -178,6 +210,7 @@ export class Hosting {
       await host.call({ op: 'open', dataDir: this.data, port: this.saved.port });
       this.host = host;
       this.error = undefined;
+      await host.call({ op: 'account', account: this.account });
     } catch (reason) {
       await host.end().catch(() => {});
       this.error =
@@ -207,7 +240,14 @@ export class Hosting {
       notebooks: seen?.notebooks ?? [],
       devices: (seen?.devices ?? [])
         .filter((device) => !device.revoked)
-        .map(({ revoked: _revoked, ...device }) => ({ ...device, self: own.has(device.id) })),
+        .map(({ revoked: _revoked, ...device }) => {
+          const mirror = seen?.mirrors.find((each) => each.device === device.id);
+          return {
+            ...device,
+            self: own.has(device.id),
+            ...(mirror ? { github: repositoryLabel(mirror.remote) } : {}),
+          };
+        }),
       invitations: seen?.invitations ?? [],
       keepRunning: this.saved.keepRunning,
     };
@@ -385,5 +425,198 @@ export class Hosting {
       this.sync.kick();
       return this.backups();
     });
+  }
+
+  // GitHub.
+
+  private get githubFile(): string {
+    return join(this.userData, 'github.json');
+  }
+  private async readAccount(): Promise<GitHubAccount | undefined> {
+    try {
+      const saved = JSON.parse(await readFile(this.githubFile, 'utf8')) as SavedAccount;
+      const token = saved.token.startsWith('safe:')
+        ? safeStorage.decryptString(Buffer.from(saved.token.slice(5), 'base64'))
+        : saved.token.replace(/^plain:/, '');
+      return { ...saved, token };
+    } catch {
+      return undefined;
+    }
+  }
+  private async useAccount(account: GitHubAccount | undefined): Promise<void> {
+    this.account = account;
+    if (account) {
+      const token = safeStorage.isEncryptionAvailable()
+        ? `safe:${safeStorage.encryptString(account.token).toString('base64')}`
+        : `plain:${account.token}`;
+      await mkdir(this.userData, { recursive: true });
+      await writeFile(
+        this.githubFile,
+        JSON.stringify({ ...account, token } satisfies SavedAccount),
+        {
+          mode: 0o600,
+        },
+      );
+    } else await rm(this.githubFile, { force: true });
+    await this.host?.call({ op: 'account', account }).catch(() => {});
+  }
+  private signedIn(): GitHubAccount {
+    if (!this.account) throw new Error('Sign in to GitHub first.');
+    return this.account;
+  }
+  /** git is needed for GitHub; asking for it on a Mac without it offers to install it. */
+  private async needGit(): Promise<void> {
+    try {
+      await gitVersion();
+      this.gitProblem = undefined;
+    } catch (reason) {
+      this.gitProblem = message(reason);
+      throw reason;
+    }
+  }
+
+  async github(): Promise<GitHubInfo> {
+    const seen = await this.host?.call<Snapshot>({ op: 'snapshot' }).catch(() => undefined);
+    return {
+      ...(this.account
+        ? {
+            account: {
+              login: this.account.login,
+              ...(this.account.name ? { name: this.account.name } : {}),
+            },
+          }
+        : {}),
+      ...(this.gitProblem ? { problem: this.gitProblem } : {}),
+      mirrors: (seen?.mirrors ?? []).map((each) => {
+        const { fullName } = parseRepository(each.remote);
+        const status = each.status;
+        return {
+          notebook: each.name,
+          repository: repositoryLabel(each.remote),
+          ...(fullName ? { url: `https://github.com/${fullName}` } : {}),
+          state: status?.state ?? 'waiting',
+          ...(status?.message ? { message: status.message } : {}),
+          ...(status?.at ? { at: status.at } : {}),
+          ...(status?.held ? { held: status.held } : {}),
+        };
+      }),
+    };
+  }
+
+  /** Shows GitHub's sign-in page with the code already on the clipboard. */
+  async signInToGitHub(): Promise<{ code: string; url: string }> {
+    this.signingIn?.abort.abort();
+    const started = await startSignIn();
+    this.signingIn = { started, abort: new AbortController() };
+    clipboard.writeText(started.code);
+    // The dialog shows the page's address too, so a browser that does not open is no failure.
+    void shell.openExternal(started.url).catch(() => {});
+    return { code: started.code, url: started.url };
+  }
+  async finishGitHubSignIn(): Promise<GitHubInfo> {
+    const signing = this.signingIn;
+    if (!signing) throw new Error('Start signing in first.');
+    try {
+      await this.useAccount(await finishSignIn(signing.started, { signal: signing.abort.signal }));
+    } finally {
+      if (this.signingIn === signing) this.signingIn = undefined;
+    }
+    return this.github();
+  }
+  async cancelGitHubSignIn(): Promise<void> {
+    this.signingIn?.abort.abort();
+    this.signingIn = undefined;
+  }
+  async signOutOfGitHub(): Promise<GitHubInfo> {
+    await this.useAccount(undefined);
+    return this.github();
+  }
+  async githubRepositories(): Promise<GitHubRepository[]> {
+    return (await repositories(this.signedIn())).map((each) => ({
+      fullName: each.fullName,
+      private: each.private,
+      empty: each.empty,
+      ...(each.pushedAt ? { pushedAt: each.pushedAt } : {}),
+    }));
+  }
+  /** The address git uses for a choice, making the repository if asked to. */
+  private async remote(choice: RepositoryChoice): Promise<string> {
+    if ('create' in choice)
+      return (await createRepository(this.signedIn(), repositoryName(choice.create))).url;
+    const parsed = parseRepository(choice.repository);
+    // An SSH address, or a server that is not GitHub, uses this Mac's own git credentials.
+    if (!parsed.fullName || parsed.url.startsWith('git@')) return parsed.url;
+    const found = await findRepository(this.signedIn(), parsed.fullName);
+    if (!found.canPush)
+      throw new Error(`${this.signedIn().login} cannot make changes to ${found.fullName}.`);
+    return found.url;
+  }
+  private running(): HostThread {
+    if (!this.host) throw new Error('This Mac is not hosting.');
+    return this.host;
+  }
+
+  async keepOnGitHub(notebook: string, choice: RepositoryChoice): Promise<GitHubInfo> {
+    await this.needGit();
+    const remote = await this.remote(choice);
+    try {
+      await this.running().call({ op: 'keep', notebook, remote });
+    } finally {
+      void this.tell();
+    }
+    return this.github();
+  }
+  /**
+   * Makes a hosted notebook from a repository and returns an invitation to it, for the app to
+   * join it from a new folder. Hosting is turned on if it was off.
+   */
+  importFromGitHub(choice: RepositoryChoice): Promise<{ address: string; code: string }> {
+    return this.serial(async () => {
+      await this.needGit();
+      const remote = await this.remote(choice);
+      await this.open();
+      if (!this.host) throw new Error(this.error ?? 'Hosting could not start.');
+      this.saved.enabled = true;
+      await this.save();
+      const { notebooks } = await this.host.call<Snapshot>({ op: 'snapshot' });
+      const base =
+        'create' in choice
+          ? choice.create
+          : (parseRepository(choice.repository).fullName?.split('/')[1] ??
+            remote
+              .replace(/\.git$/, '')
+              .split(/[/:]/)
+              .at(-1) ??
+            'Notes');
+      const taken = new Set([
+        ...notebooks.map((each) => each.name.toLowerCase()),
+        ...Object.values(this.saved.folders ?? {}).map((name) => name.toLowerCase()),
+      ]);
+      let name = base;
+      for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${base} ${n}`;
+      try {
+        await this.host.call({ op: 'keep', notebook: name, remote });
+      } finally {
+        void this.tell();
+      }
+      const { code } = await this.host.call<{ code: string }>({ op: 'invite', notebook: name });
+      return { address: `http://127.0.0.1:${this.saved.port}`, code };
+    });
+  }
+  /** Remembers that a folder on this Mac is a notebook hosted here, joined as `device`. */
+  async adopt(folder: string, notebook: string, device: string): Promise<void> {
+    this.saved.own = [...(this.saved.own ?? []), device];
+    this.saved.folders = { ...this.saved.folders, [folder]: notebook };
+    await this.save();
+    void this.tell();
+  }
+  async syncGitHub(notebook: string, confirmDeletions = false): Promise<GitHubInfo> {
+    await this.running().call({ op: 'mirror', notebook, confirm: confirmDeletions });
+    return this.github();
+  }
+  async stopGitHub(notebook: string): Promise<GitHubInfo> {
+    await this.running().call({ op: 'unmirror', notebook });
+    void this.tell();
+    return this.github();
   }
 }

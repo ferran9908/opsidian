@@ -59,6 +59,16 @@ contextBridge.exposeInMainWorld('opsidian', {
   backUpNow: call('backup:now'),
   restoreBackup: call('backup:restore'),
   onHosting: subscribe('hosting:info'),
+  github: call('github:info'),
+  signInToGitHub: call('github:sign-in'),
+  finishGitHubSignIn: call('github:finish-sign-in'),
+  cancelGitHubSignIn: call('github:cancel-sign-in'),
+  signOutOfGitHub: call('github:sign-out'),
+  githubRepositories: call('github:repositories'),
+  keepOnGitHub: call('github:keep'),
+  importFromGitHub: call('github:import'),
+  syncGitHub: call('github:sync'),
+  stopGitHub: call('github:stop'),
   // Whoever listens is waited for when the window closes, so listening is announced, and the
   // announcement taken back when it stops.
   onCloseRequest: (callback: () => void) => {

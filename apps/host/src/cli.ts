@@ -19,6 +19,9 @@ import {
   type Config,
 } from './home';
 import { service, type Service } from './service';
+import { github, readAccount, statusLine } from './github-cli';
+import { repositoryLabel } from './github';
+import { Mirrors } from './mirror';
 
 const VERSION = process.env.OPSIDIAN_VERSION ?? 'development';
 // Said back in messages the way it was typed: from this repository, through npx, or installed.
@@ -64,6 +67,10 @@ const HELP = `Opsidian ${VERSION}: a host for your notebooks, so every device sy
   ${me} host backup now|off   Back up now, or stop backing up
   ${me} host backups          The backups there are
   ${me} host restore BACKUP   Put the host back to a backup
+  ${me} host github import you/notes      Make a notebook from a GitHub repository, and invite a device
+  ${me} host github connect "Name" [REPO] Keep a notebook in a GitHub repository, both ways
+  ${me} host github                       How each notebook on GitHub is doing; also login,
+                                         sync, disconnect, logout
   ${me} host logs [-f]        What the host has been doing
   ${me} host stop             Stop it, and stop it starting by itself
   ${me} host uninstall        Stop it and remove the program; --delete-data removes your notebooks too
@@ -232,9 +239,10 @@ async function status(): Promise<void> {
   const state = 'missing' in manager ? { running: false } : await manager.state();
   const reach = reachableAt(config);
   const answering = state.running && (await answers(reach));
-  const { notebooks, devices } = await withHost((host) => ({
+  const { notebooks, devices, mirrors } = await withHost((host) => ({
     notebooks: host.notebooks(),
     devices: host.devices().filter((device) => !device.revoked),
+    mirrors: host.mirrors(),
   }));
   let backups = backupLine(config);
   if (config.backup) {
@@ -254,13 +262,16 @@ async function status(): Promise<void> {
       `  Notebooks  ${notebooks.map((each) => `${each.name} (${each.files} files)`).join(', ') || 'none yet'}`,
       `  Devices    ${devices.length}`,
       `  Backups    ${backups}`,
+      ...mirrors.map(
+        (record, at) =>
+          `  ${at ? '          ' : 'GitHub   '}  ${record.name} → ${repositoryLabel(record.remote)}  ${statusLine(record.status)}`,
+      ),
       `  Data       ${where.data}`,
     ].join('\n'),
   );
 }
 
-async function invite(): Promise<void> {
-  const name = words.join(' ') || 'Personal';
+async function invite(name = words.join(' ') || 'Personal'): Promise<void> {
   const minutes = Number(flags.get('minutes') ?? 15);
   const { code, expires } = await withHost((host) => host.invite(name, minutes));
   const address = await deviceAddress();
@@ -358,6 +369,11 @@ async function runHere(): Promise<void> {
   }
   log(`Opsidian host ${VERSION} is listening on ${address}:${port}. Data: ${data}`);
 
+  // Notebooks kept on GitHub sync from here, beside the host. New ones, added with
+  // `host github connect`, are noticed within a few seconds.
+  const mirrors = new Mirrors({ host, dataDir: data, account: () => readAccount(where), log });
+  mirrors.start();
+
   // Backups are scheduled here, so a server needs no cron. Settings are read each time, so
   // `host backup` changes them without a restart.
   let busy = false;
@@ -394,7 +410,10 @@ async function runHere(): Promise<void> {
   const stop = () => {
     clearInterval(timer);
     log('Stopping.');
-    void host.close().then(() => process.exit(0));
+    void mirrors
+      .stop()
+      .then(() => host.close())
+      .then(() => process.exit(0));
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
@@ -415,6 +434,19 @@ async function main(): Promise<void> {
       return status();
     case 'invite':
       return invite();
+    case 'github':
+      return github({
+        me,
+        where,
+        flags,
+        words,
+        withHost,
+        invite,
+        running: async () => {
+          const config = await readConfig(where);
+          return Boolean(config) && (await answers(reachableAt(config!)));
+        },
+      });
     case 'devices':
       return withHost((host) => {
         const all = host.devices();

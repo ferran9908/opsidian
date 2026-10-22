@@ -10,7 +10,8 @@ export function App() {
   const theme = useTheme();
   // undefined while asking which notebook, if any, was open last time.
   const [vault, setVault] = useState<VaultInfo | null>();
-  const [choosing, setChoosing] = useState(false);
+  // Showing the welcome screen over an open notebook, and in which mode.
+  const [choosing, setChoosing] = useState<false | 'start' | 'github'>(false);
   const [error, setError] = useState('');
   useEffect(() => {
     void bridge
@@ -27,6 +28,7 @@ export function App() {
       {!vault || choosing ? (
         <Welcome
           error={error}
+          {...(choosing === 'github' ? { mode: 'github' as const } : {})}
           onOpened={(next) => {
             setVault(next);
             setChoosing(false);
@@ -38,7 +40,7 @@ export function App() {
           key={vault.location}
           vault={vault}
           theme={theme}
-          onSwitch={() => setChoosing(true)}
+          onSwitch={(mode) => setChoosing(mode ?? 'start')}
         />
       )}
       <UpdateNotice />

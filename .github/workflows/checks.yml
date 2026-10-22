@@ -1,0 +1,44 @@
+# Checks a pull request on Linux and on a Mac, the two places a host runs, before it reaches
+# main. The release workflow checks main again on its own.
+name: Checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+        if: runner.os == 'Linux'
+      - run: pnpm typecheck
+      - run: pnpm test
+      # The Mac app's GitHub screens, driven end to end against a stand-in for GitHub that
+      # speaks real git. Linux has no screen, so it gets a virtual one.
+      - name: GitHub in the desktop app
+        if: runner.os == 'macOS'
+        run: pnpm test:github
+      - name: GitHub in the desktop app
+        if: runner.os == 'Linux'
+        run: pnpm build:desktop && xvfb-run --auto-servernum node scripts/test-github.mjs --no-sandbox

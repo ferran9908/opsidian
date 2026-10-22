@@ -50,7 +50,8 @@ import { cn } from '@/lib/utils';
 interface Props {
   vault: VaultInfo;
   theme: ReturnType<typeof useTheme>;
-  onSwitch(): void;
+  /** Shows the welcome screen, to open another notebook or, with `github`, import one. */
+  onSwitch(mode?: 'github'): void;
 }
 
 export function Workspace({ vault, theme, onSwitch }: Props) {
@@ -341,7 +342,7 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
           onTrash={(path) => void trash(path)}
           onReveal={(path) => void bridge.reveal(path).catch(fail)}
           onShowTrash={() => setTrashOpen(true)}
-          onSwitch={onSwitch}
+          onSwitch={() => onSwitch()}
           sort={sort}
           onSort={(next) => {
             setSort(next);
@@ -574,6 +575,10 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
           onConnect={() => {
             setSettings(undefined);
             setSyncOpen(true);
+          }}
+          onImport={() => {
+            setSettings(undefined);
+            onSwitch('github');
           }}
           onClose={() => setSettings(undefined)}
         />
