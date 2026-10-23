@@ -141,6 +141,14 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Not moved:** the GitHub sign-in (kept per machine, in the keychain or a file only its user can read), backup settings, and unused invitations.
 - **Not built:** changing the address by hand on the iPhone (it follows a move by itself, through the shared sync service), and a way to undo a finished move other than moving back.
 
+## Hosting beside development — 2026-10-23
+
+- **One machine can host real notebooks and be where Opsidian is developed.** Requested by the user, who wants this server to be their host and keeps developing on it.
+- **A service per data folder.** The real host in `~/.opsidian` keeps `opsidian-host.service` (and `sh.ferran.opsidian.host`); every other folder's service is named after it. Before, every host on an account shared one name, so starting or removing a test host replaced or stopped the real one. A service an older version made for a folder other than `~/.opsidian` under the plain name is taken over by that folder's next `start` or `stop`.
+- **`pnpm host` is a development build** with its own home, `~/.opsidian-dev`, and port 4811. It refuses `~/.opsidian` unless `--production` is given, since a work-in-progress build could change the real database. Separate users or containers were considered; they need root or Docker, which a development server may not have.
+- **Tests run with a home of their own**, set before any test file, and the hosts they start listen on `127.0.0.1`, not on a server's public address.
+- **The Mac app's development runs keep their own data,** in `Opsidian Development`, and host on port 4811. This replaces "the app's data folder is `Opsidian` for installed and development copies alike" from the release decisions: a development run could otherwise rewrite the installed app's host. Data development runs left in `Opsidian` stays there, unused by them.
+
 ## Future AI direction
 
 Potential features: organize a messy thought, answer questions over notes with citations, and suggest related notes. A machine-hosted agent and supported Codex/ChatGPT sign-in were explored. No AI integration is committed for the initial milestones; re-check product access and integration documentation when that work begins.
@@ -164,7 +172,7 @@ Milestone 1 uses a fixed single-note directory to isolate editor validation from
 - **Backups are scheduled inside the host,** the same daily rule the Mac app uses, so a server needs no cron.
 - **The Mac app is packaged with electron-builder** and updated with electron-updater from GitHub releases. Everything the app runs is bundled at build time, so no `node_modules` are shipped. Separate Apple silicon and Intel downloads keep each half the size of a universal one.
 - **The repository becomes public,** so its releases page can serve updates without a token. The code was already permissively licensed; the history was checked for secrets first.
-- **The app's data folder is `Opsidian`** for installed and development copies alike. Development copies used `@opsidian/desktop`; that data is not moved, because device credentials are encrypted with a keychain key named after the app, and the name changed.
+- **The app's data folder is `Opsidian`** for installed copies (development runs: see "Hosting beside development — 2026-10-23"). Development copies used `@opsidian/desktop`; that data is not moved, because device credentials are encrypted with a keychain key named after the app, and the name changed.
 - **Every push to `main` that changes the Mac app is a release,** built and published by GitHub Actions as `<major>.<minor>.<run number>`. T3 Code's nightly-then-promote channels were considered; with one developer, a single channel is enough. Tests gate the release; releases run one at a time and are never cancelled midway.
 - **Updates follow Agentic Studio's pattern:** one update state owned by the main process, offered in the window and Settings, downloaded when asked, and read from the latest release's `latest-mac.yml` directly rather than GitHub's cached release list, which made the app say it was up to date when it was not.
 - **The iPhone app ships through EAS, as T3 Code's does:** builds and TestFlight submission by EAS, and JavaScript-only changes over the air (expo-updates, fingerprint runtime version), decided per push by comparing fingerprints. Building with Xcode on GitHub Actions was the alternative; it would make every change a full TestFlight build.

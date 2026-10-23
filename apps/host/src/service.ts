@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -8,7 +8,10 @@ import type { Place } from './home';
 
 const run = promisify(execFile);
 export const LABEL = 'sh.ferran.opsidian.host';
-const UNIT = 'opsidian-host.service';
+/** The service's name for one host: the real one keeps the plain name, any other has its tag. */
+export const labelOf = (where: Place) => (where.instance ? `${LABEL}.${where.instance}` : LABEL);
+export const unitOf = (where: Place) =>
+  `opsidian-host${where.instance ? `-${where.instance}` : ''}.service`;
 
 export interface ServiceState {
   running: boolean;
@@ -28,6 +31,20 @@ export interface Service {
   install(): Promise<void>;
   remove(): Promise<void>;
   state(): Promise<ServiceState>;
+}
+
+/**
+ * Before services were named per folder, every host had the plain name. One defined that way
+ * for this very folder is this host's own, from an older version: it is replaced, not left
+ * running beside the new one. Anyone else's is left alone.
+ */
+async function olderOwn(file: string, where: Place): Promise<boolean> {
+  if (!where.instance) return false;
+  const text = await readFile(file, 'utf8').catch(() => '');
+  return (
+    text.includes(`Environment=${quote(`OPSIDIAN_HOME=${where.home}`)}`) ||
+    text.includes(`<string>${xml(where.home)}</string>`)
+  );
 }
 
 /** A systemd word: quoted, with its own escapes for `$` and `%`, which it would otherwise expand. */
@@ -56,7 +73,7 @@ export function launchdPlist(where: Place, node = process.execPath): string {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${LABEL}</string>
+  <string>${labelOf(where)}</string>
   <key>ProgramArguments</key>
   <array>
 ${args}
@@ -104,37 +121,49 @@ WantedBy=${system ? 'multi-user.target' : 'default.target'}
 }
 
 class Launchd implements Service {
-  readonly file = join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
   private readonly target = `gui/${process.getuid!()}`;
-  constructor(private readonly where: Place) {}
+  private readonly label: string;
+  readonly file: string;
+  constructor(private readonly where: Place) {
+    this.label = labelOf(where);
+    this.file = join(homedir(), 'Library', 'LaunchAgents', `${this.label}.plist`);
+  }
 
   async advice() {
     return undefined;
   }
+  private async retireOlder() {
+    const older = join(dirname(this.file), `${LABEL}.plist`);
+    if (older === this.file || !(await olderOwn(older, this.where))) return;
+    await run('launchctl', ['bootout', `${this.target}/${LABEL}`]).catch(() => {});
+    await rm(older, { force: true });
+  }
   async install() {
+    await this.retireOlder();
     await mkdir(dirname(this.file), { recursive: true });
     await writeFile(this.file, launchdPlist(this.where));
     // Loading it again is how launchd picks up a changed definition or a new program. Unloading
     // finishes after the command returns, and loading before then fails, so it is waited for.
-    await run('launchctl', ['bootout', `${this.target}/${LABEL}`]).catch(() => {});
+    await run('launchctl', ['bootout', `${this.target}/${this.label}`]).catch(() => {});
     for (let tries = 0; tries < 50 && (await this.loaded()); tries++)
       await new Promise((done) => setTimeout(done, 100));
     await run('launchctl', ['bootstrap', this.target, this.file]);
   }
   private async loaded() {
-    return run('launchctl', ['print', `${this.target}/${LABEL}`]).then(
+    return run('launchctl', ['print', `${this.target}/${this.label}`]).then(
       () => true,
       () => false,
     );
   }
   async remove() {
-    await run('launchctl', ['bootout', `${this.target}/${LABEL}`]).catch(() => {});
+    await this.retireOlder();
+    await run('launchctl', ['bootout', `${this.target}/${this.label}`]).catch(() => {});
     // Without its file it does not come back at the next login.
     await rm(this.file, { force: true });
   }
   async state(): Promise<ServiceState> {
     try {
-      const { stdout } = await run('launchctl', ['print', `${this.target}/${LABEL}`]);
+      const { stdout } = await run('launchctl', ['print', `${this.target}/${this.label}`]);
       const pid = Number(stdout.match(/^\s*pid = (\d+)/m)?.[1]);
       return { running: /^\s*state = running/m.test(stdout), ...(pid ? { pid } : {}) };
     } catch {
@@ -145,11 +174,15 @@ class Launchd implements Service {
 
 class Systemd implements Service {
   private readonly system = process.getuid!() === 0;
-  readonly file = this.system
-    ? `/etc/systemd/system/${UNIT}`
-    : join(homedir(), '.config', 'systemd', 'user', UNIT);
+  private readonly unit: string;
+  readonly file: string;
   private readonly flags = this.system ? [] : ['--user'];
-  constructor(private readonly where: Place) {}
+  constructor(private readonly where: Place) {
+    this.unit = unitOf(where);
+    this.file = this.system
+      ? `/etc/systemd/system/${this.unit}`
+      : join(homedir(), '.config', 'systemd', 'user', this.unit);
+  }
 
   private readonly user = userInfo().username;
 
@@ -171,6 +204,7 @@ class Systemd implements Service {
     // unless the user may linger. Most systems let people allow that for themselves.
     if (!this.system && !(await this.lingers()))
       await run('loginctl', ['enable-linger', this.user]).catch(() => {});
+    await this.retireOlder();
     await mkdir(dirname(this.file), { recursive: true });
     await writeFile(this.file, systemdUnit(this.where, this.system));
     await this.ctl('daemon-reload').catch((reason: Error) => {
@@ -181,18 +215,28 @@ class Systemd implements Service {
         );
       throw reason;
     });
-    await this.ctl('enable', UNIT);
-    await this.ctl('restart', UNIT);
+    await this.ctl('enable', this.unit);
+    await this.ctl('restart', this.unit);
+  }
+  private async retireOlder() {
+    const plain = 'opsidian-host.service';
+    const older = join(dirname(this.file), plain);
+    if (older === this.file || !(await olderOwn(older, this.where))) return;
+    await this.ctl('disable', '--now', plain).catch(() => {});
+    await rm(older, { force: true });
   }
   async remove() {
-    await this.ctl('disable', '--now', UNIT).catch(() => {});
+    await this.retireOlder();
+    await this.ctl('disable', '--now', this.unit).catch(() => {});
     await rm(this.file, { force: true });
     await this.ctl('daemon-reload').catch(() => {});
   }
   async state(): Promise<ServiceState> {
-    const { stdout } = await this.ctl('show', UNIT, '--property=ActiveState,MainPID').catch(() => ({
-      stdout: '',
-    }));
+    const { stdout } = await this.ctl('show', this.unit, '--property=ActiveState,MainPID').catch(
+      () => ({
+        stdout: '',
+      }),
+    );
     const pid = Number(stdout.match(/MainPID=(\d+)/)?.[1]);
     return { running: /ActiveState=active/.test(stdout), ...(pid ? { pid } : {}) };
   }

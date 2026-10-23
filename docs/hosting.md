@@ -142,6 +142,24 @@ A few things belong to a machine rather than to the host, so they do not move:
 
 The new machine refuses to take over if it already hosts notebooks of its own, so a host is never overwritten by accident. A machine whose host moved away holds only an old copy, so a host can be moved back to it. If the copy fails part-way, it is given up on both sides and the old host carries on as before; after five minutes without hearing from the new machine, the old host gives up by itself.
 
+## Beside development on the same machine
+
+A machine can host your real notebooks and be where Opsidian is developed and tested, without one touching the other:
+
+|              | Real host                                                                 | Development and tests                                            |
+| ------------ | ------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Started with | `npx opsidian host start` (or the installed `opsidian`)                   | `pnpm host …` in the repository                                  |
+| Data         | `~/.opsidian`                                                             | `~/.opsidian-dev`; tests use a new temporary folder each run     |
+| Port         | 4810, on the Tailscale address                                            | 4811; tests use random ports on `127.0.0.1` only                 |
+| Service      | `opsidian-host.service` (`sh.ferran.opsidian.host` on a Mac)              | named after its folder, such as `opsidian-host-a75a2422.service` |
+| Program      | its own copy in `~/.opsidian/bin`, unchanged by rebuilding the repository | the repository's build                                           |
+
+Starting, stopping or removing a development host never touches the real one, because each data folder's service has its own name. `pnpm host` refuses to act on `~/.opsidian` at all, whether through `OPSIDIAN_HOME` or `--data`, unless `--production` is added. The automated tests set their own `OPSIDIAN_HOME` before anything runs.
+
+The Mac app works the same way: a development run (`pnpm dev:desktop`) keeps its data in `Opsidian Development` and hosts on port 4811, so it can run beside the installed app.
+
+Backups and the copy on GitHub protect the real host's data whatever happens on the machine. Keep backups in a folder outside `~/.opsidian`.
+
 ## Devices
 
 On a hosting Mac, **Settings → Devices** lists every device, when it was last seen, and invitations not yet used. Removing a device stops it syncing at once; the notes on it stay there. Without the app, use `host devices` and `host revoke`.

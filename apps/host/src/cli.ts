@@ -1,18 +1,20 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Host, listBackups, restoreBackup, type Moved } from './host';
 import {
-  DEFAULT_PORT,
   addresses,
   chooseAddress,
+  defaultPort,
+  developing,
   drawQr,
   invitationLink,
   isTailscale,
   parseArgs,
   place,
+  productionHome,
   reachableAt,
   readConfig,
   writeConfig,
@@ -83,7 +85,11 @@ const HELP = `Opsidian ${VERSION}: a host for your notebooks, so every device sy
   ${me} host uninstall        Stop it and remove the program; --delete-data removes your notebooks too
   ${me} host run              Run in this terminal instead (for Docker, or to watch it)
 
-Settings, data and the log are in ${where.home}.`;
+Settings, data and the log are in ${where.home}.${
+  developing()
+    ? `\nThis is a development build, so it keeps its own host there, on port ${defaultPort()},\napart from the real one in ${productionHome()}.`
+    : ''
+}`;
 
 /** Answers whether an Opsidian host is at an address, quickly. */
 async function answers(address: string): Promise<boolean> {
@@ -129,7 +135,7 @@ async function deviceAddress(): Promise<string> {
   const config = await readConfig(where);
   return reachableAt({
     address: flags.get('address') ?? config?.address ?? '0.0.0.0',
-    port: whole('port', config?.port ?? DEFAULT_PORT, 1, 65535),
+    port: whole('port', config?.port ?? defaultPort(), 1, 65535),
   });
 }
 
@@ -150,7 +156,7 @@ function backupLine(config: Config): string {
  * a Mac that fell back to its home network moves to Tailscale once it has it.
  */
 async function listening(before: Config | undefined): Promise<{ config: Config; note?: string }> {
-  const port = whole('port', before?.port ?? DEFAULT_PORT, 1, 65535);
+  const port = whole('port', before?.port ?? defaultPort(), 1, 65535);
   let address = flags.get('address');
   let manual = address !== undefined || before?.manual === true;
   let note: string | undefined;
@@ -382,7 +388,7 @@ async function restore(): Promise<void> {
   const managed = (await manager?.state())?.running === true;
   // A host this program does not manage, such as `host run` in Docker or a terminal, must be
   // stopped by whoever started it: its data is about to be replaced underneath it.
-  const port = config?.port ?? DEFAULT_PORT;
+  const port = config?.port ?? defaultPort();
   const live = [`127.0.0.1:${port}`, ...(config ? [reachableAt(config)] : [])];
   if (!managed && (await Promise.all(live.map(answers))).some(Boolean))
     fail('The host is running. Stop it first (Ctrl+C, or docker stop), then restore.');
@@ -449,7 +455,7 @@ async function takeOverHere(): Promise<void> {
   const running = (await manager?.state())?.running === true;
   if (manager && config) {
     if (!running) await portFree(manager, before, config);
-  } else if (await answers(`127.0.0.1:${before?.port ?? DEFAULT_PORT}`))
+  } else if (await answers(`127.0.0.1:${before?.port ?? defaultPort()}`))
     fail('A host is running here. Stop the container first, then take over with docker run --rm.');
 
   const tty = process.stdout.isTTY;
@@ -522,7 +528,7 @@ async function takeOverHere(): Promise<void> {
 /** Runs the host in this process until it is told to stop. This is what the service runs. */
 async function runHere(): Promise<void> {
   const config = await readConfig(where);
-  const port = whole('port', config?.port ?? DEFAULT_PORT, 1, 65535);
+  const port = whole('port', config?.port ?? defaultPort(), 1, 65535);
   const address = flags.get('address') ?? config?.address ?? '0.0.0.0';
   const data = flags.get('data') ?? where.data;
   const host = new Host({ dataDir: data });
@@ -617,6 +623,20 @@ async function main(): Promise<void> {
   const [area, ...rest] = words.splice(0, 2);
   // Every command lives under `host`, leaving room for others beside it later.
   if (area !== 'host' || flags.has('help') || flags.has('h')) return console.log(HELP);
+  // A development build never acts on the real host's data by accident: not by a stray
+  // OPSIDIAN_HOME, not by --data. Its own host lives in ~/.opsidian-dev.
+  const real = resolve(productionHome());
+  const data = flags.get('data');
+  if (
+    developing() &&
+    !flags.has('production') &&
+    (resolve(where.home) === real ||
+      (data && (resolve(data) === real || resolve(data).startsWith(real + sep))))
+  )
+    fail(
+      `This is a development build, and ${real} belongs to the real host on this machine.\n` +
+        'Use the installed opsidian command for it, or add --production to act on it from here anyway.',
+    );
   const command = rest[0];
   switch (command) {
     case 'start':
