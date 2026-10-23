@@ -8,7 +8,7 @@
  */
 
 /** Opsidian's OAuth app on GitHub. Not a secret: the device flow needs only the id. */
-export const CLIENT_ID = process.env.OPSIDIAN_GITHUB_CLIENT_ID || 'Ov23liOpsidianPending';
+export const CLIENT_ID = process.env.OPSIDIAN_GITHUB_CLIENT_ID || 'Ov23liVYN7TIXVnb7rMB';
 const API = process.env.OPSIDIAN_GITHUB_API || 'https://api.github.com';
 const WEB = process.env.OPSIDIAN_GITHUB_WEB || 'https://github.com';
 
