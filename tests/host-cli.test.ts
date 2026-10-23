@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   chooseAddress,
+  defaultPort,
+  productionHome,
   drawQr,
   invitationLink,
   isTailscale,
@@ -8,7 +10,7 @@ import {
   place,
   reachableAt,
 } from '../apps/host/src/home';
-import { LABEL, launchdPlist, systemdUnit } from '../apps/host/src/service';
+import { LABEL, labelOf, launchdPlist, systemdUnit, unitOf } from '../apps/host/src/service';
 
 describe('the address a host listens on', () => {
   const tailscale = { kind: 'tailscale' as const, ip: '100.119.32.51' };
@@ -51,7 +53,7 @@ describe('the background service', () => {
 
   it('runs the installed copy with this Node, and starts again by itself (launchd)', () => {
     const plist = launchdPlist(where, '/opt/node/bin/node');
-    expect(plist).toContain(`<string>${LABEL}</string>`);
+    expect(plist).toContain(`<string>${labelOf(where)}</string>`);
     expect(plist).toContain(
       '<string>/opt/node/bin/node</string>\n    <string>/Users/someone/.opsidian/bin/opsidian.mjs</string>\n    <string>host</string>\n    <string>run</string>',
     );
@@ -121,5 +123,44 @@ describe('the command line', () => {
     expect(flags.has('f')).toBe(true);
     expect(flags.has('delete-data')).toBe(true);
     expect(words).toEqual(['host', 'logs', 'extra']);
+  });
+});
+
+describe('a development or test host beside the real one', () => {
+  it('runs tests with a home of their own, never the real host’s', () => {
+    expect(process.env.OPSIDIAN_HOME).toBeTruthy();
+    expect(place().home).not.toBe(productionHome());
+  });
+
+  it('gives each folder’s host its own service, and the real one the plain name', () => {
+    const real = place(productionHome());
+    expect(real.instance).toBe('');
+    expect(labelOf(real)).toBe(LABEL);
+    expect(unitOf(real)).toBe('opsidian-host.service');
+    const other = place('/tmp/some-test-host');
+    expect(other.instance).toMatch(/^[0-9a-f]{8}$/);
+    expect(labelOf(other)).toBe(`${LABEL}.${other.instance}`);
+    expect(unitOf(other)).toBe(`opsidian-host-${other.instance}.service`);
+    // The same folder always gets the same name, so stop finds what start made.
+    expect(place('/tmp/some-test-host/').instance).toBe(other.instance);
+    expect(place('/tmp/another').instance).not.toBe(other.instance);
+  });
+
+  it('keeps `pnpm host` in its own folder and on its own port', () => {
+    const saved = { ...process.env };
+    try {
+      delete process.env.OPSIDIAN_HOME;
+      process.env.npm_lifecycle_event = 'start';
+      process.env.npm_package_name = 'opsidian';
+      expect(place().home).toBe(`${productionHome()}-dev`);
+      expect(place().instance).not.toBe('');
+      expect(defaultPort()).toBe(4811);
+      // `npx opsidian`, as people run it, is the real thing.
+      process.env.npm_lifecycle_event = 'npx';
+      expect(place().home).toBe(productionHome());
+      expect(defaultPort()).toBe(4810);
+    } finally {
+      process.env = saved;
+    }
   });
 });

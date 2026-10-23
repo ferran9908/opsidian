@@ -21,6 +21,7 @@ Read README.md and docs/decisions.md before implementation. Consult the relevant
 - Keep sync, file I/O, and indexing off the typing path.
 - Render note content as untrusted content; expose a narrow typed native bridge.
 - Keep user vaults, secrets, pairing credentials, and local test data out of Git.
+- Development and tests never use a real host's data: `pnpm host` uses `~/.opsidian-dev` and port 4811, tests a temporary `OPSIDIAN_HOME` and `127.0.0.1`. Never run commands against `~/.opsidian` or the `opsidian-host.service` unit.
 - Do not claim unimplemented app or sync functionality based on scaffold checks.
 
 ## Validation

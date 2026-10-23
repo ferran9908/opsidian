@@ -13,6 +13,8 @@ const env = {
   OPSIDIAN_PROFILE_DIR: join(root, 'profile'),
   OPSIDIAN_BACKUP_DIR: join(root, 'backups'),
   OPSIDIAN_HOST_PORT: String(5400 + Math.floor(Math.random() * 500)),
+  // The app's host listens on this machine only, never on its network addresses.
+  OPSIDIAN_HOST_ADDRESS: '127.0.0.1',
 };
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.OPSIDIAN_RENDERER_URL;

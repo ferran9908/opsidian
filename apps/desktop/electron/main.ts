@@ -33,6 +33,14 @@ protocol.registerSchemesAsPrivileged([
 if (!app.requestSingleInstanceLock()) app.quit();
 else void start();
 
+/**
+ * A development run keeps its own data, apart from the installed app's: its own notebooks list,
+ * device credentials and, when it hosts, its own host. Otherwise trying out a change could
+ * rewrite the real host's data. Tests choose a folder of their own before this runs.
+ */
+if (!app.isPackaged && app.getPath('userData') === join(app.getPath('appData'), 'Opsidian'))
+  app.setPath('userData', join(app.getPath('appData'), 'Opsidian Development'));
+
 /** Icons drawn from design/logo by `pnpm icons`. */
 const resources = join(__dirname, '../resources');
 

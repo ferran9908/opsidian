@@ -1,16 +1,39 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir, networkInterfaces } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import qrcode from 'qrcode-generator';
+
+/** Where the real host on this machine keeps everything, unless told otherwise. */
+export const productionHome = () => join(homedir(), '.opsidian');
+
+/**
+ * Whether this is `pnpm host` in the repository: a development build, which keeps its own
+ * host in `~/.opsidian-dev` on port 4811, so that working on Opsidian on a machine that also
+ * hosts real notebooks never touches them.
+ */
+export const developing = () =>
+  process.env.npm_lifecycle_event === 'start' && process.env.npm_package_name === 'opsidian';
 
 /**
  * Where a host installed with `opsidian host start` keeps everything: its settings, its data,
  * its log, and the copy of the program the service runs. `OPSIDIAN_HOME` moves it, for tests
  * and for Docker.
  */
-export function place(home = process.env.OPSIDIAN_HOME || join(homedir(), '.opsidian')) {
+export function place(
+  home = process.env.OPSIDIAN_HOME ||
+    (developing() ? join(homedir(), '.opsidian-dev') : productionHome()),
+) {
+  const standard = resolve(home) === resolve(productionHome());
   return {
     home,
+    /**
+     * Tells this host's background service apart from any other on the machine: empty for
+     * the real one in `~/.opsidian`, a short tag for every other folder, such as a
+     * development or test host. Each folder thus has a service of its own, and starting or
+     * removing one never replaces or stops another.
+     */
+    instance: standard ? '' : createHash('sha256').update(resolve(home)).digest('hex').slice(0, 8),
     config: join(home, 'host.json'),
     data: join(home, 'host'),
     log: join(home, 'host.log'),
@@ -33,6 +56,8 @@ export interface Config {
 }
 
 export const DEFAULT_PORT = 4810;
+/** The port a host starts on unless told: 4811 for a development build, beside the real one. */
+export const defaultPort = () => (developing() ? DEFAULT_PORT + 1 : DEFAULT_PORT);
 
 const BOOLEAN = new Set([
   'follow',
@@ -46,6 +71,7 @@ const BOOLEAN = new Set([
   'confirm-deletions',
   'yes',
   'y',
+  'production',
 ]);
 
 /** Splits a command line into words and flags; `--port 4811` and `--port=4811` are the same. */

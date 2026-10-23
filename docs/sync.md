@@ -11,14 +11,14 @@ Milestone 3, 2026-10-14. A notebook can be kept in step between devices through 
 
 ## Running it
 
-On the machine that will be the host (this Mac, another Mac, a VPS):
+To try sync from this repository:
 
 ```sh
-pnpm host run                   # in this terminal; port 4810, data in ~/.opsidian/host
+pnpm host run                   # in this terminal; port 4811, data in ~/.opsidian-dev/host
 pnpm host invite "Personal"     # prints an address and a single-use code
 ```
 
-To leave it running in the background instead, use `pnpm host start`, or `npx opsidian host start` on a machine without this repository. See [hosting](hosting.md).
+`pnpm host` is a development build, so it keeps its own host in `~/.opsidian-dev` on port 4811, apart from a real one on the same machine. To leave it running in the background, use `pnpm host start`. A real host is installed with `npx opsidian host start` (port 4810, `~/.opsidian`); see [hosting](hosting.md#beside-development-on-the-same-machine).
 
 On the first Mac, open the notebook, click the sync line at the bottom of the sidebar, and enter the address and code. On the second Mac, run `invite` again for a fresh code, then choose **Connect to a notebook** on the welcome screen. Each invitation works once and expires after 15 minutes.
 

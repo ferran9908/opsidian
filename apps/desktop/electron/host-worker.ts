@@ -43,7 +43,8 @@ async function open(dataDir: string, port: number): Promise<void> {
   if (host) return;
   const opened = new Host({ dataDir });
   try {
-    await opened.listen(port, '0.0.0.0');
+    // Every address, so devices can reach this Mac; tests keep it to this machine.
+    await opened.listen(port, process.env.OPSIDIAN_HOST_ADDRESS || '0.0.0.0');
   } catch (reason) {
     await opened.close().catch(() => {});
     throw reason;

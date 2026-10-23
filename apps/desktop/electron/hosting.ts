@@ -1,4 +1,4 @@
-import { clipboard, safeStorage, shell } from 'electron';
+import { app, clipboard, safeStorage, shell } from 'electron';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
@@ -55,8 +55,9 @@ interface Saved {
 }
 const fresh = (): Saved => ({
   enabled: false,
-  // The port can be moved for tests, or when 4810 is taken.
-  port: Number(process.env.OPSIDIAN_HOST_PORT) || 4810,
+  // The port can be moved for tests, or when 4810 is taken. A development run uses 4811, so
+  // it can host beside the installed app, or a host already running on this Mac.
+  port: Number(process.env.OPSIDIAN_HOST_PORT) || (app.isPackaged ? 4810 : 4811),
   keepRunning: true,
   backup: { hour: 3, keep: 14 },
 });
