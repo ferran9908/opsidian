@@ -6,15 +6,19 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/host/package.json apps/host/
 COPY packages/core/package.json packages/core/
 COPY packages/sync/package.json packages/sync/
+COPY packages/notebook/package.json packages/notebook/
 RUN pnpm install --frozen-lockfile --filter opsidian...
 COPY tsconfig.base.json ./
 COPY apps/host apps/host
 COPY packages/core packages/core
 COPY packages/sync packages/sync
+COPY packages/notebook packages/notebook
 RUN pnpm --filter opsidian build
 
 FROM node:24-slim
-# One file, no dependencies to install.
+# git, to keep notebooks on GitHub. Otherwise one file, with nothing else to install.
+RUN apt-get update && apt-get install --yes --no-install-recommends git openssh-client ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/apps/host/dist/opsidian.mjs /usr/local/lib/opsidian.mjs
 RUN printf '#!/bin/sh\nexec node /usr/local/lib/opsidian.mjs "$@"\n' > /usr/local/bin/opsidian \
   && chmod +x /usr/local/bin/opsidian && mkdir /data && chown node:node /data

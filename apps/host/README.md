@@ -16,6 +16,14 @@ npx opsidian host invite "Personal"
 
 Scan the code it prints with the Opsidian app, or type the address and code. A name the host has not seen makes a new notebook.
 
+## Keep notebooks on GitHub
+
+```sh
+npx opsidian host github import you/notes
+```
+
+makes a notebook from a GitHub repository (an Obsidian vault kept with git, say) and invites a device to it. `host github connect "Personal"` keeps an existing notebook in a repository instead. Either way it goes both ways from then on: changes reach GitHub within a minute, and edits made on GitHub come back to every device. Signing in shows a code to enter at github.com/login/device, so it works on a server without a browser. Needs git.
+
 ## Keep it private
 
 The host has no sign-in of its own, so it should only be reachable by your devices. Install [Tailscale](https://tailscale.com) on the host and on each device: the host then listens only on its Tailscale address, and syncs from anywhere. Without Tailscale, a Mac uses your home network; a server refuses to start unless you choose an address with `--address`.
@@ -32,6 +40,9 @@ The host has no sign-in of its own, so it should only be reachable by your devic
 | `host backup DIR` / `now` / `off`                        | Back up every night at 3 and once now; back up now; stop    |
 | `host backups` / `host restore BACKUP`                   | The backups there are; put the host back to one             |
 | `host logs [-f]`                                         | What the host has been doing                                |
+| `host github import you/notes`                           | A new notebook from a GitHub repository, and an invitation  |
+| `host github connect "Name" [REPO]`                      | Keep a notebook in a GitHub repository, both ways           |
+| `host github` / `sync` / `disconnect` / `logout`         | How each is doing; sync now; stop; forget the sign-in       |
 | `host stop`                                              | Stops it, and stops it starting by itself                   |
 | `host uninstall [--delete-data]`                         | Removes it; your notebooks stay unless you say otherwise    |
 | `host run`                                               | Runs in the terminal instead, for Docker or to watch it     |

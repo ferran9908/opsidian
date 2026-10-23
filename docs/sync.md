@@ -105,7 +105,7 @@ All paths begin `/v1`. Everything except `pair` needs `Authorization: Bearer <cr
 - **Pruning history.** The host keeps every version forever. That is what lets a device return after any absence without bringing old data back, and it means the host's disk only grows.
 - **Encrypted transport and public-host setup.** See above.
 - **A signed, installable host.** The Mac app can host from its settings and a server can run the Docker image ([hosting](hosting.md)), but neither is a signed download yet.
-- **A browsable copy on the host.** The host stores versions by content hash, not as a folder of Markdown files. To read a notebook on the host machine, connect a device to it.
+- **A browsable copy on the host.** The host stores versions by content hash, not as a folder of Markdown files. To read a notebook on the host machine, connect a device to it, or keep it on GitHub ([hosting](hosting.md#keeping-notebooks-on-github)).
 - **Empty folders.** Folders exist on other devices only once they contain a file.
 - **Files over 100 MB** are not synced.
 - **Sync while the iPhone app is closed.** The phone uses the same engine and syncs whenever the app is open. See [the iPhone app](iphone.md).
@@ -114,4 +114,5 @@ All paths begin `/v1`. Everything except `pair` needs `Authorization: Bearer <cr
 ## Checks
 
 - `tests/sync.test.ts` runs a real host and real notebook folders: propagation, identity through renames, letter-case renames, files trading names, merging, clashes, delete against edit, name collisions, joining two existing copies, the deletion guard, one unsyncable file among others, an oversized file, a two-second liveness bound, repeated requests, a connection that drops 20% of requests, damaged transfers, a crash at every step, and three devices doing random offline work with random connection failures. The random test checks that all devices end identical and that no line anyone wrote is missing unless someone removed it. `OPSIDIAN_FUZZ_SEEDS=200 pnpm test` runs it longer.
+- `tests/mirror.test.ts` keeps notebooks in real git repositories: importing one into a new notebook, sending a notebook to an empty one, edits, renames and deletions both ways, lines combined and clashes kept twice, edit against deletion, a push that loses a race, a crash in the middle of a merge, a host restart, the deletion guard, the background loop, and disconnecting. `pnpm test:github` drives the Mac app's GitHub screens against a stand-in for GitHub that speaks real git.
 - `pnpm test:sync` starts the host program and the production desktop app. It connects a local notebook with an invitation, has a second device edit the open note and add another, edits one note from both sides at once, restores an earlier version from history, and joins the notebook from a second, empty app.

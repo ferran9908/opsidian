@@ -14,6 +14,8 @@ export function place(home = process.env.OPSIDIAN_HOME || join(homedir(), '.opsi
     config: join(home, 'host.json'),
     data: join(home, 'host'),
     log: join(home, 'host.log'),
+    /** The GitHub sign-in, readable only by this user. */
+    github: join(home, 'github.json'),
     program: join(home, 'bin', 'opsidian.mjs'),
   };
 }
@@ -32,7 +34,19 @@ export interface Config {
 
 export const DEFAULT_PORT = 4810;
 
-const BOOLEAN = new Set(['follow', 'f', 'delete-data', 'help', 'h', 'version', 'v']);
+const BOOLEAN = new Set([
+  'follow',
+  'f',
+  'delete-data',
+  'help',
+  'h',
+  'version',
+  'v',
+  'with-token',
+  'confirm-deletions',
+  'yes',
+  'y',
+]);
 
 /** Splits a command line into words and flags; `--port 4811` and `--port=4811` are the same. */
 export function parseArgs(argv: string[]): { flags: Map<string, string>; words: string[] } {

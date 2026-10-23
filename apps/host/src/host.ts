@@ -78,6 +78,28 @@ export interface HostNotebook {
   versions: number;
   bytes: number;
 }
+/** How a copy of a notebook in a git repository is doing. */
+export interface MirrorStatus {
+  state: 'syncing' | 'synced' | 'offline' | 'error';
+  message?: string;
+  /** When the repository last matched the notebook, milliseconds. */
+  at?: number;
+  /** The commit the repository was at then. */
+  commit?: string;
+  /** Deletions held back because most of the notebook vanished from the repository at once. */
+  held?: number;
+}
+export interface MirrorRecord {
+  /** The notebook's id. */
+  notebook: string;
+  name: string;
+  /** Where the repository is, as git takes it. */
+  remote: string;
+  /** The device the copy syncs as, and its credential. */
+  device?: string;
+  token?: string;
+  status?: MirrorStatus;
+}
 export interface Backup {
   /** Names the snapshot; also its file name. */
   name: string;
@@ -208,6 +230,8 @@ export class Host {
       create table if not exists blobs (notebook text not null, hash text not null, size integer not null, primary key (notebook, hash));
       create table if not exists invites (code text primary key, notebook text not null, expires integer not null);
       create table if not exists meta (name text primary key, value text not null);
+      create table if not exists mirrors (
+        notebook text primary key, remote text not null, device text, token text, status text);
     `);
     if (!this.db.prepare("select 1 from pragma_table_info('devices') where name = 'seen'").get())
       this.db.exec('alter table devices add column seen integer');
@@ -225,17 +249,7 @@ export class Host {
 
   /** Creates a single-use invitation, and the notebook itself if it is new. */
   invite(notebook: string, minutes = 15): { code: string; expires: number } {
-    const name = notebook.trim();
-    if (!name || name.length > 200) throw new Error('Give the notebook a name.');
-    // The name becomes a folder on each device.
-    if (/[\\/:*?"<>|#^[\]\u0000-\u001f]/.test(name) || /^\.|\.$/.test(name))
-      throw new Error(
-        'A notebook name cannot contain \\ / : * ? " < > | # ^ [ ] or start or end with a dot.',
-      );
-    this.db
-      .prepare('insert into notebooks (id, name) values (?, ?) on conflict (name) do nothing')
-      .run(randomUUID(), name);
-    const id = this.db.prepare('select id from notebooks where name = ?').get(name)!.id as string;
+    const id = this.notebook(notebook);
     const raw = Array.from({ length: 12 }, () => ALPHABET[randomInt(ALPHABET.length)]).join('');
     const expires = Date.now() + minutes * 60000;
     this.db.prepare('delete from invites where expires < ?').run(Date.now());
@@ -292,6 +306,96 @@ export class Host {
       .all() as never;
   }
 
+  /** The id of the notebook with this name, made now if it is new. */
+  notebook(notebook: string): string {
+    const name = notebook.trim();
+    if (!name || name.length > 200) throw new Error('Give the notebook a name.');
+    // The name becomes a folder on each device.
+    if (/[\\/:*?"<>|#^[\]\u0000-\u001f]/.test(name) || /^\.|\.$/.test(name))
+      throw new Error(
+        'A notebook name cannot contain \\ / : * ? " < > | # ^ [ ] or start or end with a dot.',
+      );
+    this.db
+      .prepare('insert into notebooks (id, name) values (?, ?) on conflict (name) do nothing')
+      .run(randomUUID(), name);
+    return this.notebookId(name)!;
+  }
+  /** The id of the notebook with this name, if there is one. */
+  notebookId(name: string): string | undefined {
+    return this.db.prepare('select id from notebooks where name = ?').get(name.trim())?.id as
+      string | undefined;
+  }
+
+  // Copies of notebooks kept in git repositories. See mirror.ts.
+
+  mirrors(): MirrorRecord[] {
+    return this.db
+      .prepare(
+        `select m.notebook, n.name, m.remote, m.device, m.token, m.status
+         from mirrors m join notebooks n on n.id = m.notebook order by n.name`,
+      )
+      .all()
+      .map((row) => ({
+        notebook: row.notebook as string,
+        name: row.name as string,
+        remote: row.remote as string,
+        ...(row.device ? { device: row.device as string } : {}),
+        ...(row.token ? { token: row.token as string } : {}),
+        ...(row.status ? { status: JSON.parse(row.status as string) as MirrorStatus } : {}),
+      }));
+  }
+  /** Keeps notebook `name` in `remote`, a git repository. Makes the notebook if it is new. */
+  addMirror(name: string, remote: string): MirrorRecord {
+    const notebook = this.notebook(name);
+    const before = this.mirrors().find((each) => each.notebook === notebook);
+    if (before && before.remote !== remote)
+      throw new Error(`“${before.name}” is already kept in ${before.remote}. Disconnect it first.`);
+    this.db
+      .prepare('insert into mirrors (notebook, remote) values (?, ?) on conflict do nothing')
+      .run(notebook, remote);
+    return this.mirrors().find((each) => each.notebook === notebook)!;
+  }
+  /** Remembers the device a copy syncs as. */
+  setMirrorDevice(notebook: string, device: string, token: string): void {
+    this.db
+      .prepare('update mirrors set device = ?, token = ? where notebook = ?')
+      .run(device, token, notebook);
+  }
+  setMirrorStatus(notebook: string, status: MirrorStatus): void {
+    this.db
+      .prepare('update mirrors set status = ? where notebook = ?')
+      .run(JSON.stringify(status), notebook);
+  }
+  /** Stops keeping a copy. Its device is removed; the repository is left as it is. */
+  removeMirror(notebook: string): boolean {
+    const row = this.db
+      .prepare('delete from mirrors where notebook = ? returning device')
+      .get(notebook);
+    if (row?.device) this.revoke(row.device as string);
+    return Boolean(row);
+  }
+
+  /**
+   * Talks to this host without the network, for what runs beside it in the same process.
+   * Same requests, same checks: only the wire is missing.
+   */
+  readonly local: typeof fetch = async (input, init) => {
+    const request = new Request(input, init);
+    const url = new URL(request.url);
+    const payload = request.body ? Buffer.from(await request.arrayBuffer()) : undefined;
+    const response = await this.app.inject({
+      method: request.method as 'GET',
+      url: url.pathname + url.search,
+      headers: Object.fromEntries(request.headers),
+      ...(payload ? { payload } : {}),
+    });
+    const empty = request.method === 'HEAD' || [204, 304].includes(response.statusCode);
+    return new Response(empty ? null : new Uint8Array(response.rawPayload), {
+      status: response.statusCode,
+      headers: response.headers as Record<string, string>,
+    });
+  };
+
   /**
    * Copies everything the host holds into `folder`: a snapshot of the database, and any
    * stored content the folder does not have yet. Content is only ever added there, so each
@@ -320,6 +424,7 @@ export class Host {
     return this.app.listen({ port, host: address });
   }
   async close(): Promise<void> {
+    if (!this.db.isOpen) return;
     for (const waiting of this.waiters.values()) for (const wake of waiting) wake();
     await this.app.close();
     this.db.close();

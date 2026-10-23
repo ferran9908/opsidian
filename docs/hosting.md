@@ -51,6 +51,35 @@ docker exec opsidian-host opsidian host invite "Personal"
 
 `100.x.y.z` is the server's Tailscale address (`tailscale ip -4`). Publishing only on it keeps the host off the public internet. `OPSIDIAN_ADDRESS` tells the host the address to put in invitations, which it cannot see from inside the container.
 
+## Keeping notebooks on GitHub
+
+A hosted notebook can also be kept in a GitHub repository, as ordinary Markdown files. It works in both directions: a change made on any device reaches GitHub within a minute, and an edit pushed to GitHub, or made on github.com, comes back to every device. The host does this, so it works while devices are asleep, and it needs git on the host machine (on a Mac, `xcode-select --install` provides it).
+
+It is also how to bring notes that already live on GitHub, such as an Obsidian vault kept with git, into Opsidian, or to set up a new host from them.
+
+**In the Mac app:** Settings → GitHub. Sign in with GitHub (the code is copied and GitHub opens in the browser), then choose **Keep on GitHub…** beside a notebook and pick a repository or make a new private one. **Import from GitHub**, there or on the welcome screen, makes a new notebook from a repository, hosted on this Mac, and opens it.
+
+**Without the app:**
+
+```sh
+npx opsidian host github import you/notes      # a new notebook from a repository, then an invitation to it
+npx opsidian host github connect "Personal"    # keep an existing notebook in a repository; asks which one
+npx opsidian host github                       # how each one is doing
+```
+
+The first command that needs GitHub signs in by showing a code to enter at github.com/login/device, in any browser, so it works on a server with no screen. `connect` lists your repositories and offers to make a new private one; a repository can also be named as `you/notes`, a GitHub link, an SSH address (`git@github.com:you/notes.git`, which uses the machine's own SSH keys), or any other address git understands. `host github sync` syncs now; `disconnect` stops; `logout` forgets the sign-in. In Docker, run them with `docker exec -it opsidian-host opsidian host github …`.
+
+What happens to the notes:
+
+- **Each change is a commit** from your GitHub account, named after what changed ("Edit Plan; Add Ideas"). Typing is gathered for ten seconds first, so a burst of edits is one commit.
+- **Edits on both sides are combined** line by line. When both sides changed the same lines, the notebook's version keeps the name and GitHub's is kept beside it as a `conflicted copy GitHub` note, on GitHub and on every device. Nothing is ever force-pushed.
+- **A repository that already has notes is joined, not replaced.** Connecting a notebook to one combines the two: nothing is deleted, and a note that differs is kept twice.
+- **Hidden files are left alone.** Folders such as `.obsidian` and `.github`, and files such as `.gitignore`, stay in the repository untouched and are not sent to devices. The notebook's trash is not committed: the repository's history already has every deleted note.
+- **A repository that suddenly looks mostly empty is not trusted.** If half or more of the notebook disappears from GitHub at once, the deletions wait to be confirmed with **Confirm deletions** or `host github sync --confirm-deletions`.
+- **Files over 100 MB** stay out, as they do in sync. Git LFS is not supported.
+
+The sign-in lets Opsidian read and write your repositories; it is kept on the host machine only (in the keychain on a Mac, readable by you alone in `~/.opsidian` on a server). Signing out stops the copies until you sign in again. To withdraw the access entirely, revoke Opsidian at github.com/settings/applications. The host keeps its own checkout of each repository in its data folder; GitHub is a copy, and the host's history and backups stay the place to restore from.
+
 ## Devices
 
 On a hosting Mac, **Settings → Devices** lists every device, when it was last seen, and invitations not yet used. Removing a device stops it syncing at once; the notes on it stay there. Without the app, use `host devices` and `host revoke`.

@@ -15,7 +15,12 @@ import { Hosting } from './hosting';
 import { lstat, readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { validateContent, validateName, type VaultInfo } from '@opsidian/core';
+import {
+  validateContent,
+  validateName,
+  type RepositoryChoice,
+  type VaultInfo,
+} from '@opsidian/core';
 import { themes } from '@opsidian/theme';
 import { Vault } from './vault';
 import { desktopSync, hostAddress } from './sync';
@@ -312,6 +317,31 @@ async function start() {
   handle('hosting:invite', (notebook) => hosting.invite(text(notebook, 200)));
   handle('hosting:cancel-invitation', (id) => hosting.cancelInvitation(text(id, 100)));
   handle('hosting:remove-device', (id) => hosting.removeDevice(text(id, 100)));
+  handle('github:info', () => hosting.github());
+  handle('github:sign-in', () => hosting.signInToGitHub());
+  handle('github:finish-sign-in', () => hosting.finishGitHubSignIn());
+  handle('github:cancel-sign-in', () => hosting.cancelGitHubSignIn());
+  handle('github:sign-out', () => hosting.signOutOfGitHub());
+  handle('github:repositories', () => hosting.githubRepositories());
+  const choice = (value: unknown): RepositoryChoice => {
+    const given = value as { repository?: unknown; create?: unknown } | null;
+    if (typeof given?.create === 'string') return { create: text(given.create, 100) };
+    return { repository: text(given?.repository, 500) };
+  };
+  handle('github:keep', (notebook, chosen) =>
+    hosting.keepOnGitHub(text(notebook, 200), choice(chosen)),
+  );
+  handle('github:import', async (chosen, parent) => {
+    const { address, code } = await hosting.importFromGitHub(choice(chosen));
+    const root = parent === undefined ? defaultParent : text(parent, 4000);
+    const { info, pairing } = await joinNotebook(address, code, root);
+    await hosting.adopt(info.location, pairing.notebook.name, pairing.device.id);
+    return info;
+  });
+  handle('github:sync', (notebook, confirm) =>
+    hosting.syncGitHub(text(notebook, 200), confirm === true),
+  );
+  handle('github:stop', (notebook) => hosting.stopGitHub(text(notebook, 200)));
   handle('backup:info', () => hosting.backups());
   handle('backup:choose-folder', async () => {
     const result = await dialog.showOpenDialog(window!, {
@@ -329,12 +359,11 @@ async function start() {
   );
   handle('backup:now', () => hosting.backUpNow());
   handle('backup:restore', (name) => hosting.restore(text(name, 100)));
-  handle('vault:join', async (host, code, parent) => {
-    const address = hostAddress(text(host, 500));
-    const root = parent === undefined ? defaultParent : text(parent, 4000);
+  /** Makes a folder for a notebook that lives on a host, and downloads it there. */
+  async function joinNotebook(address: string, code: string, parent: string) {
     // Check the folder before spending the invitation, which works only once.
-    await mkdir(root, { recursive: true });
-    const pairing = await sync.invite(address, text(code, 100));
+    await mkdir(parent, { recursive: true });
+    const pairing = await sync.invite(address, code);
     // The invitation is spent, so nothing from here on may fail for a reason that a
     // different folder name would have avoided.
     let name = pairing.notebook.name;
@@ -348,12 +377,17 @@ async function start() {
         async (found) => found.isDirectory() && !(await readdir(directory)).length,
         () => true,
       );
-    let directory = join(root, name);
+    let directory = join(parent, name);
     for (let count = 1; !(await free(directory)); count++)
-      directory = join(root, `${name} ${count}`);
+      directory = join(parent, `${name} ${count}`);
     const info = await use(directory, true);
     await sync.adopt(open(), address, pairing);
-    return info;
+    return { info, pairing };
+  }
+  handle('vault:join', async (host, code, parent) => {
+    const address = hostAddress(text(host, 500));
+    const root = parent === undefined ? defaultParent : text(parent, 4000);
+    return (await joinNotebook(address, text(code, 100), root)).info;
   });
   /**
    * How many parts of the page have work to save before the window may close: the editor, while

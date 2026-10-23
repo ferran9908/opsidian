@@ -14,9 +14,10 @@ import { syncLabel } from './SyncDialog';
 import { UpdateSettings } from './updates';
 import { defaultMode, setDefaultMode } from './preferences';
 import { Button } from '@/components/ui/button';
+import { GitHubSettings } from './GitHub';
 
 export type SettingsSection =
-  'general' | 'editor' | 'appearance' | 'sync' | 'devices' | 'backups' | 'check';
+  'general' | 'editor' | 'appearance' | 'sync' | 'devices' | 'backups' | 'github' | 'check';
 /** The sections down the left, in Obsidian's two kinds: how the app works, and sync. */
 const GROUPS: [string, [SettingsSection, string][]][] = [
   [
@@ -33,6 +34,7 @@ const GROUPS: [string, [SettingsSection, string][]][] = [
       ['sync', 'Sync'],
       ['devices', 'Devices'],
       ['backups', 'Backups'],
+      ['github', 'GitHub'],
     ],
   ],
 ];
@@ -263,6 +265,8 @@ interface Props {
   onSection(section: SettingsSection): void;
   /** Opens the form for joining a host that already exists. */
   onConnect(): void;
+  /** Opens the screen that makes a notebook from a GitHub repository. */
+  onImport(): void;
   onClose(): void;
 }
 
@@ -573,20 +577,28 @@ export function Settings(props: Props) {
                   <p className="text-muted-foreground text-[13px]">
                     {each.self
                       ? 'This Mac · hosting'
-                      : `${each.notebook} · joined ${day(each.created)}`}
+                      : each.github
+                        ? `Keeps “${each.notebook}” in ${each.github}`
+                        : `${each.notebook} · joined ${day(each.created)}`}
                   </p>
                 </div>
                 <span className="text-muted-foreground w-44">
                   {each.self ? 'In step now' : ago(each.seen)}
                 </span>
                 <span className="w-16 text-right">
-                  {!each.self && (
-                    <button
-                      className="text-destructive"
-                      onClick={() => setConfirm({ kind: 'remove', id: each.id, name: each.name })}
-                    >
-                      Remove
+                  {each.github ? (
+                    <button className="text-link" onClick={() => props.onSection('github')}>
+                      GitHub
                     </button>
+                  ) : (
+                    !each.self && (
+                      <button
+                        className="text-destructive"
+                        onClick={() => setConfirm({ kind: 'remove', id: each.id, name: each.name })}
+                      >
+                        Remove
+                      </button>
+                    )
                   )}
                 </span>
               </div>
@@ -745,6 +757,16 @@ export function Settings(props: Props) {
           )}
         </section>
       </>
+    );
+  else if (section === 'github')
+    body = (
+      <GitHubSettings
+        hosting={hosting}
+        notebook={props.notebook}
+        onHost={() => run(() => bridge.startHosting().then(setHosting))}
+        onImport={props.onImport}
+        heading={(sub, action) => <Heading title="GitHub" sub={sub} action={action} />}
+      />
     );
   else if (section === 'check') {
     const failed = checks?.find((each) => each.state === 'failed');

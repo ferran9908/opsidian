@@ -89,6 +89,8 @@ export interface HostedDevice {
   seen?: number;
   /** This very Mac. */
   self: boolean;
+  /** The repository, when this is the device that keeps a notebook on GitHub. */
+  github?: string;
 }
 /** Whether this Mac hosts notebooks for other devices, and what it is hosting. */
 export interface HostingInfo {
@@ -115,6 +117,36 @@ export interface Invitation {
   /** The link as a QR code: one string per row, `1` for a dark square. */
   qr: string[];
 }
+/** A notebook this Mac hosts, kept in a GitHub repository too. */
+export interface GitHubMirror {
+  notebook: string;
+  /** `owner/name`, or the address for a repository elsewhere. */
+  repository: string;
+  /** The repository's page. */
+  url?: string;
+  state: 'syncing' | 'synced' | 'offline' | 'error' | 'waiting';
+  message?: string;
+  /** When the repository last matched the notebook. */
+  at?: number;
+  /** Deletions waiting to be confirmed, because most of the notebook vanished from GitHub. */
+  held?: number;
+}
+export interface GitHubInfo {
+  /** Who is signed in to GitHub on this Mac. */
+  account?: { login: string; name?: string };
+  /** Why GitHub cannot be used here, such as git not being installed. */
+  problem?: string;
+  mirrors: GitHubMirror[];
+}
+export interface GitHubRepository {
+  fullName: string;
+  private: boolean;
+  /** Has no commits yet. */
+  empty: boolean;
+  pushedAt?: string;
+}
+/** A repository that exists, by `owner/name` or address; or a new private one to make. */
+export type RepositoryChoice = { repository: string } | { create: string };
 export interface BackupSettings {
   folder?: string;
   /** Hour of the day, 0–23, at which a daily backup is made. Absent: only by hand. */
@@ -192,6 +224,21 @@ export interface VaultBridge {
   backUpNow(): Promise<BackupInfo>;
   restoreBackup(name: string): Promise<BackupInfo>;
   onHosting(callback: (info: HostingInfo) => void): () => void;
+  github(): Promise<GitHubInfo>;
+  /** Starts signing in: opens GitHub in the browser and returns the code to enter there. */
+  signInToGitHub(): Promise<{ code: string; url: string }>;
+  /** Resolves once the code has been entered on GitHub. */
+  finishGitHubSignIn(): Promise<GitHubInfo>;
+  cancelGitHubSignIn(): Promise<void>;
+  signOutOfGitHub(): Promise<GitHubInfo>;
+  githubRepositories(): Promise<GitHubRepository[]>;
+  /** Keeps a hosted notebook in a repository from now on, in both directions. */
+  keepOnGitHub(notebook: string, choice: RepositoryChoice): Promise<GitHubInfo>;
+  /** Makes a notebook from a repository, hosted on this Mac, in a new folder, and opens it. */
+  importFromGitHub(choice: RepositoryChoice, parent?: string): Promise<VaultInfo>;
+  syncGitHub(notebook: string, confirmDeletions?: boolean): Promise<GitHubInfo>;
+  /** Stops keeping a notebook on GitHub. The repository and the notebook stay as they are. */
+  stopGitHub(notebook: string): Promise<GitHubInfo>;
   /** This app's own update: where it stands, and what can be done about it. */
   updateState(): Promise<AppUpdate>;
   /** Rejects with a readable message when the update server cannot be reached. */

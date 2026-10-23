@@ -265,6 +265,9 @@ importers:
 
   apps/host:
     devDependencies:
+      '@opsidian/notebook':
+        specifier: workspace:*
+        version: link:../../packages/notebook
       '@opsidian/sync':
         specifier: workspace:*
         version: link:../../packages/sync
