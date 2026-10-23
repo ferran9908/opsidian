@@ -39,6 +39,7 @@ import {
   sha256,
   unlink,
   watch,
+  type Stats,
 } from './platform';
 
 const revisionOf = (content: string) => sha256(content);
@@ -50,6 +51,12 @@ const child = (folder: string, name: string) => (folder ? `${folder}/${name}` : 
 const within = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`);
 const sorted = (paths: Iterable<string>) => [...paths].sort((a, b) => a.localeCompare(b));
 const isNote = (path: string) => /\.md$/i.test(path);
+/**
+ * Whether a file may have changed since it was last read. A rename keeps the time and size,
+ * so two notes of one length saved in the same moment could trade names unnoticed; which
+ * file it is on disk tells them apart.
+ */
+const stampOf = (info: Stats) => `${info.mtimeMs}:${info.size}:${info.ino}`;
 /** Where each trashed item came from. Hidden, so other programs leave it alone. */
 const ORIGINS = '.opsidian-origins.json';
 type Origins = Record<string, { from: string; at: number }>;
@@ -60,7 +67,7 @@ type Origins = Record<string, { from: string; at: number }>;
  */
 export class Vault {
   private readonly index = new NoteIndex();
-  /** mtime and size of each indexed note, so a rescan only rereads what changed. */
+  /** mtime, size and file of each indexed note, so a rescan only rereads what changed. */
   private readonly stamps = new Map<string, string>();
   private folders: string[] = [];
   private images: string[] = [];
@@ -144,7 +151,7 @@ export class Vault {
   }
   private async stamp(path: string, file: string): Promise<void> {
     const info = await lstat(file);
-    this.stamps.set(path, `${info.mtimeMs}:${info.size}`);
+    this.stamps.set(path, stampOf(info));
   }
 
   /**
@@ -172,7 +179,7 @@ export class Vault {
           const info = await lstat(file).catch(() => undefined);
           if (!info) continue;
           seen.add(path);
-          const stamp = `${info.mtimeMs}:${info.size}`;
+          const stamp = stampOf(info);
           if (this.stamps.get(path) === stamp) continue;
           // An oversized file is still listed, but its text is neither indexed nor searched.
           const content = info.size > MAX_NOTE_LENGTH * 4 ? '' : await readFile(file, 'utf8');
@@ -698,7 +705,7 @@ export class Vault {
                   seen.add(path);
                   continue;
                 }
-                const stamp = `${info.mtimeMs}:${info.size}`;
+                const stamp = stampOf(info);
                 let known = this.hashes.get(path);
                 if (known?.stamp !== stamp) {
                   const hash = await current(file);
