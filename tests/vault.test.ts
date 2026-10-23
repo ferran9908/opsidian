@@ -1,4 +1,15 @@
-import { chmod, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -355,6 +366,40 @@ describe('vault notes', () => {
     await rm(join(vault.root, 'Added.md'));
     await pause(600);
     expect(vault.tree().notes).toEqual(['Note.md']);
+  });
+  // A rename keeps a file's time and size, so these two look alike to anything that checks
+  // only those, before and after they trade names.
+  async function twins() {
+    const directory = await folder();
+    await writeFile(join(directory, 'x.md'), 'alpha');
+    await writeFile(join(directory, 'y.md'), 'bravo');
+    const moment = new Date('2026-01-01T00:00:00Z');
+    await utimes(join(directory, 'x.md'), moment, moment);
+    await utimes(join(directory, 'y.md'), moment, moment);
+    return open(directory);
+  }
+  async function trade(vault: Vault) {
+    await rename(join(vault.root, 'x.md'), join(vault.root, 'tmp.md'));
+    await rename(join(vault.root, 'y.md'), join(vault.root, 'x.md'));
+    await rename(join(vault.root, 'tmp.md'), join(vault.root, 'y.md'));
+  }
+  it('tells sync about two notes that traded names, though time and size stayed', async () => {
+    const vault = await twins();
+    const store = vault.syncStore();
+    const listed = async () =>
+      Object.fromEntries((await store.list()).map((file) => [file.path, file.hash]));
+    const hash = (text: string) => store.hash(Buffer.from(text));
+    expect(await listed()).toEqual({ 'x.md': hash('alpha'), 'y.md': hash('bravo') });
+    await trade(vault);
+    expect(await listed()).toEqual({ 'x.md': hash('bravo'), 'y.md': hash('alpha') });
+  });
+  it('searches the right note after two notes trade names in another program', async () => {
+    const vault = await twins();
+    vault.watch(() => {});
+    expect(vault.search('alpha').map((result) => result.path)).toEqual(['x.md']);
+    await trade(vault);
+    await pause(600);
+    expect(vault.search('alpha').map((result) => result.path)).toEqual(['y.md']);
   });
   it('rejects active SVG content disguised as an image', () => {
     expect(detectImage(Buffer.from('<svg onload="alert(1)"></svg>'))).toBeUndefined();
