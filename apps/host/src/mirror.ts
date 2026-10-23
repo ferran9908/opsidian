@@ -32,6 +32,11 @@ const HERE = 'http://opsidian.local';
 const DEVICE = 'GitHub';
 /** Never committed: sync's own state, the trash, and files half-written by a save. */
 const EXCLUDE = ['/.opsidian/', '/.trash/', '*.opsidian-pending', '.DS_Store'];
+/**
+ * Opsidian's own folders in a notebook: sync state, which belongs to one device, and the
+ * trash, whose notes the repository's history already has. Never part of the repository.
+ */
+const OWN = ['.opsidian', '.trash'];
 
 export class GitError extends Error {
   constructor(
@@ -377,10 +382,68 @@ export class Mirror {
   private async recover(): Promise<void> {
     // Only this program uses this checkout, and only one round at a time.
     await rm(join(this.folder, '.git', 'index.lock'), { force: true });
+    // A crash in the middle of a merge left this copy's own sync state set aside.
+    await this.restoreOwn();
     if (existsSync(join(this.folder, '.git', 'MERGE_HEAD')))
       // Everything was committed before the merge began, so abandoning it loses nothing; the
       // round merges again.
       await this.git(['merge', '--abort'], { ok: true });
+  }
+
+  /**
+   * Takes Opsidian's own files out of the repository when someone committed them, as happens
+   * when a notebook folder was pushed to GitHub by hand. Otherwise this copy's sync state would
+   * be committed every round, and handed to everyone who clones the repository. They leave in
+   * one commit that says so, stay in the history, and are added to `.gitignore` so that other
+   * clones do not commit them again.
+   */
+  private async untrackOwn(): Promise<void> {
+    const tracked = await this.git(['ls-files', '-z', '--', ...OWN]);
+    if (!tracked.out.split('\0').some(Boolean)) return;
+    await this.git(['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', ...OWN]);
+    const ignore = join(this.folder, '.gitignore');
+    const text = await readFile(ignore, 'utf8').catch(() => '');
+    const lines = text.split(/\r?\n/).map((line) => line.trim());
+    const wanted = OWN.map((name) => `/${name}/`).filter(
+      (line) =>
+        ![line, line.slice(1), line.slice(0, -1), line.slice(1, -1)].some((form) =>
+          lines.includes(form),
+        ),
+    );
+    if (wanted.length) {
+      await writeFile(
+        ignore,
+        `${text}${text && !text.endsWith('\n') ? '\n' : ''}# Opsidian's own: one device's sync state, and the notebook's trash\n${wanted.join('\n')}\n`,
+      );
+      await this.git(['add', '--', '.gitignore']);
+    }
+    await this.git([
+      'commit',
+      '--quiet',
+      '--no-verify',
+      '-m',
+      "Stop tracking Opsidian's own files\n\nSync state belongs to one device, and the notebook's trash is already in this history. Both stay in the history, and .gitignore keeps them out from now on.",
+    ]);
+  }
+  /** Where this copy's own folders wait while a merge brings in someone else's. */
+  private get ownAside(): string {
+    return join(this.folder, '.git', 'opsidian-own');
+  }
+  private async setOwnAside(): Promise<void> {
+    await rm(this.ownAside, { recursive: true, force: true });
+    await mkdir(this.ownAside, { recursive: true });
+    for (const name of OWN)
+      if (existsSync(join(this.folder, name)))
+        await rename(join(this.folder, name), join(this.ownAside, name));
+  }
+  private async restoreOwn(): Promise<void> {
+    if (!existsSync(this.ownAside)) return;
+    for (const name of OWN) {
+      if (!existsSync(join(this.ownAside, name))) continue;
+      await rm(join(this.folder, name), { recursive: true, force: true });
+      await rename(join(this.ownAside, name), join(this.folder, name));
+    }
+    await rm(this.ownAside, { recursive: true, force: true });
   }
 
   /** Commits whatever differs from the last commit. True if there was anything. */
@@ -416,6 +479,19 @@ export class Mirror {
    * repository's is kept beside it as a conflicted copy.
    */
   private async merge(commit: string): Promise<void> {
+    // Someone committed Opsidian's own files again. This copy's sync state is set aside so the
+    // merge cannot replace it, and comes back once the merge is done.
+    const foreign = await this.git(['ls-tree', '-r', '--name-only', commit, '--', ...OWN]);
+    if (!foreign.out.trim()) return this.combine(commit);
+    await this.setOwnAside();
+    try {
+      await this.combine(commit);
+    } finally {
+      await this.restoreOwn();
+    }
+    await this.untrackOwn();
+  }
+  private async combine(commit: string): Promise<void> {
     const merged = await this.git(
       [
         'merge',
@@ -654,6 +730,7 @@ export class Mirror {
     try {
       await this.prepare();
       await this.recover();
+      await this.untrackOwn();
       let outcome = await this.exchange();
       await this.commit();
       const branch = await this.branch();

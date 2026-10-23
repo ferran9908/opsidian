@@ -141,6 +141,11 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Not moved:** the GitHub sign-in (kept per machine, in the keychain or a file only its user can read), backup settings, and unused invitations.
 - **Not built:** changing the address by hand on the iPhone (it follows a move by itself, through the shared sync service), and a way to undo a finished move other than moving back.
 
+## Opsidian's own files in a repository — 2026-10-23
+
+- **`.opsidian` and `.trash` are taken out of a repository that has them,** in one labelled commit, and added to its `.gitignore`. Found when connecting the user's existing vault repository, which had a Mac's sync state and trash committed by hand. Left in place, the host's copy would have committed its own sync state on every round and handed it to every clone. Untracking them in each copy's checkout only was considered; a merge of someone else's commit would still have overwritten the copy's state. A merge that brings them back sets the copy's own folders aside and restores them afterwards.
+- This narrows "hidden files are left alone": other hidden files, such as `.obsidian` and `.DS_Store`, still are.
+
 ## Hosting beside development — 2026-10-23
 
 - **One machine can host real notebooks and be where Opsidian is developed.** Requested by the user, who wants this server to be their host and keeps developing on it.

@@ -187,6 +187,75 @@ describe('keeping a notebook in a git repository', () => {
     expect(existsSync(join(server.dataDir, 'mirrors', `${first.notebook}.cloning`))).toBe(false);
   });
 
+  it('takes Opsidian’s own files out of a repository they were committed to, once', async () => {
+    // A notebook folder pushed to GitHub by hand, sync state and trash included.
+    const foreign = JSON.stringify({
+      version: 1,
+      host: 'http://127.0.0.1:4810',
+      notebook: 'elsewhere',
+      device: 'another-device',
+      deviceName: 'Old Mac',
+      cursor: 21,
+      files: {},
+    });
+    const github = await repository({
+      'Plan.md': '- one\n',
+      '.opsidian/sync.json': foreign,
+      '.trash/Old.md': 'thrown away\n',
+      '.trash/.opsidian-origins.json': '{}',
+      '.DS_Store': 'finder',
+    });
+    const server = await startHost();
+    // The notebook already exists, empty, as when invitations were made before connecting.
+    server.host.invite('Notes');
+    expect((await server.mirrors.connect('Notes', github.remote)).state).toBe('synced');
+    expect(server.host.notebooks()).toMatchObject([{ name: 'Notes', files: 1 }]);
+    github.pull();
+    // Other hidden files are left as they were.
+    expect(github.tracked()).toEqual(['.DS_Store', '.gitignore', 'Plan.md']);
+    expect(await github.read('.gitignore')).toMatch(/^\/\.opsidian\/$/m);
+    expect(await github.read('.gitignore')).toMatch(/^\/\.trash\/$/m);
+    const stop = git(github.person, 'log', '--format=%H', '--grep', 'Stop tracking', 'origin/main')
+      .trim()
+      .split('\n');
+    expect(stop).toHaveLength(1);
+    // Still in the history.
+    expect(git(github.person, 'show', `${stop[0]}~1:.opsidian/sync.json`)).toBe(foreign);
+
+    // Edits keep flowing both ways, and no later commit touches Opsidian's own files.
+    const mac = await device(server);
+    await mac.sync();
+    expect(await mac.read('Plan.md')).toBe('- one\n');
+    await mac.write('Plan.md', '- one\n- two\n');
+    await mac.sync();
+    await server.mirrors.sync('Notes');
+    await server.mirrors.sync('Notes');
+    github.pull();
+    expect(await github.read('Plan.md')).toBe('- one\n- two\n');
+    const since = git(github.person, 'log', '--format=', '--name-only', `${stop[0]}..origin/main`);
+    expect(since).toContain('Plan.md');
+    expect(since).not.toMatch(/\.opsidian|\.trash/);
+
+    // Someone commits them again by force. The copy keeps its own sync state, so it does not
+    // join the host again as a new device, and they leave the repository again.
+    const devices = server.host.devices().length;
+    await github.write('.opsidian/sync.json', foreign);
+    git(github.person, 'add', '-f', '.opsidian/sync.json');
+    github.push('Commit sync state again');
+    await server.mirrors.sync('Notes');
+    github.pull();
+    expect(github.tracked()).not.toContain('.opsidian/sync.json');
+    expect(server.host.devices()).toHaveLength(devices);
+    const copy = join(server.dataDir, 'mirrors', server.host.mirrors()[0]!.notebook);
+    const state = JSON.parse(await readFile(join(copy, '.opsidian', 'sync.json'), 'utf8'));
+    expect(state.deviceName).toBe('GitHub');
+    await mac.write('Plan.md', '- one\n- two\n- three\n');
+    await mac.sync();
+    await server.mirrors.sync('Notes');
+    github.pull();
+    expect(await github.read('Plan.md')).toBe('- one\n- two\n- three\n');
+  });
+
   it('sends an existing notebook to an empty repository, without sync’s own files', async () => {
     const github = await repository();
     const server = await startHost();

@@ -76,6 +76,7 @@ What happens to the notes:
 - **Edits on both sides are combined** line by line. When both sides changed the same lines, the notebook's version keeps the name and GitHub's is kept beside it as a `conflicted copy GitHub` note, on GitHub and on every device. Nothing is ever force-pushed.
 - **A repository that already has notes is joined, not replaced.** Connecting a notebook to one combines the two: nothing is deleted, and a note that differs is kept twice.
 - **Hidden files are left alone.** Folders such as `.obsidian` and `.github`, and files such as `.gitignore`, stay in the repository untouched and are not sent to devices. The notebook's trash is not committed: the repository's history already has every deleted note.
+- **Opsidian's own folders never stay in the repository.** If a notebook folder was pushed to GitHub by hand with its `.opsidian` (one device's sync state) or `.trash`, the first round takes them out in one commit, "Stop tracking Opsidian's own files", and adds them to `.gitignore`. They stay in the repository's history. Otherwise the host's own sync state would be committed every round.
 - **A repository that suddenly looks mostly empty is not trusted.** If half or more of the notebook disappears from GitHub at once, the deletions wait to be confirmed with **Confirm deletions** or `host github sync --confirm-deletions`.
 - **Files over 100 MB** stay out, as they do in sync. Git LFS is not supported.
 
