@@ -15,6 +15,7 @@ import { UpdateSettings } from './updates';
 import { defaultMode, setDefaultMode } from './preferences';
 import { Button } from '@/components/ui/button';
 import { GitHubSettings } from './GitHub';
+import { FollowDialog, MoveDialog, MovedSettings, TakeOverDialog } from './MoveHost';
 
 export type SettingsSection =
   'general' | 'editor' | 'appearance' | 'sync' | 'devices' | 'backups' | 'github' | 'check';
@@ -90,7 +91,7 @@ const Label = ({ children }: { children: ReactNode }) => (
   </h3>
 );
 /** One setting, as Obsidian lays it out: what it is on the left, its control on the right. */
-function Row(props: { name: ReactNode; description?: ReactNode; children?: ReactNode }) {
+export function Row(props: { name: ReactNode; description?: ReactNode; children?: ReactNode }) {
   return (
     <div className="border-border flex items-center justify-between gap-6 border-t py-4">
       <div className="min-w-0 flex-1 space-y-1">
@@ -105,7 +106,7 @@ function Row(props: { name: ReactNode; description?: ReactNode; children?: React
 }
 const select =
   'border-border bg-secondary h-8 shrink-0 rounded-md border px-2 text-[13px] outline-none';
-const Line = ({ children }: { children: ReactNode }) => (
+export const Line = ({ children }: { children: ReactNode }) => (
   <div className="border-border flex min-h-11 items-center justify-between gap-4 border-t py-2 text-sm last:border-b">
     {children}
   </div>
@@ -276,6 +277,7 @@ export function Settings(props: Props) {
   const [backups, setBackups] = useState<BackupInfo>();
   const [checks, setChecks] = useState<ConnectionCheck[]>();
   const [inviting, setInviting] = useState(false);
+  const [moving, setMoving] = useState<'move' | 'take-over' | 'follow'>();
   const [confirm, setConfirm] = useState<
     | { kind: 'stop' }
     | { kind: 'remove'; id: string; name: string }
@@ -303,10 +305,10 @@ export function Settings(props: Props) {
   }, []);
   useEffect(() => {
     const keys = (event: KeyboardEvent) =>
-      event.key === 'Escape' && !inviting && !confirm && props.onClose();
+      event.key === 'Escape' && !inviting && !confirm && !moving && props.onClose();
     window.addEventListener('keydown', keys);
     return () => window.removeEventListener('keydown', keys);
-  }, [inviting, confirm]);
+  }, [inviting, confirm, moving]);
   const check = () => {
     setChecks(undefined);
     void bridge.checkConnection().then(setChecks, (reason) => setError(message(reason)));
@@ -361,8 +363,30 @@ export function Settings(props: Props) {
     </button>
   );
 
+  const takeOverRow = (
+    <Row
+      name="Host from this Mac instead"
+      description="Moves the host here, with every notebook, its history and its devices. They follow by themselves."
+    >
+      <Button variant="secondary" className="shrink-0" onClick={() => setMoving('take-over')}>
+        Take over hosting…
+      </Button>
+    </Row>
+  );
+
   let body: ReactNode;
   if (!hosting) body = <p className="text-muted-foreground">Loading…</p>;
+  else if (section === 'sync' && hosting.moved)
+    body = (
+      <>
+        <MovedSettings
+          moved={hosting.moved}
+          busy={busy}
+          onStop={() => run(() => bridge.stopHosting().then(setHosting))}
+        />
+        {sync.connected && <div>{checkRow}</div>}
+      </>
+    );
   else if (section === 'sync')
     body = isHost ? (
       <>
@@ -435,6 +459,14 @@ export function Settings(props: Props) {
             />
           </Row>
           {sync.connected && checkRow}
+          <Row
+            name="Move hosting to another machine"
+            description="To a server or another Mac, with every notebook, its history and its devices. They follow by themselves."
+          >
+            <Button variant="secondary" className="shrink-0" onClick={() => setMoving('move')}>
+              Move…
+            </Button>
+          </Row>
           <Row name="Stop hosting" description="This Mac must be awake for devices to sync.">
             <Button variant="secondary" onClick={() => setConfirm({ kind: 'stop' })}>
               Stop hosting…
@@ -496,6 +528,15 @@ export function Settings(props: Props) {
         </section>
         <div>
           {checkRow}
+          {takeOverRow}
+          <Row
+            name="Host moved?"
+            description="If the host went to another machine while this Mac was away, give its new address."
+          >
+            <Button variant="secondary" className="shrink-0" onClick={() => setMoving('follow')}>
+              Change address…
+            </Button>
+          </Row>
           <Row
             name="Stop syncing here"
             description="Every note stays on this Mac and on the host. You can join again later."
@@ -543,6 +584,7 @@ export function Settings(props: Props) {
               Enter an invitation
             </Button>
           </Row>
+          {takeOverRow}
         </div>
         <p className="text-muted-foreground text-[13px] leading-5">
           Prefer a server that is always on? See docs/hosting.md. Your notes are never stored by
@@ -963,6 +1005,22 @@ export function Settings(props: Props) {
           }}
         />
       )}
+      {moving === 'move' && (
+        <MoveDialog
+          onClose={() => {
+            setMoving(undefined);
+            void bridge.hosting().then(setHosting);
+          }}
+        />
+      )}
+      {moving === 'take-over' && (
+        <TakeOverDialog
+          address={sync.connected && !own ? sync.host : undefined}
+          onDone={setHosting}
+          onClose={() => setMoving(undefined)}
+        />
+      )}
+      {moving === 'follow' && <FollowDialog onClose={() => setMoving(undefined)} />}
       {confirm?.kind === 'stop' && (
         <Confirm
           title="Stop hosting on this Mac?"

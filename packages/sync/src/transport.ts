@@ -1,4 +1,5 @@
 import {
+  Moved,
   Unauthorized,
   type Changes,
   type Op,
@@ -13,7 +14,9 @@ const trim = (host: string) => host.replace(/\/+$/, '');
 
 async function fail(response: Response): Promise<never> {
   if (response.status === 401) throw new Unauthorized();
-  const body = (await response.json().catch(() => undefined)) as { error?: string } | undefined;
+  const body = (await response.json().catch(() => undefined)) as
+    { error?: string; moved?: unknown } | undefined;
+  if (response.status === 410 && typeof body?.moved === 'string') throw new Moved(body.moved);
   throw new Error(body?.error ?? `The host answered ${response.status}.`);
 }
 

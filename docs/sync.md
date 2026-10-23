@@ -100,6 +100,8 @@ All paths begin `/v1`. Everything except `pair` needs `Authorization: Bearer <cr
 | `GET /files/:id/history`            | Every version of a file, newest first.                                                          |
 | `GET /whoami`                       | The device's and notebook's names, for the connection check.                                    |
 
+A host that has moved answers every request from a device it knows with `410` and `{ moved: "http://new-address" }`. The device checks that the new address is an Opsidian host that accepts its credential, then keeps the same state and carries on there. Moving itself uses `POST /v1/move` with a code from `host move`, then `/v1/move/files`, `/file`, `/freeze`, `/database` and `/finish` with the credential that returns. While frozen, changes are answered `503`. See [hosting](hosting.md#moving-the-host-to-another-machine).
+
 ## Not built
 
 - **Pruning history.** The host keeps every version forever. That is what lets a device return after any absence without bringing old data back, and it means the host's disk only grows.
@@ -109,10 +111,11 @@ All paths begin `/v1`. Everything except `pair` needs `Authorization: Bearer <cr
 - **Empty folders.** Folders exist on other devices only once they contain a file.
 - **Files over 100 MB** are not synced.
 - **Sync while the iPhone app is closed.** The phone uses the same engine and syncs whenever the app is open. See [the iPhone app](iphone.md).
-- **Rotating a device credential.** Moving to another host is done by restoring a backup there; see [hosting](hosting.md).
+- **Rotating a device credential.**
 
 ## Checks
 
 - `tests/sync.test.ts` runs a real host and real notebook folders: propagation, identity through renames, letter-case renames, files trading names, merging, clashes, delete against edit, name collisions, joining two existing copies, the deletion guard, one unsyncable file among others, an oversized file, a two-second liveness bound, repeated requests, a connection that drops 20% of requests, damaged transfers, a crash at every step, and three devices doing random offline work with random connection failures. The random test checks that all devices end identical and that no line anyone wrote is missing unless someone removed it. `OPSIDIAN_FUZZ_SEEDS=200 pnpm test` runs it longer.
 - `tests/mirror.test.ts` keeps notebooks in real git repositories: importing one into a new notebook, sending a notebook to an empty one, edits, renames and deletions both ways, lines combined and clashes kept twice, edit against deletion, a push that loses a race, a crash in the middle of a merge, a host restart, the deletion guard, the background loop, and disconnecting. `pnpm test:github` drives the Mac app's GitHub screens against a stand-in for GitHub that speaks real git.
+- `tests/move.test.ts` moves a host between real hosts with real devices: everything taken along, devices following by themselves, an edit made while changes are paused, the history keeping its identity, wrong and spent codes, a machine that already hosts refused, a move that fails part-way given up on both sides, moving back with only what is missing sent, and the GitHub checkouts copied with their file modes and links. `pnpm test:move` drives the Mac app taking a headless host over through Settings and then offering it on.
 - `pnpm test:sync` starts the host program and the production desktop app. It connects a local notebook with an invitation, has a second device edit the open note and add another, edits one note from both sides at once, restores an earlier version from history, and joins the notebook from a second, empty app.

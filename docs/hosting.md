@@ -106,6 +106,42 @@ If GitHub does ask Opsidian to slow down (it answers "too many requests" or "rat
 
 The sign-in lets Opsidian read and write your repositories; it is kept on the host machine only (in the keychain on a Mac, readable by you alone in `~/.opsidian` on a server). Signing out stops the copies until you sign in again. To withdraw the access entirely, revoke Opsidian at github.com/settings/applications. The host keeps its own checkout of each repository in its data folder; GitHub is a copy, and the host's history and backups stay the place to restore from.
 
+## Moving the host to another machine
+
+The host can move at any time: from a Mac mini to a server, from a server to the MacBook you work on, and back. Everything goes with it — every notebook and its whole history, every device and its access, the notebooks kept on GitHub — and nothing has to be set up again on any device.
+
+**From a host without the app** (a Mac mini, a server), on the host:
+
+```sh
+npx opsidian host move
+```
+
+It prints a single-use code and the command to run on the machine that will host from now on:
+
+```sh
+npx opsidian host take-over 100.101.1.2:4810 ABCD-EFGH-JKLM
+```
+
+`take-over` copies the host, starts it as a background service the way `host start` does (it takes the same `--port` and `--address`), and prints what it took over. In Docker, run it with the container stopped and its volume mounted: `docker run --rm -v opsidian-data:/data -e OPSIDIAN_ADDRESS=100.x.y.z:4810 opsidian-host opsidian host take-over …`, then start the container.
+
+**In the Mac app**, on the hosting Mac: **Settings → Sync → Move…** shows the code and the command for a server. On a Mac taking over: **Settings → Sync → Take over hosting…**; when that Mac already syncs through the host, its address is filled in, so only the code is typed.
+
+What happens:
+
+1. **The notes are copied while devices keep syncing.** Content the new machine already has, as when a host moves back to where it was before, is not sent again.
+2. **Changes pause for a few seconds** while the last of them and the host's database are copied. A device that saves meanwhile keeps the edit and sends it once it has followed; the status bar says the host is moving.
+3. **The new machine starts serving, and the old host starts pointing devices to it.** Each device follows by itself the next time it syncs: it checks that the new address is the same host, one that already knows this device, and carries on from where it was. Nothing is downloaded again and nothing becomes a conflicted copy, because the history keeps its identity.
+
+The old host keeps pointing devices to the new address until it is stopped. `host status` there, or Settings → Sync in the app, lists which devices have followed. Once all of them have, stop it (`host stop`, or **Stop** in the app). A device that was away the whole time and never heard can be pointed at the new address by hand: on a Mac, **Settings → Sync → Host moved? → Change address…**. It is accepted only if the host there already knows that device.
+
+A few things belong to a machine rather than to the host, so they do not move:
+
+- **The GitHub sign-in.** The copies on GitHub move, with their history, but the new machine needs its own sign-in (`host github login`, or Settings → GitHub) before it carries on with them.
+- **Backups.** Set them up again on the new machine. The old machine stops backing up, since what it holds is now an old copy.
+- **Unused invitations**, which named the old address.
+
+The new machine refuses to take over if it already hosts notebooks of its own, so a host is never overwritten by accident. A machine whose host moved away holds only an old copy, so a host can be moved back to it. If the copy fails part-way, it is given up on both sides and the old host carries on as before; after five minutes without hearing from the new machine, the old host gives up by itself.
+
 ## Devices
 
 On a hosting Mac, **Settings → Devices** lists every device, when it was last seen, and invitations not yet used. Removing a device stops it syncing at once; the notes on it stay there. Without the app, use `host devices` and `host revoke`.
@@ -135,7 +171,7 @@ What happens next is automatic:
 - A device removed after the backup stays removed.
 - A device that had not synced for a while keeps working: only what it agreed with the host after the backup is treated as new.
 
-To move a host to a new machine, back up, then restore the backup into the new machine's empty host and point devices at the new address by connecting them again.
+To move a host to a new machine, see [moving the host](#moving-the-host-to-another-machine). A backup can also be restored into a new machine's empty host, but devices then have to be connected again.
 
 ## When it will not connect
 

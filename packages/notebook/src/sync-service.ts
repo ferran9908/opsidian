@@ -37,6 +37,9 @@ export class SyncService {
   private state: SyncState | undefined;
   private problem: string | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
+  /** Tries again to follow a host that moved, while its new address does not answer yet. */
+  private retry: ReturnType<typeof setTimeout> | undefined;
+  private retries = 0;
 
   constructor(
     private readonly secrets: Secrets,
@@ -65,6 +68,7 @@ export class SyncService {
   /** Follows the app to another notebook, or to none. */
   async attach(vault: Vault | null): Promise<void> {
     clearTimeout(this.timer);
+    clearTimeout(this.retry);
     this.vault?.onRelocate(undefined);
     this.vault?.onActivity(undefined);
     // Nothing of the old notebook's sync may still be writing when the next one starts.
@@ -83,7 +87,10 @@ export class SyncService {
           this.transport,
           state,
           () => this.notify(this.info()),
-          this.newId ? { newId: this.newId } : {},
+          {
+            ...(this.newId ? { newId: this.newId } : {}),
+            onMoved: (to) => void this.followMove(vault, state.host, to),
+          },
         );
         const engine = this.engine;
         vault.onRelocate((from, to) => void engine.moved(from, to).catch(() => {}));
@@ -127,6 +134,58 @@ export class SyncService {
     await this.secrets.set(state.device, undefined);
     await this.attach(vault);
   }
+  /**
+   * Syncs with the host at another address from now on: the same host, moved to another
+   * machine. It is checked first: only the host this device belongs to accepts its credential,
+   * so the credential is shown only to something that has already answered as a host.
+   */
+  follow(address: string): Promise<void> {
+    return this.switching((vault, state) => this.moveTo(vault, state, address));
+  }
+  /** One change of address at a time, so the last one asked for is the one that stands. */
+  private switching(task: (vault: Vault, state: SyncState) => Promise<void>): Promise<void> {
+    const next = this.moving
+      .catch(() => {})
+      .then(() => {
+        const { vault, state } = this;
+        if (!vault || !state) throw new Error('This notebook is not syncing.');
+        return task(vault, state);
+      });
+    this.moving = next;
+    return next;
+  }
+  private moving: Promise<void> = Promise.resolve();
+  private async moveTo(vault: Vault, state: SyncState, address: string): Promise<void> {
+    const to = hostAddress(address);
+    const token = await this.secrets.get(state.device);
+    if (!token) throw new Error('This device’s connection to the host was lost. Connect again.');
+    await verifyHost(to, token, this.request ?? fetch);
+    await this.engine?.stop();
+    // What the engine last saved, not what this service was given when it started.
+    const saved = (await vault.syncState()) ?? state;
+    await vault.syncStore().save({ ...saved, host: to });
+    await this.attach(vault);
+  }
+  /** The host said it moved: follow it, and keep trying while the new address is not ready. */
+  private async followMove(vault: Vault, from: string, to: string): Promise<void> {
+    try {
+      await this.switching(async (current, state) => {
+        // Already pointed somewhere else, such as this very machine when it took the host
+        // over: that choice stands.
+        if (current !== vault || state.host !== from) return;
+        await this.moveTo(current, state, to);
+      });
+      this.retries = 0;
+    } catch (error) {
+      if (this.vault !== vault || this.state?.host !== from) return;
+      this.problem = `The host moved to ${to.replace(/^https?:\/\//, '')}, but ${error instanceof Error ? error.message.charAt(0).toLowerCase() + error.message.slice(1) : 'it does not answer there yet.'}`;
+      this.notify(this.info());
+      clearTimeout(this.retry);
+      // Starting over asks the old host again, which says where it went, which tries again.
+      const wait = [2, 5, 15][this.retries++] ?? 30;
+      this.retry = setTimeout(() => void this.attach(vault), wait * 1000);
+    }
+  }
   confirmDeletions(): void {
     this.engine?.confirmDeletions();
   }
@@ -138,6 +197,10 @@ export class SyncService {
       online,
       ...(this.request ? { request: this.request } : {}),
     });
+  }
+  /** The open notebook's folder. */
+  get root(): string | undefined {
+    return this.vault?.root;
   }
   /** The id the host knows this device by. */
   get deviceId(): string | undefined {
@@ -157,4 +220,33 @@ export class SyncService {
     if (!this.transport) throw new Error('This notebook is not syncing.');
     return new TextDecoder().decode(await this.transport.getBlob(hash));
   }
+}
+
+/** Checks that `host` is an Opsidian host that accepts this device. */
+async function verifyHost(host: string, token: string, request: typeof fetch): Promise<void> {
+  const short = host.replace(/^https?:\/\//, '');
+  const ask = async (path: string, headers: Record<string, string> = {}) => {
+    // Not AbortSignal.timeout, which the iPhone's JavaScript engine lacks.
+    const stop = new AbortController();
+    const timer = setTimeout(() => stop.abort(), 8000);
+    try {
+      return await request(`${host}/v1${path}`, { headers, signal: stop.signal });
+    } catch {
+      throw new Error(`Nothing answers at ${short} yet.`);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const hello = (await (await ask('')).json().catch(() => undefined)) as
+    { opsidian?: string; moved?: boolean } | undefined;
+  if (hello?.opsidian !== 'host')
+    throw new Error(`What answers at ${short} is not an Opsidian host.`);
+  if (hello.moved) throw new Error(`The host at ${short} has moved on too.`);
+  const whoami = await ask('/whoami', { authorization: `Bearer ${token}` });
+  if (!whoami.ok)
+    throw new Error(
+      whoami.status === 401
+        ? `The host at ${short} does not know this device. It may be a different host.`
+        : `The host at ${short} answered ${whoami.status}.`,
+    );
 }

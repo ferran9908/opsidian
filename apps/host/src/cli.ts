@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Host, listBackups, restoreBackup } from './host';
+import { Host, listBackups, restoreBackup, type Moved } from './host';
 import {
   DEFAULT_PORT,
   addresses,
@@ -22,6 +22,7 @@ import { service, type Service } from './service';
 import { github, readAccount, statusLine } from './github-cli';
 import { repositoryLabel } from './github';
 import { Mirrors, scheduleOf } from './mirror';
+import { takeOver, type TakeOverProgress } from './move';
 
 const VERSION = process.env.OPSIDIAN_VERSION ?? 'development';
 // Said back in messages the way it was typed: from this repository, through npx, or installed.
@@ -67,6 +68,10 @@ const HELP = `Opsidian ${VERSION}: a host for your notebooks, so every device sy
   ${me} host backup now|off   Back up now, or stop backing up
   ${me} host backups          The backups there are
   ${me} host restore BACKUP   Put the host back to a backup
+  ${me} host move             Move this host to another machine: prints what to run there
+  ${me} host take-over ADDRESS CODE
+                              Make this machine the host, taking everything over from the
+                              one at ADDRESS. Devices follow by themselves.
   ${me} host github import you/notes      Make a notebook from a GitHub repository, and invite a device
   ${me} host github connect "Name" [REPO] Keep a notebook in a GitHub repository, both ways
   ${me} host github every 1h              How often notebooks go to GitHub: live, 15m, 1h
@@ -139,13 +144,13 @@ function backupLine(config: Config): string {
   return `Every night at ${String(hour).padStart(2, '0')}:00 to ${folder}, keeping ${keep}`;
 }
 
-async function start(): Promise<void> {
-  const manager = needService();
-  const before = await readConfig(where);
+/**
+ * Where this machine's host listens, from the flags over what was set before. An address given
+ * with --address is kept until another is given. One chosen here is chosen again each time, so
+ * a Mac that fell back to its home network moves to Tailscale once it has it.
+ */
+async function listening(before: Config | undefined): Promise<{ config: Config; note?: string }> {
   const port = whole('port', before?.port ?? DEFAULT_PORT, 1, 65535);
-
-  // An address given with --address is kept until another is given. One chosen here is chosen
-  // again each time, so a Mac that fell back to its home network moves to Tailscale once it has it.
   let address = flags.get('address');
   let manual = address !== undefined || before?.manual === true;
   let note: string | undefined;
@@ -180,18 +185,26 @@ async function start(): Promise<void> {
       before?.backup?.folder ?? fail('--keep and --hour go with --backup FOLDER.'),
       before?.backup,
     );
+  return { config, ...(note ? { note } : {}) };
+}
 
-  const reach = reachableAt(config);
+/** Fails if something other than this machine's own host already answers where it will listen. */
+async function portFree(manager: Service, before: Config | undefined, config: Config) {
   // Something already answering, while ours is not running, is another host: most likely the
   // Opsidian app on this Mac.
   const moving =
-    !(await manager.state()).running || before?.port !== port || before.address !== address;
-  if (moving && (await answers(reach)))
+    !(await manager.state()).running ||
+    before?.port !== config.port ||
+    before.address !== config.address;
+  if (moving && (await answers(reachableAt(config))))
     fail(
-      `Another Opsidian host is already using port ${port} here, perhaps the Opsidian app.\n` +
-        `Turn hosting off there, or start this one with --port ${port + 1}.`,
+      `Another Opsidian host is already using port ${config.port} here, perhaps the Opsidian app.\n` +
+        `Turn hosting off there, or start this one with --port ${config.port + 1}.`,
     );
+}
 
+/** Hands the host to the service manager and waits until it answers. */
+async function launch(manager: Service, config: Config): Promise<void> {
   // The service runs a copy of this program kept beside the data. npx keeps what it fetches in a
   // cache that can be cleared, so the copy is what keeps the host independent of it.
   const self = fileURLToPath(import.meta.url);
@@ -202,6 +215,7 @@ async function start(): Promise<void> {
   await writeConfig(where, config);
   await manager.install();
 
+  const reach = reachableAt(config);
   const by = Date.now() + 15_000;
   while (!(await answers(reach))) {
     if (Date.now() > by)
@@ -211,18 +225,28 @@ async function start(): Promise<void> {
       );
     await new Promise((done) => setTimeout(done, 300));
   }
+}
 
-  const kind = isTailscale(config.address)
+const kindOf = (config: Config) =>
+  isTailscale(config.address)
     ? '(Tailscale only)'
     : config.address === '0.0.0.0'
       ? '(every address)'
       : '(this network only)';
+
+async function start(): Promise<void> {
+  const manager = needService();
+  const before = await readConfig(where);
+  const { config, note } = await listening(before);
+  await portFree(manager, before, config);
+  await launch(manager, config);
+
   // Without it, a Linux user's service stops at logout and does not come back after a reboot.
   const advice = await manager.advice();
   console.log(
     [
       '✓ Opsidian host is running in the background',
-      `  Address    http://${reach}   ${kind}`,
+      `  Address    http://${reachableAt(config)}   ${kindOf(config)}`,
       `  Data       ${where.data}`,
       `  Backups    ${backupLine(config)}`,
       `  Logs       ${me} host logs`,
@@ -235,18 +259,47 @@ async function start(): Promise<void> {
   console.log(`\nNext: ${me} host invite "Personal"`);
 }
 
+/** Which devices have heard where the host went, for `status` and `move` on the old host. */
+function movedLines(moved: Moved): string[] {
+  const told = moved.devices.filter((each) => each.told);
+  const waiting = moved.devices.filter((each) => !each.told);
+  const name = (device: Moved['devices'][number]) =>
+    `${device.name}${device.seen ? ` (last seen ${when(device.seen)})` : ''}`;
+  return [
+    `→ Moved to ${moved.to} on ${when(moved.at)}. This machine only points devices there now.`,
+    `  Followed   ${told.map((each) => each.name).join(', ') || 'none yet'}`,
+    ...(waiting.length
+      ? [
+          `  Not yet    ${waiting.map(name).join(', ')}`,
+          '             Each follows the next time it syncs, while this machine is still here to tell it.',
+        ]
+      : [`  Every device has followed. Stop this one with: ${me} host stop`]),
+  ];
+}
+
 async function status(): Promise<void> {
   const config = await needConfig();
   const manager = service(where);
   const state = 'missing' in manager ? { running: false } : await manager.state();
   const reach = reachableAt(config);
   const answering = state.running && (await answers(reach));
-  const { notebooks, devices, mirrors, schedule } = await withHost((host) => ({
+  const { notebooks, devices, mirrors, schedule, moved } = await withHost((host) => ({
     notebooks: host.notebooks(),
     devices: host.devices().filter((device) => !device.revoked),
     mirrors: host.mirrors(),
     schedule: scheduleOf(host),
+    moved: host.moved(),
   }));
+  if (moved) {
+    console.log(
+      [
+        ...movedLines(moved),
+        answering ? `  Still running here, at http://${reach}` : '  Stopped here.',
+        `  Data       ${where.data} (an old copy, as it was when the host moved)`,
+      ].join('\n'),
+    );
+    return;
+  }
   let backups = backupLine(config);
   if (config.backup) {
     const latest = (await listBackups(config.backup.folder).catch(() => []))[0];
@@ -349,6 +402,123 @@ async function restore(): Promise<void> {
   }
 }
 
+/** Prints what to run on the machine that will host from now on. */
+async function move(): Promise<void> {
+  const moved = await withHost((host) => host.moved());
+  if (moved) return console.log(movedLines(moved).join('\n'));
+  const address = await deviceAddress();
+  // The other machine copies from the running host, which keeps serving devices meanwhile.
+  if (!(await answers(address)) && !(await answers(`127.0.0.1:${address.split(':').at(-1)}`)))
+    fail(`The host is not running, so nothing can take it over. Start it first: ${me} host start`);
+  const minutes = whole('minutes', 15, 1, 24 * 60);
+  const { code, expires } = await withHost((host) => host.handoff(minutes));
+  console.log(
+    [
+      'To move this host, with every notebook, its history and its devices, run this on the',
+      'machine that will host from now on:',
+      '',
+      `  npx opsidian host take-over ${address} ${code}`,
+      '',
+      'Or, on a Mac with the Opsidian app: Settings → Sync → Take over hosting, and type:',
+      `  Address  ${address}`,
+      `  Code     ${code}`,
+      '',
+      `The code works once, until ${when(expires)}. Devices keep syncing while the notes are copied,`,
+      'pause for a few seconds at the end, then follow by themselves: nothing to set up again on them.',
+    ].join('\n'),
+  );
+}
+
+/** Makes this machine the host, taking everything over from another. */
+async function takeOverHere(): Promise<void> {
+  const [from, code] = words;
+  if (!from || !code)
+    return fail(
+      `Say where from: ${me} host take-over ADDRESS CODE\n` +
+        `The current host prints both when you run ${me} host move there.`,
+    );
+  const data = flags.get('data') ?? where.data;
+  const docker = existsSync('/.dockerenv');
+  const before = await readConfig(where);
+  // In Docker the container's own host is started by Docker, once the data is in place.
+  const manager = docker ? undefined : needService();
+  const { config, note } = docker
+    ? { config: undefined, note: undefined }
+    : await listening(before);
+  const address = docker ? await deviceAddress() : reachableAt(config!);
+  const running = (await manager?.state())?.running === true;
+  if (manager && config) {
+    if (!running) await portFree(manager, before, config);
+  } else if (await answers(`127.0.0.1:${before?.port ?? DEFAULT_PORT}`))
+    fail('A host is running here. Stop the container first, then take over with docker run --rm.');
+
+  const tty = process.stdout.isTTY;
+  const megabytes = (bytes: number) =>
+    `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 ** 2 ? 1 : 0)} MB`;
+  let shown = '';
+  const progress = (step: TakeOverProgress) => {
+    const label = {
+      connecting: `Asking ${from} to hand over…`,
+      copying: 'Copying notes and history',
+      pausing: 'Pausing changes for a moment to copy the last of them',
+      finishing: 'Starting the host here and pointing devices to it…',
+    }[step.phase];
+    const amount =
+      step.total > 0
+        ? `  ${Math.floor((step.done / step.total) * 100)}%  (${megabytes(step.done)} of ${megabytes(step.total)})`
+        : '';
+    if (tty) process.stdout.write(`\r\x1b[2K  ${label}${amount}`);
+    else if (shown !== step.phase) console.log(`  ${label}`);
+    shown = step.phase;
+  };
+  let result;
+  try {
+    result = await takeOver({
+      from,
+      code,
+      dataDir: data,
+      to: `http://${address}`,
+      progress,
+      // A host already here, such as an old copy left by moving away, lets go of its data.
+      beforeInstall: async () => {
+        if (manager && (await manager.state()).running) await manager.remove();
+      },
+      afterInstall: async () => {
+        if (manager && config) await launch(manager, config);
+      },
+    });
+  } finally {
+    if (tty) process.stdout.write('\r\x1b[2K');
+  }
+  const signedIn = await readAccount(where);
+  const github = result.mirrors.filter((each) => /github\.com/i.test(each.remote));
+  const advice = await manager?.advice();
+  console.log(
+    [
+      '✓ This machine is the host now',
+      `  Address    http://${address}${config ? `   ${kindOf(config)}` : ''}`,
+      `  Notebooks  ${result.notebooks.map((each) => `${each.name} (${each.files} files)`).join(', ') || 'none'}`,
+      `  Devices    ${result.devices}, each following by itself the next time it syncs`,
+      `  Data       ${data}`,
+      ...result.mirrors.map(
+        (each, at) =>
+          `  ${at ? '          ' : 'GitHub   '}  ${each.name} → ${repositoryLabel(each.remote)}`,
+      ),
+      `  Backups    ${config?.backup ? backupLine(config) : `Off on this machine. To back up: ${me} host backup FOLDER`}`,
+    ].join('\n'),
+  );
+  if (github.length && !signedIn)
+    console.log(
+      `\nGitHub is signed in on the old machine, not this one. To carry on keeping notebooks there:\n  ${me} host github login`,
+    );
+  if (docker) console.log('\nNow start the container, with the same data volume.');
+  for (const extra of [note, advice]) if (extra) console.log(`\n${extra}`);
+  console.log(
+    `\nThe old host only points devices here now. ${me} host status there shows who has followed;\n` +
+      `once everyone has, stop it there with: ${me} host stop`,
+  );
+}
+
 /** Runs the host in this process until it is told to stop. This is what the service runs. */
 async function runHere(): Promise<void> {
   const config = await readConfig(where);
@@ -375,14 +545,29 @@ async function runHere(): Promise<void> {
   // Notebooks kept on GitHub sync from here, beside the host. New ones, added with
   // `host github connect`, are noticed within a few seconds.
   const mirrors = new Mirrors({ host, dataDir: data, account: () => readAccount(where), log });
-  mirrors.start();
+  const moved = host.movedTo();
+  // A host that moved away only points devices to where it went: its copy is an old one, and
+  // must not be sent to GitHub or backed up as if it were current.
+  if (moved) log(`This host moved to ${moved.to}. It only tells devices so now.`);
+  else mirrors.start();
+  // While another machine copies this host, nothing beside it may write to the data.
+  host.moveHooks = {
+    pause: async () => {
+      log('Another machine is taking this host over. Copies on GitHub are paused meanwhile.');
+      await mirrors.stop();
+    },
+    resume: () => {
+      log('The move was given up. This machine carries on as the host.');
+      mirrors.start();
+    },
+  };
 
   // Backups are scheduled here, so a server needs no cron. Settings are read each time, so
   // `host backup` changes them without a restart.
   let busy = false;
   const backUpIfDue = async () => {
     const latest = await readConfig(where);
-    if (busy || !latest?.backup) return;
+    if (busy || !latest?.backup || host.movedTo()) return;
     const { folder, keep, hour } = latest.backup;
     const due = new Date();
     due.setHours(hour, 0, 0, 0);
@@ -494,6 +679,11 @@ async function main(): Promise<void> {
     }
     case 'restore':
       return restore();
+    case 'move':
+      return move();
+    case 'take-over':
+    case 'takeover':
+      return takeOverHere();
     case 'logs': {
       if (!existsSync(where.log)) return console.log('No log yet.');
       const follow = flags.has('follow') || flags.has('f');

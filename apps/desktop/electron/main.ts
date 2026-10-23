@@ -318,6 +318,16 @@ async function start() {
   handle('hosting:invite', (notebook) => hosting.invite(text(notebook, 200)));
   handle('hosting:cancel-invitation', (id) => hosting.cancelInvitation(text(id, 100)));
   handle('hosting:remove-device', (id) => hosting.removeDevice(text(id, 100)));
+  handle('hosting:move', () => hosting.moveHosting());
+  handle('hosting:take-over', (address, code) =>
+    hosting.takeOver(text(address, 500), text(code, 100), (progress) =>
+      window?.webContents.send('hosting:take-over-progress', progress),
+    ),
+  );
+  handle('sync:follow', async (address) => {
+    await sync.follow(hostAddress(text(address, 500)));
+    return sync.info();
+  });
   handle('github:info', () => hosting.github());
   handle('github:sign-in', () => hosting.signInToGitHub());
   handle('github:finish-sign-in', () => hosting.finishGitHubSignIn());

@@ -156,6 +156,16 @@ export const previewVault: VaultBridge = {
   backUpNow: async () => ({ keep: 14, backups: [] }),
   restoreBackup: async () => ({ keep: 14, backups: [] }),
   onHosting: () => () => {},
+  moveHosting: async () => {
+    throw new Error('Hosting needs the Mac app.');
+  },
+  takeOverHosting: async () => {
+    throw new Error('Hosting needs the Mac app.');
+  },
+  onTakeOver: () => () => {},
+  followHost: async () => {
+    throw new Error('Sync needs the desktop app.');
+  },
   github: async () => noGitHub(),
   signInToGitHub: async () => {
     throw new Error('GitHub needs the Mac app.');
