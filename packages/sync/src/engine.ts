@@ -1,5 +1,6 @@
 import { mergeText } from '@opsidian/core';
 import {
+  Moved,
   Unauthorized,
   pathKey,
   validPath,
@@ -78,6 +79,8 @@ interface Options {
   wait: number;
   newId(): string;
   now(): number;
+  /** The host moved to another machine. The engine stops; whoever owns it follows. */
+  onMoved?(to: string): void;
 }
 
 /** A file changed underneath an operation. Nothing was lost; the cycle starts over. */
@@ -237,6 +240,12 @@ export class SyncEngine {
         if (error instanceof Unauthorized) {
           this.running = false;
           this.tell({ ...this.last, state: 'error', message: error.message });
+          break;
+        }
+        if (error instanceof Moved && this.options.onMoved) {
+          this.running = false;
+          this.tell({ ...this.last, state: 'syncing', message: `${error.message} Following it…` });
+          this.options.onMoved(error.to);
           break;
         }
         this.tell({
@@ -649,7 +658,8 @@ export class SyncEngine {
         try {
           await this.apply(change, pending, view);
         } catch (error) {
-          if (error instanceof Busy || error instanceof Unauthorized) throw error;
+          if (error instanceof Busy || error instanceof Unauthorized || error instanceof Moved)
+            throw error;
           // One change this device cannot apply must not hold up all the others.
           problems.push(
             `“${change.path}” could not be updated: ${error instanceof Error ? error.message : String(error)}`,

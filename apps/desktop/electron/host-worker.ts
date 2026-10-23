@@ -1,6 +1,7 @@
 import { parentPort } from 'node:worker_threads';
 import { Host, restoreBackup } from '../../host/src/host';
 import { Mirrors, scheduleOf, type Schedule } from '../../host/src/mirror';
+import { takeOver, type TakeOverProgress } from '../../host/src/move';
 import type { GitHubAccount } from '../../host/src/github';
 
 /**
@@ -23,39 +24,66 @@ export type HostRequest =
   | { op: 'schedule'; every: Schedule }
   | { op: 'keep'; notebook: string; remote: string }
   | { op: 'mirror'; notebook: string; confirm?: boolean }
-  | { op: 'unmirror'; notebook: string };
+  | { op: 'unmirror'; notebook: string }
+  | { op: 'handoff' }
+  | { op: 'takeOver'; dataDir: string; port: number; from: string; code: string; to: string };
 
 export type HostReply =
   | { id: number; ok: true; value: unknown }
-  | { id: number; ok: false; message: string; code?: string | undefined };
+  | { id: number; ok: false; message: string; code?: string | undefined }
+  /** How far a take-over has got, sent while it runs. */
+  | { id: number; progress: TakeOverProgress };
 
 let host: Host | undefined;
 let mirrors: Mirrors | undefined;
 /** The GitHub sign-in, handed over by the app, which keeps it in the keychain. */
 let account: GitHubAccount | undefined;
 
-async function handle(request: HostRequest): Promise<unknown> {
-  if (request.op === 'open') {
-    if (host) return;
-    const opened = new Host({ dataDir: request.dataDir });
+async function open(dataDir: string, port: number): Promise<void> {
+  if (host) return;
+  const opened = new Host({ dataDir });
+  try {
+    await opened.listen(port, '0.0.0.0');
+  } catch (reason) {
+    await opened.close().catch(() => {});
+    throw reason;
+  }
+  host = opened;
+  // Notebooks kept on GitHub sync on this thread too, beside the host they belong to. A host
+  // that moved away holds an old copy, which must not be sent there.
+  const kept = new Mirrors({ host, dataDir, account: async () => account });
+  mirrors = kept;
+  if (!host.movedTo()) kept.start();
+  host.moveHooks = { pause: () => kept.stop(), resume: () => kept.start() };
+}
+async function close(flush?: number): Promise<void> {
+  await mirrors?.stop(flush);
+  mirrors = undefined;
+  await host?.close();
+  host = undefined;
+}
+
+async function handle(request: HostRequest, id: number): Promise<unknown> {
+  if (request.op === 'open') return open(request.dataDir, request.port);
+  if (request.op === 'close') return close(request.flush);
+  if (request.op === 'takeOver') {
+    const was = Boolean(host);
     try {
-      await opened.listen(request.port, '0.0.0.0');
+      return await takeOver({
+        from: request.from,
+        code: request.code,
+        dataDir: request.dataDir,
+        to: request.to,
+        progress: (progress) => parentPort!.postMessage({ id, progress } satisfies HostReply),
+        // An old copy hosted here, left from moving away, lets go of its data first.
+        beforeInstall: () => close(),
+        afterInstall: () => open(request.dataDir, request.port),
+      });
     } catch (reason) {
-      await opened.close().catch(() => {});
+      // What was hosted here before is put back, as it was.
+      if (was && !host) await open(request.dataDir, request.port).catch(() => {});
       throw reason;
     }
-    host = opened;
-    // Notebooks kept on GitHub sync on this thread too, beside the host they belong to.
-    mirrors = new Mirrors({ host, dataDir: request.dataDir, account: async () => account });
-    mirrors.start();
-    return;
-  }
-  if (request.op === 'close') {
-    await mirrors?.stop(request.flush);
-    mirrors = undefined;
-    await host?.close();
-    host = undefined;
-    return;
   }
   if (request.op === 'account') {
     account = request.account;
@@ -74,8 +102,12 @@ async function handle(request: HostRequest): Promise<unknown> {
         devices: host.devices(),
         invitations: host.invitations(),
         mirrors: host.mirrors().map(({ token: _token, ...each }) => each),
+        moved: host.moved(),
+        moving: host.busyMoving,
         every: scheduleOf(host),
       };
+    case 'handoff':
+      return host.handoff();
     case 'invite':
       return host.invite(request.notebook);
     case 'cancelInvitation':
@@ -102,7 +134,7 @@ async function handle(request: HostRequest): Promise<unknown> {
 }
 
 parentPort!.on('message', ({ id, request }: { id: number; request: HostRequest }) => {
-  void handle(request).then(
+  void handle(request, id).then(
     (value) => parentPort!.postMessage({ id, ok: true, value } satisfies HostReply),
     (reason: unknown) =>
       parentPort!.postMessage({

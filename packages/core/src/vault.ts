@@ -105,6 +105,29 @@ export interface HostingInfo {
   invitations: { id: string; notebook: string; expires: number }[];
   /** Keep hosting from the menu bar after the window is closed. */
   keepRunning: boolean;
+  /** Another machine is copying this host to take it over. */
+  moving?: boolean;
+  /** This Mac's host moved to another machine; it now only points devices there. */
+  moved?: {
+    to: string;
+    at: number;
+    devices: { id: string; name: string; notebook: string; seen?: number; told?: number }[];
+  };
+}
+/** What another machine needs to take this Mac's host over. */
+export interface Handoff {
+  code: string;
+  expires: number;
+  /** This Mac's address, as the other machine reaches it. */
+  address: string;
+  /** What to run on a server to take over. */
+  command: string;
+}
+/** How far taking a host over has got. */
+export interface TakeOverProgress {
+  phase: 'connecting' | 'copying' | 'pausing' | 'finishing';
+  done: number;
+  total: number;
 }
 export interface Invitation {
   notebook: string;
@@ -232,6 +255,16 @@ export interface VaultBridge {
   backUpNow(): Promise<BackupInfo>;
   restoreBackup(name: string): Promise<BackupInfo>;
   onHosting(callback: (info: HostingInfo) => void): () => void;
+  /** Lets another machine take this Mac's host over. */
+  moveHosting(): Promise<Handoff>;
+  /**
+   * Makes this Mac the host, taking everything over from the host at `address`; devices,
+   * this Mac's own notebook included, follow by themselves.
+   */
+  takeOverHosting(address: string, code: string): Promise<HostingInfo>;
+  onTakeOver(callback: (progress: TakeOverProgress) => void): () => void;
+  /** Syncs with the same host at a new address, after it moved to another machine. */
+  followHost(address: string): Promise<SyncInfo>;
   github(): Promise<GitHubInfo>;
   /** Starts signing in: opens GitHub in the browser and returns the code to enter there. */
   signInToGitHub(): Promise<{ code: string; url: string }>;

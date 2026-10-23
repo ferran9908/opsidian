@@ -30,6 +30,7 @@
     "test:mobile-editor": "pnpm build:mobile-editor && node scripts/test-mobile-editor.mjs",
     "test:hosting": "pnpm build:desktop && node scripts/test-hosting.mjs",
     "test:github": "pnpm build:desktop && node scripts/test-github.mjs",
+    "test:move": "pnpm build:desktop && pnpm build:host && node scripts/test-move.mjs",
     "icons": "pnpm --filter @opsidian/desktop exec electron ../../scripts/render-icons.cjs"
   },
   "devDependencies": {

@@ -175,6 +175,18 @@ describe('keeping a notebook in a git repository', () => {
     expect(github.log()).toEqual(['Notes so far']);
   });
 
+  it('lets two copies of one notebook in one process take turns, never clone at once', async () => {
+    // As when importing: the import's own copy and the background one start together.
+    const github = await repository({ 'Welcome.md': '# Welcome\n' });
+    const server = await startHost();
+    server.host.addMirror('Notes', github.remote);
+    const [first, second] = [copyOf(server), copyOf(server)];
+    const results = await Promise.all([first.sync(), second.sync()]);
+    expect(results.map((each) => each.state)).toEqual(['synced', 'synced']);
+    expect(server.host.notebooks()).toMatchObject([{ name: 'Notes', files: 1 }]);
+    expect(existsSync(join(server.dataDir, 'mirrors', `${first.notebook}.cloning`))).toBe(false);
+  });
+
   it('sends an existing notebook to an empty repository, without sync’s own files', async () => {
     const github = await repository();
     const server = await startHost();

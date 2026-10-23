@@ -12,7 +12,8 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
-import { existsSync, mkdirSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync } from 'node:fs';
+import { lstat, readlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
   MAX_FILE_BYTES,
@@ -102,6 +103,34 @@ export interface MirrorRecord {
   token?: string;
   status?: MirrorStatus;
 }
+/** Where a host went when it moved to another machine, and which devices have heard. */
+export interface Moved {
+  /** The new host's address, as devices are told it: `http://100.64.0.9:4810`. */
+  to: string;
+  at: number;
+  /** Every device that still syncs, except the host's own copies kept on GitHub. */
+  devices: (HostDevice & { told?: number })[];
+}
+/** One thing in the host's data folder that a machine taking it over copies. */
+export interface MovableFile {
+  /** Relative to the data folder, with `/` between names. */
+  path: string;
+  kind: 'file' | 'dir' | 'link';
+  size: number;
+  mode: number;
+  /** Where a link points. */
+  target?: string;
+}
+/**
+ * How long a move may go without the new machine asking for anything before it is given up,
+ * and the host takes changes again. Each request renews it.
+ */
+const MOVE_LEASE = 5 * 60_000;
+/** Only these folders hold data worth moving; the database is sent separately, consistent. */
+const MOVABLE = ['blobs', 'mirrors'];
+/** Work in progress that a move must not copy: uploads, half-finished clones, locks. */
+const UNFINISHED = /\.(tmp|partial|lock|cloning)$/;
+
 export interface Backup {
   /** Names the snapshot; also its file name. */
   name: string;
@@ -204,6 +233,18 @@ export class Host {
   private readonly generation: string;
   /** When each device last asked for anything, kept in memory between writes. */
   private readonly seen = new Map<string, number>();
+  /**
+   * Another machine taking this host over: its credential's hash, whether changes are paused
+   * while the last of the data is copied, and when the move is given up if it goes quiet.
+   */
+  private moving:
+    | { token: string; frozen: boolean; lease: number; active: number; timer: NodeJS.Timeout }
+    | undefined;
+  /**
+   * What runs beside the host and writes to its data, such as the copies kept on GitHub:
+   * paused while another machine copies the data, and resumed if that move is given up.
+   */
+  moveHooks: { pause?(): Promise<void>; resume?(): void } = {};
 
   constructor(private readonly options: HostOptions) {
     this.maxWait = options.maxWait ?? 25;
@@ -234,6 +275,8 @@ export class Host {
       create table if not exists meta (name text primary key, value text not null);
       create table if not exists mirrors (
         notebook text primary key, remote text not null, device text, token text, status text);
+      create table if not exists handoffs (code text primary key, expires integer not null);
+      create table if not exists told (device text primary key, at integer not null);
     `);
     if (!this.db.prepare("select 1 from pragma_table_info('devices') where name = 'seen'").get())
       this.db.exec('alter table devices add column seen integer');
@@ -251,6 +294,11 @@ export class Host {
 
   /** Creates a single-use invitation, and the notebook itself if it is new. */
   invite(notebook: string, minutes = 15): { code: string; expires: number } {
+    const moved = this.movedTo();
+    if (moved)
+      throw new Error(
+        `This host moved to ${moved.to.replace(/^https?:\/\//, '')}. Invite devices from there.`,
+      );
     const id = this.notebook(notebook);
     const raw = Array.from({ length: 12 }, () => ALPHABET[randomInt(ALPHABET.length)]).join('');
     const expires = Date.now() + minutes * 60000;
@@ -326,6 +374,93 @@ export class Host {
   notebookId(name: string): string | undefined {
     return this.db.prepare('select id from notebooks where name = ?').get(name.trim())?.id as
       string | undefined;
+  }
+
+  // Moving the host to another machine. See move.ts for the machine taking over.
+
+  /**
+   * A single-use code that lets another machine take this host over: every notebook, its
+   * history, and every device, which then follow it there by themselves.
+   */
+  handoff(minutes = 15): { code: string; expires: number } {
+    const moved = this.movedTo();
+    if (moved) throw new Error(`This host has already moved to ${moved.to}.`);
+    const raw = Array.from({ length: 12 }, () => ALPHABET[randomInt(ALPHABET.length)]).join('');
+    const expires = Date.now() + minutes * 60000;
+    this.db.prepare('delete from handoffs where expires < ?').run(Date.now());
+    this.db.prepare('insert into handoffs (code, expires) values (?, ?)').run(sha(raw), expires);
+    return { code: raw.replace(/(.{4})(?=.)/g, '$1-'), expires };
+  }
+  /** Where this host went, if it moved. */
+  movedTo(): { to: string; at: number } | undefined {
+    const to = this.meta('moved_to');
+    return to ? { to, at: Number(this.meta('moved_at')) || 0 } : undefined;
+  }
+  /** Where this host went, and which devices have been told so far. */
+  moved(): Moved | undefined {
+    const moved = this.movedTo();
+    if (!moved) return undefined;
+    const told = new Map(
+      this.db
+        .prepare('select device, at from told')
+        .all()
+        .map((row) => [row.device, row.at]),
+    );
+    const github = new Set(this.mirrors().map((each) => each.device));
+    return {
+      ...moved,
+      devices: this.devices()
+        .filter((device) => !device.revoked && !github.has(device.id))
+        .map((device) => {
+          const at = told.get(device.id) as number | undefined;
+          return at ? { ...device, told: at } : device;
+        }),
+    };
+  }
+  /** Whether another machine is copying this host right now. */
+  get busyMoving(): boolean {
+    return Boolean(this.moving);
+  }
+  private meta(name: string): string | undefined {
+    return this.db.prepare('select value from meta where name = ?').get(name)?.value as
+      string | undefined;
+  }
+  /** Gives up a move that did not finish. Changes are taken again; nothing was lost. */
+  private endMove(): void {
+    if (!this.moving) return;
+    clearInterval(this.moving.timer);
+    this.moving = undefined;
+    this.moveHooks.resume?.();
+  }
+  /** Everything a machine taking over copies besides the database, with what it needs to. */
+  private async movable(): Promise<MovableFile[]> {
+    const found: MovableFile[] = [];
+    const walk = async (relative: string): Promise<void> => {
+      const entries = await readdir(join(this.options.dataDir, relative), {
+        withFileTypes: true,
+      }).catch(() => []);
+      for (const entry of entries) {
+        if (UNFINISHED.test(entry.name)) continue;
+        const path = `${relative}/${entry.name}`;
+        const info = await lstat(join(this.options.dataDir, path)).catch(() => undefined);
+        if (!info) continue;
+        if (info.isSymbolicLink())
+          found.push({
+            path,
+            kind: 'link',
+            size: 0,
+            mode: info.mode & 0o777,
+            target: await readlink(join(this.options.dataDir, path)),
+          });
+        else if (info.isDirectory()) {
+          found.push({ path, kind: 'dir', size: 0, mode: info.mode & 0o777 });
+          await walk(path);
+        } else if (info.isFile())
+          found.push({ path, kind: 'file', size: info.size, mode: info.mode & 0o777 });
+      }
+    };
+    for (const top of MOVABLE) if (existsSync(join(this.options.dataDir, top))) await walk(top);
+    return found;
   }
 
   // Copies of notebooks kept in git repositories. See mirror.ts.
@@ -444,6 +579,8 @@ export class Host {
   }
   async close(): Promise<void> {
     if (!this.db.isOpen) return;
+    if (this.moving) clearInterval(this.moving.timer);
+    this.moving = undefined;
     for (const waiting of this.waiters.values()) for (const wake of waiting) wake();
     await this.app.close();
     this.db.close();
@@ -589,6 +726,131 @@ export class Host {
     return result;
   }
 
+  /**
+   * Lets only the machine taking this host over in, with the credential it was given, and
+   * keeps the move alive while it works.
+   */
+  private async mover(
+    request: FastifyRequest,
+    reply: { raw: { once(event: 'close', listener: () => void): unknown } },
+    path: string,
+  ): Promise<void> {
+    const header = request.headers.authorization;
+    const token = header?.startsWith('Bearer ') ? sha(header.slice(7)) : '';
+    const moving = this.moving;
+    if (moving && token === moving.token) {
+      moving.active++;
+      moving.lease = Date.now() + MOVE_LEASE;
+      reply.raw.once('close', () => {
+        moving.active--;
+        moving.lease = Date.now() + MOVE_LEASE;
+      });
+      return;
+    }
+    // Finishing is safe to ask twice, in case the answer to the first was lost.
+    if (path === '/v1/move/finish' && token && token === this.meta('move_session')) return;
+    throw Object.assign(new Error('This move is over, or was never started.'), {
+      statusCode: 401,
+    });
+  }
+
+  private moveRoutes(refuse: (statusCode: number, message: string) => Error): void {
+    const { app } = this;
+    /** Spends a code from `host move`; the machine taking over gets a credential for the rest. */
+    app.post('/v1/move', async (request) => {
+      const now = Date.now();
+      const tries = (this.attempts.get(request.ip) ?? []).filter((at) => at > now - 60000);
+      this.attempts.set(request.ip, tries);
+      if (tries.length >= 10) throw refuse(429, 'Too many wrong codes. Wait a minute.');
+      const moved = this.movedTo();
+      if (moved) throw refuse(409, `This host has already moved to ${moved.to}.`);
+      if (this.moving)
+        throw refuse(409, 'Another machine is taking this host over. Try again in a few minutes.');
+      const body = request.body as { code?: unknown } | undefined;
+      const code =
+        typeof body?.code === 'string' ? body.code.toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
+      const found = this.db
+        .prepare('delete from handoffs where code = ? and expires > ? returning code')
+        .get(sha(code), now);
+      if (!found) {
+        tries.push(now);
+        throw refuse(403, 'That code is not valid. It may have expired or been used.');
+      }
+      const token = randomBytes(32).toString('base64url');
+      const timer = setInterval(() => {
+        if (this.moving && !this.moving.active && Date.now() > this.moving.lease) this.endMove();
+      }, 5000);
+      timer.unref();
+      this.moving = { token: sha(token), frozen: false, lease: now + MOVE_LEASE, active: 0, timer };
+      // Whatever writes beside the host stops first, so what is copied holds still.
+      await this.moveHooks.pause?.();
+      return { token, generation: this.generation, notebooks: this.notebooks() };
+    });
+    app.get('/v1/move/files', async () => ({ files: await this.movable() }));
+    app.get('/v1/move/file', async (request, reply) => {
+      const path = (request.query as { path?: unknown }).path;
+      const parts = typeof path === 'string' ? path.split('/') : [];
+      if (
+        !MOVABLE.includes(parts[0] ?? '') ||
+        parts.some((part) => !part || part === '.' || part === '..' || part.includes('\\'))
+      )
+        throw refuse(400, 'That is not part of the host.');
+      const file = join(this.options.dataDir, ...parts);
+      const info = await lstat(file).catch(() => undefined);
+      if (!info?.isFile()) throw refuse(404, 'That is no longer there.');
+      return reply.type('application/octet-stream').send(createReadStream(file));
+    });
+    app.post('/v1/move/freeze', async () => {
+      this.moving!.frozen = true;
+      return { frozen: true };
+    });
+    /** The whole database, consistent, once changes are paused. */
+    app.get('/v1/move/database', async (_request, reply) => {
+      if (!this.moving?.frozen) throw refuse(409, 'Pause changes before copying the database.');
+      const file = join(this.options.dataDir, `host.moving-${randomUUID()}.sqlite`);
+      this.db.exec(`vacuum into '${file.replaceAll("'", "''")}'`);
+      const stream = createReadStream(file);
+      stream.once('close', () => void rm(file, { force: true }));
+      return reply.type('application/octet-stream').send(stream);
+    });
+    /**
+     * The new machine has everything and is about to serve it. From now on this host only
+     * tells devices where it went.
+     */
+    app.post('/v1/move/finish', async (request) => {
+      const to = (request.body as { to?: unknown } | undefined)?.to;
+      if (typeof to !== 'string' || !/^https?:\/\/[^\s/?#]+$/.test(to))
+        throw refuse(400, 'Say where the host is moving to.');
+      const already = this.movedTo();
+      if (already) return { moved: already.to };
+      if (!this.moving?.frozen) throw refuse(409, 'Pause changes before finishing.');
+      const set = this.db.prepare(
+        'insert into meta (name, value) values (?, ?) on conflict (name) do update set value = excluded.value',
+      );
+      this.db.exec('begin immediate');
+      try {
+        set.run('moved_to', to);
+        set.run('moved_at', String(Date.now()));
+        set.run('move_session', this.moving.token);
+        // Unused invitations name this address; they would only lead to a host that moved.
+        this.db.exec('delete from invites; delete from handoffs; delete from told');
+        this.db.exec('commit');
+      } catch (error) {
+        this.db.exec('rollback');
+        throw error;
+      }
+      clearInterval(this.moving.timer);
+      this.moving = undefined;
+      // Devices waiting for news hear it now: the next thing they ask is answered with the way.
+      for (const waiting of this.waiters.values()) for (const wake of [...waiting]) wake();
+      return { moved: to };
+    });
+    app.post('/v1/move/cancel', async () => {
+      this.endMove();
+      return { cancelled: true };
+    });
+  }
+
   private routes(): void {
     const { app } = this;
     app.addContentTypeParser(
@@ -596,26 +858,59 @@ export class Host {
       { parseAs: 'buffer', bodyLimit: MAX_FILE_BYTES },
       (_request, body, done) => done(null, body),
     );
-    app.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) => {
-      const status = error.statusCode ?? 500;
-      void reply.code(status).send({ error: status < 500 ? error.message : 'The host failed.' });
-    });
+    app.setErrorHandler(
+      (error: Error & { statusCode?: number; moved?: string }, _request, reply) => {
+        const status = error.statusCode ?? 500;
+        void reply.code(status).send({
+          error: status < 500 || status === 503 ? error.message : 'The host failed.',
+          ...(error.moved ? { moved: error.moved } : {}),
+        });
+      },
+    );
     const signedIn = (request: FastifyRequest): Device => {
       const device = this.device(request);
       if (!device)
         throw Object.assign(new Error('This device is not connected.'), { statusCode: 401 });
       return device;
     };
-    // Checked before a request's body is read, so strangers cannot make the host buffer
-    // uploads or parse anything.
-    app.addHook('onRequest', async (request) => {
-      const path = request.url.split('?')[0];
-      if (path !== '/v1' && path !== '/v1/pair') signedIn(request);
-    });
     const refuse = (statusCode: number, message: string) =>
       Object.assign(new Error(message), { statusCode });
+    // Checked before a request's body is read, so strangers cannot make the host buffer
+    // uploads or parse anything.
+    app.addHook('onRequest', async (request, reply) => {
+      const path = request.url.split('?')[0]!;
+      if (path === '/v1' || path === '/v1/move') return;
+      if (path.startsWith('/v1/move/')) return this.mover(request, reply, path);
+      const moved = this.movedTo();
+      if (moved) {
+        // Only a device this host knows is told where it went; anyone else learns nothing.
+        if (path === '/v1/pair')
+          throw refuse(410, 'This host has moved. Ask for an invitation from its new address.');
+        const device = signedIn(request);
+        this.db
+          .prepare('insert into told (device, at) values (?, ?) on conflict do nothing')
+          .run(device.id, Date.now());
+        throw Object.assign(
+          refuse(410, `This host moved to ${moved.to.replace(/^https?:\/\//, '')}.`),
+          { moved: moved.to },
+        );
+      }
+      if (path !== '/v1/pair') signedIn(request);
+      // While the last of the data is copied, nothing may change. Devices keep their edits
+      // and send them to the new host once they have followed it.
+      if (this.moving?.frozen && request.method !== 'GET' && request.method !== 'HEAD')
+        throw refuse(
+          503,
+          'The host is moving to another machine. Changes made here are kept, and sync once the move is done.',
+        );
+    });
 
-    app.get('/v1', async () => ({ opsidian: 'host', protocol: 1 }));
+    app.get('/v1', async () => {
+      const moved = this.movedTo();
+      return { opsidian: 'host', protocol: 1, ...(moved ? { moved: true } : {}) };
+    });
+
+    this.moveRoutes(refuse);
 
     app.post('/v1/pair', async (request): Promise<Pairing> => {
       // Slow down anyone guessing codes. Only wrong codes count, and they count against

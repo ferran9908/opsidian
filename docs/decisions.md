@@ -43,7 +43,7 @@ The build order was accepted after discussing this baseline. These choices guide
 - Supported Markdown/Obsidian syntax compatibility matrix.
 - iPhone editor acceptance after real-device testing.
 - Sync wire schema, merge implementation, journal layout, retention and rebootstrap rules.
-- Background-host packaging, co-located app/host coordination, and host migration.
+- Background-host packaging and co-located app/host coordination. (Host migration: see "Moving the host — 2026-10-23".)
 - Certificate and onboarding experience for public versus Tailscale hosts.
 - Attachment caching, size policies, and history/backup retention.
 - Final typography, mobile designs, and conflict/history UI.
@@ -128,6 +128,18 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Stopping the host flushes,** within 20 seconds on a server and 8 in the Mac app so quitting never hangs. A host that was off catches up soon after it starts. Copies are spread a little apart so a host with many notebooks does not ask GitHub for all of them at once.
 - **Git traffic is not GitHub's REST API.** The API's 5,000 requests an hour covers only sign-in and listing or making repositories, never background rounds. Git requests are throttled by GitHub's undocumented secondary limits instead; when GitHub says so, the copy waits at least an hour and shows when it will try again.
 - **The host's own history remains the backup of record.** GitHub is a readable off-site copy; status warns when it is more than twice the schedule behind, rather than staying silent.
+
+## Moving the host — 2026-10-23
+
+- **A host can move between machines at any time, and devices follow by themselves.** Requested by the user, for switching among a Mac mini, a VPS and a MacBook. This settles "host migration", listed as unresolved above.
+- **The whole host moves, not one notebook.** Devices, history and GitHub copies go together, so a move is one step and nothing is left split between machines.
+- **The new machine pulls, with a single-use code made on the old host** (`host move` there, `host take-over ADDRESS CODE` here, or Settings in the app). A device's own credential was considered as the authority, so that a MacBook could take over without touching the old host. It was rejected: any device, including a lost phone, could then redirect every other device to a host of its choosing.
+- **Copy live, then pause briefly.** File contents and the GitHub checkouts are copied while devices keep syncing; changes are then refused (`503`) only while what changed meanwhile and a consistent copy of the database are taken. Devices need no queue for this, since what they have not sent is worked out from the folder.
+- **The history keeps its identity.** The database moves whole, `generation` included, so devices carry on exactly where they were instead of meeting the host afresh as after a restore. The new machine refuses to replace a host that is not an old copy left by moving away.
+- **The old host points the way, and devices check before following.** It answers devices it knows with `410` and the new address. A device follows only if the new address answers as an Opsidian host and accepts its credential, which only the same host can. The new host starts serving before the old one is told, so devices sent there find it running. A device that missed the move can be given the address by hand, with the same check.
+- **The GitHub schedule moves with the host,** since it is kept in the host's database.
+- **Not moved:** the GitHub sign-in (kept per machine, in the keychain or a file only its user can read), backup settings, and unused invitations.
+- **Not built:** changing the address by hand on the iPhone (it follows a move by itself, through the shared sync service), and a way to undo a finished move other than moving back.
 
 ## Future AI direction
 

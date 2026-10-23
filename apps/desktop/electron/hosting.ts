@@ -9,12 +9,14 @@ import type {
   GitHubInfo,
   GitHubRepository,
   GitHubSchedule,
+  Handoff,
   HostingInfo,
   Invitation,
   RepositoryChoice,
+  TakeOverProgress,
 } from '@opsidian/core';
-import type { SyncService, Vault } from '@opsidian/notebook';
-import { listBackups, type Host, type MirrorRecord } from '../../host/src/host';
+import { hostAddress, type SyncService, type Vault } from '@opsidian/notebook';
+import { listBackups, type Host, type MirrorRecord, type Moved } from '../../host/src/host';
 import {
   createRepository,
   findRepository,
@@ -88,17 +90,22 @@ class Failure extends Error {
   }
 }
 
+type Answer = Exclude<HostReply, { progress: unknown }>;
+
 /** The host's thread, seen from the app: each call is a message there and back. */
 class HostThread {
   private readonly worker = new Worker(join(__dirname, 'host-worker.cjs'));
-  private readonly waiting = new Map<number, (reply: HostReply) => void>();
+  private readonly waiting = new Map<number, (reply: Answer) => void>();
+  private readonly progress = new Map<number, (progress: TakeOverProgress) => void>();
   private next = 0;
   private ended = false;
 
   constructor(onLost: (reason: string) => void) {
     this.worker.on('message', (reply: HostReply) => {
+      if ('progress' in reply) return this.progress.get(reply.id)?.(reply.progress);
       this.waiting.get(reply.id)?.(reply);
       this.waiting.delete(reply.id);
+      this.progress.delete(reply.id);
     });
     const lost = (reason: string) => {
       if (this.ended) return;
@@ -106,15 +113,20 @@ class HostThread {
       for (const answer of this.waiting.values())
         answer({ id: -1, ok: false, message: 'Hosting stopped unexpectedly.' });
       this.waiting.clear();
+      this.progress.clear();
       onLost(reason);
     };
     this.worker.on('error', (error) => lost(error.message));
     this.worker.on('exit', (code) => lost(`Hosting stopped unexpectedly (${code}).`));
   }
 
-  call<T = void>(request: HostRequest): Promise<T> {
+  call<T = void>(
+    request: HostRequest,
+    progress?: (progress: TakeOverProgress) => void,
+  ): Promise<T> {
     if (this.ended) return Promise.reject(new Failure('Hosting stopped unexpectedly.'));
     const id = this.next++;
+    if (progress) this.progress.set(id, progress);
     return new Promise<T>((resolve, reject) => {
       this.waiting.set(id, (reply) =>
         reply.ok ? resolve(reply.value as T) : reject(new Failure(reply.message, reply.code)),
@@ -137,6 +149,8 @@ interface Snapshot {
   invitations: ReturnType<Host['invitations']>;
   mirrors: Omit<MirrorRecord, 'token'>[];
   every: Schedule;
+  moved?: Moved;
+  moving: boolean;
 }
 
 /**
@@ -212,14 +226,18 @@ export class Hosting {
     this.timer = setInterval(() => void this.backUpIfDue().catch(() => {}), 10 * 60 * 1000);
     void this.backUpIfDue().catch(() => {});
   }
-  private async open(): Promise<void> {
-    if (this.host) return;
+  private thread(): HostThread {
     const host: HostThread = new HostThread((reason) => {
       if (this.host !== host) return;
       this.host = undefined;
       this.error = reason;
       void this.tell();
     });
+    return host;
+  }
+  private async open(): Promise<void> {
+    if (this.host) return;
+    const host = this.thread();
     try {
       // Opening the host's data can fail too, for example when its disk is full.
       await host.call({ op: 'open', dataDir: this.data, port: this.saved.port });
@@ -265,7 +283,91 @@ export class Hosting {
         }),
       invitations: seen?.invitations ?? [],
       keepRunning: this.saved.keepRunning,
+      ...(seen?.moving ? { moving: true } : {}),
+      ...(seen?.moved
+        ? {
+            moved: {
+              to: seen.moved.to,
+              at: seen.moved.at,
+              devices: seen.moved.devices.map(({ id, name, notebook, seen: last, told }) => ({
+                id,
+                name: own.has(id) ? `${name} (this Mac)` : name,
+                notebook,
+                ...(last ? { seen: last } : {}),
+                ...(told ? { told } : {}),
+              })),
+            },
+          }
+        : {}),
     };
+  }
+
+  /** A code that lets another machine take this Mac's host over. */
+  async moveHosting(): Promise<Handoff> {
+    if (!this.host) throw new Error('This Mac is not hosting.');
+    const address = addresses(this.saved.port)[0]?.address;
+    if (!address)
+      throw new Error(
+        'This Mac is not on a network, so no other machine can reach it to take over.',
+      );
+    const { code, expires } = await this.host.call<{ code: string; expires: number }>({
+      op: 'handoff',
+    });
+    return { code, expires, address, command: `npx opsidian host take-over ${address} ${code}` };
+  }
+  /**
+   * Makes this Mac the host, taking everything over from the host at `from`. This Mac's own
+   * notebook was one of that host's devices; it is hosted here from now on.
+   */
+  takeOver(
+    from: string,
+    code: string,
+    progress: (progress: TakeOverProgress) => void,
+  ): Promise<HostingInfo> {
+    return this.serial(async () => {
+      const port = this.saved.port;
+      const to = addresses(port)[0]?.address;
+      if (!to)
+        throw new Error(
+          'This Mac is not on a network other devices can reach. Connect it, ideally to Tailscale, and try again.',
+        );
+      // A host already here, such as an old copy left when it moved away, hands over its thread.
+      const thread = this.host ?? this.thread();
+      try {
+        await thread.call(
+          {
+            op: 'takeOver',
+            dataDir: this.data,
+            port,
+            from: hostAddress(from),
+            code,
+            to: `http://${to}`,
+          },
+          progress,
+        );
+      } catch (reason) {
+        if (thread !== this.host) await thread.end().catch(() => {});
+        throw reason;
+      }
+      this.host = thread;
+      this.error = undefined;
+      await thread.call({ op: 'account', account: this.account });
+      this.saved.enabled = true;
+      const { devices } = await thread.call<Snapshot>({ op: 'snapshot' });
+      const now = this.sync.info();
+      const mine = this.sync.deviceId;
+      if (mine && devices.some((device) => device.id === mine)) {
+        // The open notebook belonged to the host that moved here: it syncs with it on this
+        // Mac now, the way a hosting Mac's own notebook does.
+        this.saved.own = [...new Set([...(this.saved.own ?? []), mine])];
+        const root = this.sync.root;
+        if (root && now.notebook)
+          this.saved.folders = { ...this.saved.folders, [root]: now.notebook };
+        await this.save();
+        await this.sync.follow(`http://127.0.0.1:${port}`).catch(() => {});
+      } else await this.save();
+      return this.tell();
+    });
   }
 
   /** Starts hosting, and connects the open notebook to this Mac's own host. */
@@ -407,6 +509,8 @@ export class Hosting {
   private async backUpIfDue(): Promise<void> {
     const { folder, hour } = this.saved.backup;
     if (!this.host || !folder || hour === undefined) return;
+    // What a host that moved away holds is an old copy; the new host backs up the real one.
+    if ((await this.host.call<Snapshot>({ op: 'snapshot' })).moved) return;
     const due = new Date();
     due.setHours(hour, 0, 0, 0);
     if (Date.now() < due.getTime()) return;

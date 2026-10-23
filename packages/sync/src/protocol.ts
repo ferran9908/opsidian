@@ -85,6 +85,16 @@ export class Unauthorized extends Error {
   }
 }
 
+/**
+ * Thrown by a transport when the host moved to another machine. Only a device the host still
+ * accepts is told, so `to` comes from the host it trusted; the device checks it before following.
+ */
+export class Moved extends Error {
+  constructor(readonly to: string) {
+    super(`The host moved to ${to.replace(/^https?:\/\//, '')}.`);
+  }
+}
+
 export const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
 /** Whether a path may be synced: notebook-relative, nothing hidden, no way out of the folder. */

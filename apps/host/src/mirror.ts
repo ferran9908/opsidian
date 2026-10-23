@@ -192,6 +192,9 @@ const alive = (pid: number) => {
   }
 };
 
+/** The round each notebook's copy is in, in this process, by folder. */
+const holders = new Map<string, Promise<void>>();
+
 /** Finds out whether git is installed, and says how to get it if not. */
 export async function gitVersion(): Promise<string> {
   return new Promise((resolve, reject) =>
@@ -727,7 +730,24 @@ export class Mirror {
    * Holds the copy for one process at a time: the background host and a command typed at the
    * same moment must not both commit in it.
    */
-  private async locked<T>(task: () => Promise<T>): Promise<T> {
+  private locked<T>(task: () => Promise<T>): Promise<T> {
+    // Within this process, two copies of one notebook (one importing, one in the background)
+    // take turns here; the lock file is only for other processes. Without this, the second
+    // found a lock with this process's number on it, took it for one left by a crash, and
+    // cloned into the same folder at the same time.
+    const before = holders.get(this.folder) ?? Promise.resolve();
+    const mine = before.then(() => this.lockFile(task));
+    const settled = mine.then(
+      () => {},
+      () => {},
+    );
+    holders.set(this.folder, settled);
+    void settled.then(() => {
+      if (holders.get(this.folder) === settled) holders.delete(this.folder);
+    });
+    return mine;
+  }
+  private async lockFile<T>(task: () => Promise<T>): Promise<T> {
     const lock = `${this.folder}.lock`;
     // A process number alone could be reused after a restart, by something else entirely.
     const me = `${process.pid} ${booted()}`;
@@ -743,7 +763,8 @@ export class Mirror {
         const [pid, boot] = (await readFile(lock, 'utf8').catch(() => '')).split(' ');
         const owner = Number(pid);
         if (owner === process.pid || boot !== booted() || !alive(owner))
-          // Left behind by a process that has gone: nobody holds it.
+          // Left behind by a process that has gone, or by this one before a crash or restart
+          // of its host (in this process, copies take turns before reaching here): nobody holds it.
           await rm(lock, { force: true });
         else if (this.stopped || tries > 600)
           throw new GitError('The copy is busy in another process. Try again shortly.');
