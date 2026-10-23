@@ -16,7 +16,16 @@ import {
   type Repository,
 } from './github';
 import type { Host, MirrorStatus } from './host';
-import { Mirrors, gitVersion } from './mirror';
+import {
+  DEFAULT_SCHEDULE,
+  Mirrors,
+  SCHEDULES,
+  gitVersion,
+  isBehind,
+  isSchedule,
+  scheduleOf,
+  type Schedule,
+} from './mirror';
 import type { Place } from './home';
 
 /** The GitHub sign-in on this machine, if there is one. */
@@ -47,18 +56,68 @@ export function ago(at: number, now = Date.now()): string {
   return new Date(at).toLocaleDateString();
 }
 
-/** One line on how a copy is doing. */
-export function statusLine(status: MirrorStatus | undefined): string {
+/** A length of time, roughly: 48 min, 3 h, 2 days. */
+export function span(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.round(hours / 24)} days`;
+}
+
+/** How often, in words. */
+export const SCHEDULE_NAMES: Record<Schedule, string> = {
+  live: 'live, within a minute of each change',
+  '15m': 'every 15 minutes',
+  '1h': 'every hour',
+  '6h': 'every 6 hours',
+  '24h': 'once a day',
+};
+
+/**
+ * What a schedule asks of GitHub. Copies use git over HTTPS, which GitHub's API limit of
+ * 5,000 requests an hour does not cover; it still throttles clients that ask too often.
+ */
+export function budget(schedule: Schedule): string {
+  const each =
+    schedule === 'live'
+      ? 'Each notebook checks GitHub every minute (about 60 small requests an hour) and pushes after each burst of edits.'
+      : `${SCHEDULE_NAMES[schedule].replace(/^./, (first) => first.toUpperCase())}, each notebook asks GitHub once whether anything changed, one small request; only when something did, it fetches and pushes, three requests at most. Edits since the round before go as one commit.`;
+  return `${each}\nThese are git requests, which do not count against GitHub's API limit of 5,000 an hour; Opsidian uses the API only to sign in and to list or make repositories.`;
+}
+
+/**
+ * One line on how a copy is doing: when it was last in step with the repository and when the
+ * next round is, or a warning once that is twice as long ago as the schedule allows.
+ */
+export function statusLine(
+  status: MirrorStatus | undefined,
+  schedule: Schedule = DEFAULT_SCHEDULE,
+  options: { now?: number; running?: boolean } = {},
+): string {
+  const now = options.now ?? Date.now();
   if (!status) return 'waiting for its first sync';
-  const last = status.at ? `, last in step ${ago(status.at)}` : '';
   if (status.held) return `! ${status.message}`;
+  const last = status.at ? `, last copied ${ago(status.at, now)}` : '';
+  const next =
+    options.running !== false && schedule !== 'live' && status.next && status.next > now
+      ? `, next in ${span(status.next - now)}`
+      : '';
+  if (isBehind(status, schedule, now) && status.state !== 'syncing')
+    return `! not copied for ${span(now - status.at!)}: ${
+      status.state === 'synced'
+        ? options.running === false
+          ? 'the host is not running.'
+          : 'the host has not tried since.'
+        : (status.message ?? 'it is not syncing.')
+    }`;
   switch (status.state) {
     case 'synced':
-      return `✓ up to date${last}`;
+      return `✓ copied ${status.at ? ago(status.at, now) : ''}${next}`.trim();
     case 'syncing':
-      return `… syncing${last}`;
+      return `… copying now${last}`;
     case 'offline':
-      return `… cannot reach it${last}. ${status.message ?? ''}`.trim();
+      return `… ${(status.message ?? 'cannot reach it').replace(/\.$/, '')}${last}`;
     case 'error':
       return `✗ ${status.message ?? 'Not syncing.'}`;
   }
@@ -211,7 +270,10 @@ async function target(
 }
 
 async function showResult(context: Context, name: string, label: string, status: MirrorStatus) {
-  const { notebooks } = await context.withHost((host) => ({ notebooks: host.notebooks() }));
+  const { notebooks, schedule } = await context.withHost((host) => ({
+    notebooks: host.notebooks(),
+    schedule: scheduleOf(host),
+  }));
   const files = notebooks.find((each) => each.name === name)?.files ?? 0;
   console.log(`\n✓ “${name}” is kept in ${label} (${files} files).`);
   if (status.held)
@@ -220,7 +282,10 @@ async function showResult(context: Context, name: string, label: string, status:
     );
   if (await context.running())
     console.log(
-      'Changes reach GitHub within a minute of being made, and what is pushed there comes back to every device.',
+      schedule === 'live'
+        ? 'Changes reach GitHub within a minute of being made, and what is pushed there comes back to every device.'
+        : `Changes go to GitHub ${SCHEDULE_NAMES[schedule]}, together as one commit, and what is pushed there comes back to every device then.\n` +
+            `To change how often: ${context.me} host github every ${SCHEDULES.join('|')}`,
     );
   else
     console.log(
@@ -298,11 +363,35 @@ export async function github(context: Context): Promise<void> {
       if (!chosen.length)
         fail(name ? `“${name}” is not kept on GitHub.` : 'No notebook is kept on GitHub yet.');
       for (const record of chosen) {
-        const status = await context.withHost((host) =>
-          mirrors(host).sync(record.name, flags.has('confirm-deletions')),
+        const [status, schedule] = await context.withHost(
+          async (host) =>
+            [
+              await mirrors(host).sync(record.name, flags.has('confirm-deletions')),
+              scheduleOf(host),
+            ] as const,
         );
-        console.log(`${record.name} → ${repositoryLabel(record.remote)}  ${statusLine(status)}`);
+        console.log(
+          `${record.name} → ${repositoryLabel(record.remote)}  ${statusLine(status, schedule)}`,
+        );
       }
+      return;
+    }
+    case 'every': {
+      const [chosen] = words;
+      const running = await context.running();
+      if (chosen === undefined) {
+        const schedule = await context.withHost((host) => scheduleOf(host));
+        console.log(`Notebooks go to GitHub ${SCHEDULE_NAMES[schedule]}.\n${budget(schedule)}`);
+        return;
+      }
+      if (!isSchedule(chosen))
+        return fail(
+          `Say how often: ${me} host github every ${SCHEDULES.join('|')}  (${DEFAULT_SCHEDULE} if unsure)`,
+        );
+      const schedule: Schedule = chosen;
+      await context.withHost((host) => host.setMirrorSchedule(schedule));
+      console.log(`✓ Notebooks go to GitHub ${SCHEDULE_NAMES[schedule]}.\n${budget(schedule)}`);
+      if (running) console.log('The running host takes this up within a few seconds.');
       return;
     }
     case 'disconnect': {
@@ -317,7 +406,11 @@ export async function github(context: Context): Promise<void> {
     case undefined:
     case 'status': {
       const signedIn = await readAccount(where);
-      const all = await context.withHost((host) => host.mirrors());
+      const { all, schedule } = await context.withHost((host) => ({
+        all: host.mirrors(),
+        schedule: scheduleOf(host),
+      }));
+      const running = all.length ? await context.running() : true;
       console.log(
         signedIn
           ? `Signed in to GitHub as ${signedIn.login}`
@@ -325,13 +418,17 @@ export async function github(context: Context): Promise<void> {
       );
       if (!all.length)
         console.log(`No notebook is kept on GitHub yet. ${me} host github connect "Personal"`);
+      else
+        console.log(
+          `Copied ${SCHEDULE_NAMES[schedule]}${running ? '' : ' while the host runs; it is not running now'}. Change it with ${me} host github every ${SCHEDULES.join('|')}`,
+        );
       for (const record of all)
         console.log(
-          `  ${record.name} → ${repositoryLabel(record.remote)}  ${statusLine(record.status)}`,
+          `  ${record.name} → ${repositoryLabel(record.remote)}  ${statusLine(record.status, schedule, { running })}`,
         );
       return;
     }
     default:
-      fail(`${me} host github has: login, connect, import, sync, disconnect, logout`);
+      fail(`${me} host github has: login, connect, import, sync, every, disconnect, logout`);
   }
 }

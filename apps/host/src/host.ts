@@ -88,6 +88,8 @@ export interface MirrorStatus {
   commit?: string;
   /** Deletions held back because most of the notebook vanished from the repository at once. */
   held?: number;
+  /** When the next round is planned: the next scheduled one, or the next try after a failure. */
+  next?: number;
 }
 export interface MirrorRecord {
   /** The notebook's id. */
@@ -365,6 +367,23 @@ export class Host {
     this.db
       .prepare('update mirrors set status = ? where notebook = ?')
       .run(JSON.stringify(status), notebook);
+  }
+  /**
+   * How often copies go to their repositories, one setting for every copy on this host. Kept
+   * here rather than in a settings file so that every way of running a host honours it: the
+   * service, `host run` in Docker (which has no settings file), and the Mac app's thread; and
+   * so the command line can change it while the host runs. See mirror.ts for the values.
+   */
+  mirrorSchedule(): string | undefined {
+    return this.db.prepare("select value from meta where name = 'mirror-schedule'").get()?.value as
+      string | undefined;
+  }
+  setMirrorSchedule(schedule: string): void {
+    this.db
+      .prepare(
+        "insert into meta (name, value) values ('mirror-schedule', ?) on conflict (name) do update set value = excluded.value",
+      )
+      .run(schedule);
   }
   /** Stops keeping a copy. Its device is removed; the repository is left as it is. */
   removeMirror(notebook: string): boolean {

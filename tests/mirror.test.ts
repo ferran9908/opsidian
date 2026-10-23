@@ -1,11 +1,21 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Host } from '../apps/host/src/host';
-import { Mirrors, describe as message } from '../apps/host/src/mirror';
+import {
+  GitError,
+  Mirror,
+  Mirrors,
+  backoff,
+  describe as message,
+  explainGit,
+  isBehind,
+  type MirrorOptions,
+} from '../apps/host/src/mirror';
+import { statusLine } from '../apps/host/src/github-cli';
 import { parseRepository, repositoryName } from '../apps/host/src/github';
 import { Vault } from '../apps/desktop/electron/vault';
 import { SyncEngine, httpTransport, pair, type SyncState } from '../packages/sync/src/index';
@@ -395,6 +405,7 @@ exit 0
     const github = await repository({ 'Note.md': 'one\n' });
     const server = await startHost();
     await server.mirrors.connect('Notes', github.remote);
+    server.host.setMirrorSchedule('live');
     server.mirrors.start();
     const mac = await device(server);
     await mac.sync();
@@ -445,6 +456,227 @@ exit 0
       server.mirrors.connect('Notes', join(await folder(), 'nothing-here.git')),
     ).rejects.toThrow(/could not be found|does not appear/);
     expect(server.host.mirrors()[0]?.status).toMatchObject({ state: 'error' });
+  });
+});
+
+const HOUR = 60 * 60_000;
+/** The repository's latest commit on main. */
+const remoteHead = (github: Repository) => git(github.remote, 'rev-parse', 'main').trim();
+/** The files on main in the repository. */
+const remoteFiles = (github: Repository) =>
+  git(github.remote, 'ls-tree', '-r', '--name-only', 'main').trim().split('\n');
+
+/** A second process's view of a copy, run by hand, on a clock the test moves. */
+function copyOf(server: Server, options: Partial<MirrorOptions> = {}) {
+  const mirror = new Mirror(server.host.mirrors()[0]!, {
+    host: server.host,
+    dataDir: server.dataDir,
+    spread: 0,
+    ...options,
+  });
+  cleanup.push(() => mirror.stop());
+  return mirror;
+}
+/** Background copies on an hourly schedule, on a clock `ahead` of the real one. */
+function hourly(server: Server, ahead = 0, log?: (text: string) => void) {
+  server.host.setMirrorSchedule('1h');
+  const mirrors = new Mirrors({
+    host: server.host,
+    dataDir: server.dataDir,
+    spread: 0,
+    now: () => Date.now() + ahead,
+    ...(log ? { log } : {}),
+  });
+  cleanup.push(() => mirrors.stop());
+  return mirrors;
+}
+
+describe('copying on a schedule', () => {
+  it('makes one commit of every edit since the round before', async () => {
+    const github = await repository({ 'Note.md': 'one\n' });
+    const server = await startHost();
+    await server.mirrors.connect('Notes', github.remote);
+    const mac = await device(server);
+    await mac.sync();
+    const mirror = copyOf(server);
+
+    await mac.write('A.md', 'a\n');
+    await mac.sync();
+    await mac.write('B.md', 'b\n');
+    await mac.sync();
+    await mac.write('Note.md', 'two\n');
+    await mac.sync();
+    expect((await mirror.scheduled()).state).toBe('synced');
+    github.pull();
+    expect(github.log()).toHaveLength(2);
+    expect(github.log()[0]).toBe('Edit Note; Add A, B');
+    expect(github.tracked()).toEqual(['A.md', 'B.md', 'Note.md']);
+  });
+
+  it('only asks which commit the repository is at when nothing changed', async () => {
+    const github = await repository({ 'Note.md': 'one\n' });
+    const server = await startHost();
+    await server.mirrors.connect('Notes', github.remote);
+    let clock = Date.now();
+    const mirror = copyOf(server, { now: () => clock });
+    const [record] = server.host.mirrors();
+    const fetched = join(server.dataDir, 'mirrors', record!.notebook, '.git', 'FETCH_HEAD');
+    const before = { head: remoteHead(github), fetched: statSync(fetched).mtimeMs };
+
+    clock += HOUR;
+    const status = await mirror.scheduled();
+    expect(status).toMatchObject({ state: 'synced', at: clock, next: clock + HOUR });
+    // Nothing fetched, committed or pushed: only `ls-remote`, which leaves no trace.
+    expect(remoteHead(github)).toBe(before.head);
+    expect(statSync(fetched).mtimeMs).toBe(before.fetched);
+    expect(server.host.mirrors()[0]!.status).toMatchObject({ at: clock });
+
+    // The same small question notices a push made on GitHub, and the round brings it in.
+    await github.write('Note.md', 'two, from GitHub\n');
+    github.push();
+    clock += HOUR;
+    await mirror.scheduled();
+    expect(statSync(fetched).mtimeMs).not.toBe(before.fetched);
+    const mac = await device(server);
+    await mac.sync();
+    expect(await mac.read('Note.md')).toBe('two, from GitHub\n');
+  });
+
+  it('waits for its time, and catches up at once when the host was down past it', async () => {
+    const github = await repository({ 'Note.md': 'one\n' });
+    const server = await startHost();
+    const connected = await server.mirrors.connect('Notes', github.remote);
+    const mac = await device(server);
+    await mac.sync();
+    await mac.write('Waiting.md', 'written while the copy waits\n');
+    await mac.sync();
+
+    const onTime = hourly(server);
+    onTime.start();
+    await expect
+      .poll(() => server.host.mirrors()[0]!.status?.next, { timeout: 5000, interval: 50 })
+      .toBe(connected.at! + HOUR);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(remoteFiles(github)).toEqual(['Note.md']);
+    await onTime.stop();
+
+    // Two hours later by the clock, as when the host starts again after being off.
+    hourly(server, 2 * HOUR).start();
+    await expect
+      .poll(() => remoteFiles(github), { timeout: 10_000, interval: 100 })
+      .toContain('Waiting.md');
+  });
+
+  it('sends what is waiting when the host stops', async () => {
+    const github = await repository({ 'Note.md': 'one\n' });
+    const server = await startHost();
+    await server.mirrors.connect('Notes', github.remote);
+    const mac = await device(server);
+    await mac.sync();
+    const mirrors = hourly(server);
+    mirrors.start();
+    await expect
+      .poll(() => server.host.mirrors()[0]!.status?.next, { timeout: 5000, interval: 50 })
+      .toBeDefined();
+
+    await mac.write('Last.md', 'typed just before stopping\n');
+    await mac.sync();
+    await mirrors.stop(20_000);
+    expect(remoteFiles(github)).toContain('Last.md');
+
+    // Nothing waiting: stopping asks nothing of the repository.
+    const head = remoteHead(github);
+    const again = hourly(server);
+    again.start();
+    await again.stop(20_000);
+    expect(remoteHead(github)).toBe(head);
+  });
+
+  it('backs off for an hour when the repository asks it to slow down', async () => {
+    const github = await repository({ 'Note.md': 'one\n' });
+    const server = await startHost();
+    await server.mirrors.connect('Notes', github.remote);
+    const mac = await device(server);
+    await mac.sync();
+    await mac.write('New.md', 'new\n');
+    await mac.sync();
+    const hook = join(github.remote, 'hooks', 'pre-receive');
+    await writeFile(hook, '#!/bin/sh\necho "error: 429 Too Many Requests" >&2\nexit 1\n');
+    await chmod(hook, 0o755);
+
+    const logged: string[] = [];
+    const ahead = 2 * HOUR;
+    const started = Date.now() + ahead;
+    hourly(server, ahead, (text) => logged.push(text)).start();
+    await expect
+      .poll(() => server.host.mirrors()[0]!.status?.message, { timeout: 10_000, interval: 50 })
+      .toMatch(/asked Opsidian to slow down; it will try again at \d\d:\d\d/);
+    const status = server.host.mirrors()[0]!.status!;
+    expect(status.state).toBe('offline');
+    expect(status.next! - started).toBeGreaterThanOrEqual(HOUR);
+    // Said once, not once a minute.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(logged).toHaveLength(1);
+    expect(remoteFiles(github)).toEqual(['Note.md']);
+  });
+});
+
+describe('throttling and warnings', () => {
+  it('tells GitHub slowing down apart from other failures', () => {
+    const remote = 'https://github.com/you/notes.git';
+    for (const output of [
+      "fatal: unable to access 'https://github.com/you/notes.git/': The requested URL returned error: 429",
+      'error: RPC failed; HTTP 429 curl 22 The requested URL returned error: 429',
+      'remote: You have exceeded a secondary rate limit. Please wait a few minutes.\nfatal: unable to access: The requested URL returned error: 403',
+      'remote: You have triggered an abuse detection mechanism.',
+      'Too Many Requests',
+    ]) {
+      const error = explainGit(output, remote);
+      expect(error.throttled, output).toBe(0);
+      expect(error.message).toBe('GitHub asked Opsidian to slow down.');
+    }
+    expect(explainGit('HTTP 429\nRetry-After: 7200', remote).throttled).toBe(7200_000);
+    expect(explainGit('fatal: Could not resolve host: github.com', remote)).toMatchObject({
+      offline: true,
+      throttled: undefined,
+    });
+    expect(explainGit('remote: Permission to you/notes.git denied. 403', remote).message).toMatch(
+      /Sign in to GitHub again/,
+    );
+  });
+
+  it('waits at least an hour after throttling, and a short while after other failures', () => {
+    const throttled = new GitError('slow down', true, 0);
+    expect(backoff(throttled, 1, '1h')).toBe(HOUR);
+    expect(backoff(throttled, 2, 'live')).toBe(2 * HOUR);
+    expect(backoff(new GitError('slow down', true, 3 * HOUR), 1, '1h')).toBe(3 * HOUR);
+    expect(backoff(throttled, 20, '1h')).toBe(24 * HOUR);
+    const offline = new GitError('could not be reached', true);
+    expect(backoff(offline, 1, 'live')).toBe(5000);
+    expect(backoff(offline, 20, 'live')).toBe(10 * 60_000);
+    expect(backoff(offline, 1, '1h')).toBe(60_000);
+    expect(backoff(offline, 20, '15m')).toBe(15 * 60_000);
+    expect(backoff(offline, 20, '24h')).toBe(HOUR);
+  });
+
+  it('says when a copy was last made, and warns once it is overdue', () => {
+    const now = Date.UTC(2026, 9, 23, 12);
+    const fresh = { state: 'synced', at: now - 12 * 60_000, next: now + 48 * 60_000 } as const;
+    expect(statusLine(fresh, '1h', { now })).toBe('✓ copied 12 min ago, next in 48 min');
+    expect(isBehind(fresh, '1h', now)).toBe(false);
+    const stale = {
+      state: 'offline',
+      at: now - 3 * HOUR,
+      message: 'you/notes could not be reached. Opsidian will keep trying.',
+    } as const;
+    expect(isBehind(stale, '1h', now)).toBe(true);
+    expect(statusLine(stale, '1h', { now })).toBe(
+      '! not copied for 3 h: you/notes could not be reached. Opsidian will keep trying.',
+    );
+    expect(statusLine({ ...fresh, at: now - 3 * HOUR }, '1h', { now, running: false })).toBe(
+      '! not copied for 3 h: the host is not running.',
+    );
+    expect(isBehind(stale, '6h', now)).toBe(false);
   });
 });
 

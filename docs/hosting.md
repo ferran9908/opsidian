@@ -53,7 +53,7 @@ docker exec opsidian-host opsidian host invite "Personal"
 
 ## Keeping notebooks on GitHub
 
-A hosted notebook can also be kept in a GitHub repository, as ordinary Markdown files. It works in both directions: a change made on any device reaches GitHub within a minute, and an edit pushed to GitHub, or made on github.com, comes back to every device. The host does this, so it works while devices are asleep, and it needs git on the host machine (on a Mac, `xcode-select --install` provides it).
+A hosted notebook can also be kept in a GitHub repository, as ordinary Markdown files. It works in both directions: changes made on any device go to GitHub, every hour unless you choose otherwise, and an edit pushed to GitHub, or made on github.com, comes back to every device. The host does this, so it works while devices are asleep, and it needs git on the host machine (on a Mac, `xcode-select --install` provides it).
 
 It is also how to bring notes that already live on GitHub, such as an Obsidian vault kept with git, into Opsidian, or to set up a new host from them.
 
@@ -65,18 +65,44 @@ It is also how to bring notes that already live on GitHub, such as an Obsidian v
 npx opsidian host github import you/notes      # a new notebook from a repository, then an invitation to it
 npx opsidian host github connect "Personal"    # keep an existing notebook in a repository; asks which one
 npx opsidian host github                       # how each one is doing
+npx opsidian host github every 1h              # how often: live, 15m, 1h, 6h or 24h
 ```
 
-The first command that needs GitHub signs in by showing a code to enter at github.com/login/device, in any browser, so it works on a server with no screen. `connect` lists your repositories and offers to make a new private one; a repository can also be named as `you/notes`, a GitHub link, an SSH address (`git@github.com:you/notes.git`, which uses the machine's own SSH keys), or any other address git understands. `host github sync` syncs now; `disconnect` stops; `logout` forgets the sign-in. In Docker, run them with `docker exec -it opsidian-host opsidian host github …`.
+The first command that needs GitHub signs in by showing a code to enter at github.com/login/device, in any browser, so it works on a server with no screen. `connect` lists your repositories and offers to make a new private one; a repository can also be named as `you/notes`, a GitHub link, an SSH address (`git@github.com:you/notes.git`, which uses the machine's own SSH keys), or any other address git understands. `host github sync` syncs now, whatever the schedule; `disconnect` stops; `logout` forgets the sign-in. In Docker, run them with `docker exec -it opsidian-host opsidian host github …`.
 
 What happens to the notes:
 
-- **Each change is a commit** from your GitHub account, named after what changed ("Edit Plan; Add Ideas"). Typing is gathered for ten seconds first, so a burst of edits is one commit.
+- **Each round is one commit** from your GitHub account, named after what changed ("Edit Plan; Add Ideas"), holding every edit made since the round before. See [how often](#how-often) below.
 - **Edits on both sides are combined** line by line. When both sides changed the same lines, the notebook's version keeps the name and GitHub's is kept beside it as a `conflicted copy GitHub` note, on GitHub and on every device. Nothing is ever force-pushed.
 - **A repository that already has notes is joined, not replaced.** Connecting a notebook to one combines the two: nothing is deleted, and a note that differs is kept twice.
 - **Hidden files are left alone.** Folders such as `.obsidian` and `.github`, and files such as `.gitignore`, stay in the repository untouched and are not sent to devices. The notebook's trash is not committed: the repository's history already has every deleted note.
 - **A repository that suddenly looks mostly empty is not trusted.** If half or more of the notebook disappears from GitHub at once, the deletions wait to be confirmed with **Confirm deletions** or `host github sync --confirm-deletions`.
 - **Files over 100 MB** stay out, as they do in sync. Git LFS is not supported.
+
+### How often
+
+One setting for the whole host, in **Settings → GitHub → Copy to GitHub** on a Mac or with `host github every` elsewhere. It applies to every notebook kept on GitHub and takes effect at once, without a restart.
+
+| Choice             | What happens                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------ |
+| `1h`               | The default. Once an hour, everything changed since the last round goes as one commit.           |
+| `15m`, `6h`, `24h` | The same, every 15 minutes, every 6 hours, or once a day.                                        |
+| `live`             | About ten seconds after each burst of typing, as its own commit; GitHub is checked every minute. |
+
+Edits made on GitHub come back in the same rounds, so on the hourly schedule they reach devices within the hour. **Sync now** in the app, or `host github sync`, runs a round at once whatever the schedule.
+
+- **A host that was off catches up.** When it starts and the last round is older than the schedule, it runs one soon after starting. Several notebooks are spread a little apart, so they do not all ask GitHub in the same second.
+- **Stopping sends what is waiting.** Quitting the app, turning hosting off, or stopping the host (`host stop`, Ctrl+C, a restart) first sends what GitHub does not have yet. It waits 8 seconds at most in the app, so quitting never hangs, and 20 seconds on a server; whatever does not make it goes in the first round after the next start, and the log says so. In Docker, `docker stop` allows 10 seconds by default; `docker stop -t 30` gives it time.
+- **It says when a copy is overdue.** `host github`, `host status` and the app show when each notebook was last copied and when the next round is ("copied 12 min ago, next in 48 min"). Once the last copy is more than twice the schedule old, they say so as a warning ("not copied for 3 h: you/notes could not be reached").
+
+**What it asks of GitHub.** Rounds use git over HTTPS (`ls-remote`, `fetch`, `push`), which GitHub's API limit of 5,000 requests an hour does not cover; the API is used only to sign in and to list or make repositories. GitHub still slows down clients that ask too often, so a round is frugal: when neither the notebook nor the repository changed, it only asks GitHub which commit the repository is at, one small request, and stops there. Per notebook:
+
+| Choice | Nothing changed                 | Something changed                               |
+| ------ | ------------------------------- | ----------------------------------------------- |
+| `1h`   | 1 small request an hour         | at most 3 an hour (check, fetch, push)          |
+| `live` | about 60 small requests an hour | the same, plus a push after each burst of edits |
+
+If GitHub does ask Opsidian to slow down (it answers "too many requests" or "rate limit"), the copy waits at least an hour, longer if GitHub says so or keeps asking, and the status says when it will try again. Other failures, such as no network, are retried soon (after a minute; five seconds when live), then less and less often, but never later than the next scheduled round would be.
 
 The sign-in lets Opsidian read and write your repositories; it is kept on the host machine only (in the keychain on a Mac, readable by you alone in `~/.opsidian` on a server). Signing out stops the copies until you sign in again. To withdraw the access entirely, revoke Opsidian at github.com/settings/applications. The host keeps its own checkout of each repository in its data folder; GitHub is a copy, and the host's history and backups stay the place to restore from.
 

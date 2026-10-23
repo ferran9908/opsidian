@@ -8,6 +8,7 @@ import type {
   BackupInfo,
   GitHubInfo,
   GitHubRepository,
+  GitHubSchedule,
   HostingInfo,
   Invitation,
   RepositoryChoice,
@@ -26,7 +27,13 @@ import {
   type DeviceCode,
   type GitHubAccount,
 } from '../../host/src/github';
-import { gitVersion } from '../../host/src/mirror';
+import {
+  DEFAULT_SCHEDULE,
+  gitVersion,
+  isBehind,
+  isSchedule,
+  type Schedule,
+} from '../../host/src/mirror';
 import { invitationLink } from '../../host/src/home';
 import type { HostReply, HostRequest } from './host-worker';
 
@@ -115,9 +122,10 @@ class HostThread {
       this.worker.postMessage({ id, request });
     });
   }
-  async end(): Promise<void> {
+  /** `flush`: how long GitHub copies may take to send their last changes. */
+  async end(flush = 0): Promise<void> {
     if (this.ended) return;
-    await this.call({ op: 'close' }).catch(() => {});
+    await this.call({ op: 'close', flush }).catch(() => {});
     this.ended = true;
     await this.worker.terminate();
   }
@@ -128,7 +136,14 @@ interface Snapshot {
   devices: ReturnType<Host['devices']>;
   invitations: ReturnType<Host['invitations']>;
   mirrors: Omit<MirrorRecord, 'token'>[];
+  every: Schedule;
 }
+
+/**
+ * How long quitting, or turning hosting off, waits for GitHub copies to send what they have
+ * not yet. Short, so quitting never seems to hang; whatever misses it goes at the next start.
+ */
+const FLUSH = 8000;
 
 /** The GitHub sign-in, kept in the app's data with its token encrypted by the keychain. */
 interface SavedAccount extends Omit<GitHubAccount, 'token'> {
@@ -225,7 +240,7 @@ export class Hosting {
     await this.serial(async () => {
       const host = this.host;
       this.host = undefined;
-      await host?.end();
+      await host?.end(FLUSH);
     });
   }
 
@@ -304,7 +319,7 @@ export class Hosting {
     return this.serial(async () => {
       const host = this.host;
       this.host = undefined;
-      await host?.end();
+      await host?.end(FLUSH);
       this.saved.enabled = false;
       await this.save();
       return this.tell();
@@ -487,6 +502,7 @@ export class Hosting {
           }
         : {}),
       ...(this.gitProblem ? { problem: this.gitProblem } : {}),
+      every: seen?.every ?? DEFAULT_SCHEDULE,
       mirrors: (seen?.mirrors ?? []).map((each) => {
         const { fullName } = parseRepository(each.remote);
         const status = each.status;
@@ -498,6 +514,8 @@ export class Hosting {
           ...(status?.message ? { message: status.message } : {}),
           ...(status?.at ? { at: status.at } : {}),
           ...(status?.held ? { held: status.held } : {}),
+          ...(status?.next ? { next: status.next } : {}),
+          ...(seen && isBehind(status, seen.every) ? { behind: true } : {}),
         };
       }),
     };
@@ -612,6 +630,12 @@ export class Hosting {
   }
   async syncGitHub(notebook: string, confirmDeletions = false): Promise<GitHubInfo> {
     await this.running().call({ op: 'mirror', notebook, confirm: confirmDeletions });
+    return this.github();
+  }
+  /** How often every notebook hosted here goes to GitHub. */
+  async setGitHubSchedule(every: GitHubSchedule): Promise<GitHubInfo> {
+    if (!isSchedule(every)) throw new Error('That is not a choice of how often.');
+    await this.running().call({ op: 'schedule', every });
     return this.github();
   }
   async stopGitHub(notebook: string): Promise<GitHubInfo> {

@@ -132,12 +132,24 @@ app.on('will-quit', () => {
   // The suggested name is taken by an existing repository, so a new one is named.
   await type('[aria-label="New repository name"]', 'my-notes');
   await button('Keep on GitHub');
-  await waitFor(() => shows('Up to date'), 'the first sync to GitHub');
+  await waitFor(() => shows('Copied just now · next in'), 'the first sync to GitHub');
   await shot('4-kept');
   const mine = join(root, USER.login, 'my-notes.git');
   assert.deepEqual(tracked(mine), ['First.md']);
   assert.equal(github.refusedGit > 0, true, 'git asked for the token, and was given it');
   pass('kept the notebook in a new private repository');
+
+  // Hourly unless changed. Live makes the rest of this test quick.
+  assert.equal(await evaluate('document.querySelector("#github-every").value'), '1h');
+  assert.equal((await info()).every, '1h');
+  await evaluate(`(() => {
+    const select = document.querySelector('#github-every');
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, 'live');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await waitFor(async () => (await info()).every === 'live', 'the schedule to change');
+  await waitFor(() => shows('Up to date'), 'the live label');
+  pass('copies hourly by default, and live once chosen');
 
   // Typed in the app's folder: reaches GitHub by itself, after the pause that gathers typing.
   writeFileSync(join(vault, 'Typed.md'), 'typed on the Mac\n');

@@ -3,6 +3,7 @@ import type {
   GitHubInfo,
   GitHubMirror,
   GitHubRepository,
+  GitHubSchedule,
   HostingInfo,
   RepositoryChoice,
 } from '@opsidian/core';
@@ -268,10 +269,26 @@ function since(at: number): string {
   if (minutes < 60 * 36) return `${Math.round(minutes / 60)} h ago`;
   return new Date(at).toLocaleDateString();
 }
-export function mirrorLabel(mirror: GitHubMirror): string {
+/** A length of time, roughly: 48 min, 3 h, 2 days. */
+function span(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60000));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `${hours} h` : `${Math.round(hours / 24)} days`;
+}
+export function mirrorLabel(mirror: GitHubMirror, every: GitHubSchedule = 'live'): string {
   if (mirror.held) return `${mirror.held} deletions are waiting for you to confirm`;
+  // A copy that is no longer a recent backup says so, whatever else it is doing.
+  if (mirror.behind && mirror.at && mirror.state !== 'syncing')
+    return `Not copied for ${span(Date.now() - mirror.at)} — ${
+      mirror.state === 'synced'
+        ? 'the host has not tried since'
+        : (mirror.message ?? 'not syncing').replace(/\.$/, '')
+    }`;
   switch (mirror.state) {
     case 'synced':
+      if (every !== 'live' && mirror.at)
+        return `Copied ${since(mirror.at)}${mirror.next && mirror.next > Date.now() ? ` · next in ${span(mirror.next - Date.now())}` : ''}`;
       return `Up to date${mirror.at ? ` · ${since(mirror.at)}` : ''}`;
     case 'syncing':
       return 'Syncing…';
@@ -283,6 +300,15 @@ export function mirrorLabel(mirror: GitHubMirror): string {
       return mirror.message ?? 'Not syncing';
   }
 }
+
+/** The choices of how often, as the menu shows them. */
+const EVERY: Record<GitHubSchedule, string> = {
+  live: 'Live',
+  '15m': 'Every 15 minutes',
+  '1h': 'Every hour',
+  '6h': 'Every 6 hours',
+  '24h': 'Once a day',
+};
 
 /** Settings → GitHub. */
 export function GitHubSettings(props: {
@@ -328,8 +354,10 @@ export function GitHubSettings(props: {
       )}
       <p className="text-muted-foreground text-sm leading-[22px]">
         A notebook is kept in a repository of yours as ordinary Markdown files. Changes made on any
-        device reach it within a minute, and edits made on GitHub come back to every device. When
-        both sides change the same lines, both versions are kept.
+        device reach it{' '}
+        {info.every === 'live' ? 'within a minute' : EVERY[info.every].toLowerCase()}, and edits
+        made on GitHub come back to every device. When both sides change the same lines, both
+        versions are kept.
       </p>
       {(error || info.problem) && (
         <p role="alert" className="text-destructive text-sm leading-5">
@@ -359,7 +387,7 @@ export function GitHubSettings(props: {
                 className="border-border flex min-h-14 items-center gap-4 border-t py-2.5 text-sm last:border-b"
               >
                 <span
-                  className={`size-2 shrink-0 rounded-full ${!mirror ? 'bg-faint' : mirror.state === 'synced' && !mirror.held ? 'bg-success' : mirror.state === 'error' || mirror.held ? 'bg-destructive' : 'bg-amber-500'}`}
+                  className={`size-2 shrink-0 rounded-full ${!mirror ? 'bg-faint' : mirror.state === 'synced' && !mirror.held && !mirror.behind ? 'bg-success' : mirror.state === 'error' || mirror.held ? 'bg-destructive' : 'bg-amber-500'}`}
                 />
                 <div className="min-w-0 flex-1 space-y-0.5">
                   <p className="font-semibold">{notebook.name}</p>
@@ -368,7 +396,7 @@ export function GitHubSettings(props: {
                   >
                     {mirror ? (
                       <>
-                        {mirror.repository} · {mirrorLabel(mirror)}
+                        {mirror.repository} · {mirrorLabel(mirror, info.every)}
                       </>
                     ) : (
                       'Only on your devices'
@@ -412,6 +440,32 @@ export function GitHubSettings(props: {
               </div>
             );
           })}
+          <div className="border-border flex items-center justify-between gap-6 pt-4 pb-1">
+            <div className="min-w-0 flex-1 space-y-1">
+              <p className="text-sm font-medium">
+                <label htmlFor="github-every">Copy to GitHub</label>
+              </p>
+              <p className="text-muted-foreground text-[13px] leading-5">
+                {info.every === 'live'
+                  ? 'A few seconds after each change, and GitHub is checked every minute. Makes many small commits.'
+                  : 'Everything changed since the last copy goes as one commit, and edits made on GitHub come back then. Quitting, or turning hosting off, sends what is waiting.'}
+              </p>
+            </div>
+            <select
+              id="github-every"
+              className="border-border bg-secondary h-8 shrink-0 rounded-md border px-2 text-[13px] outline-none"
+              value={info.every}
+              onChange={(event) =>
+                run(() => bridge.setGitHubSchedule(event.target.value as GitHubSchedule))
+              }
+            >
+              {(Object.keys(EVERY) as GitHubSchedule[]).map((every) => (
+                <option key={every} value={every}>
+                  {EVERY[every]}
+                </option>
+              ))}
+            </select>
+          </div>
         </section>
       )}
       <div className="border-border flex items-center justify-between gap-6 border-t py-4">

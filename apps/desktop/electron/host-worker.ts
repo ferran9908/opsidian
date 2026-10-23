@@ -1,6 +1,6 @@
 import { parentPort } from 'node:worker_threads';
 import { Host, restoreBackup } from '../../host/src/host';
-import { Mirrors } from '../../host/src/mirror';
+import { Mirrors, scheduleOf, type Schedule } from '../../host/src/mirror';
 import type { GitHubAccount } from '../../host/src/github';
 
 /**
@@ -10,7 +10,8 @@ import type { GitHubAccount } from '../../host/src/github';
  */
 export type HostRequest =
   | { op: 'open'; dataDir: string; port: number }
-  | { op: 'close' }
+  /** `flush`: how long to give copies to send what GitHub does not have yet, if anything. */
+  | { op: 'close'; flush?: number }
   | { op: 'restore'; dataDir: string; folder: string; name: string }
   | { op: 'snapshot' }
   | { op: 'invite'; notebook: string }
@@ -19,6 +20,7 @@ export type HostRequest =
   | { op: 'backup'; folder: string; keep: number }
   | { op: 'account'; account: GitHubAccount | undefined }
   | { op: 'mirrors' }
+  | { op: 'schedule'; every: Schedule }
   | { op: 'keep'; notebook: string; remote: string }
   | { op: 'mirror'; notebook: string; confirm?: boolean }
   | { op: 'unmirror'; notebook: string };
@@ -49,7 +51,7 @@ async function handle(request: HostRequest): Promise<unknown> {
     return;
   }
   if (request.op === 'close') {
-    await mirrors?.stop();
+    await mirrors?.stop(request.flush);
     mirrors = undefined;
     await host?.close();
     host = undefined;
@@ -72,6 +74,7 @@ async function handle(request: HostRequest): Promise<unknown> {
         devices: host.devices(),
         invitations: host.invitations(),
         mirrors: host.mirrors().map(({ token: _token, ...each }) => each),
+        every: scheduleOf(host),
       };
     case 'invite':
       return host.invite(request.notebook);
@@ -84,6 +87,11 @@ async function handle(request: HostRequest): Promise<unknown> {
     // What the app needs to show, without the copies' device credentials.
     case 'mirrors':
       return host.mirrors().map(({ token: _token, ...each }) => each);
+    case 'schedule':
+      host.setMirrorSchedule(request.every);
+      // Each copy plans its next round again now, rather than at its next look.
+      mirrors?.refresh();
+      return;
     case 'keep':
       return mirrors!.connect(request.notebook, request.remote);
     case 'mirror':

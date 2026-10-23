@@ -3,6 +3,8 @@ import {
   initialMarkdown,
   noteFolder,
   validateName,
+  type GitHubInfo,
+  type GitHubSchedule,
   type MoveResult,
   type VaultBridge,
 } from '@opsidian/core';
@@ -154,13 +156,13 @@ export const previewVault: VaultBridge = {
   backUpNow: async () => ({ keep: 14, backups: [] }),
   restoreBackup: async () => ({ keep: 14, backups: [] }),
   onHosting: () => () => {},
-  github: async () => ({ mirrors: [] }),
+  github: async () => noGitHub(),
   signInToGitHub: async () => {
     throw new Error('GitHub needs the Mac app.');
   },
-  finishGitHubSignIn: async () => ({ mirrors: [] }),
+  finishGitHubSignIn: async () => noGitHub(),
   cancelGitHubSignIn: async () => {},
-  signOutOfGitHub: async () => ({ mirrors: [] }),
+  signOutOfGitHub: async () => noGitHub(),
   githubRepositories: async () => [],
   keepOnGitHub: async () => {
     throw new Error('GitHub needs the Mac app.');
@@ -168,8 +170,12 @@ export const previewVault: VaultBridge = {
   importFromGitHub: async () => {
     throw new Error('GitHub needs the Mac app.');
   },
-  syncGitHub: async () => ({ mirrors: [] }),
-  stopGitHub: async () => ({ mirrors: [] }),
+  syncGitHub: async () => noGitHub(),
+  setGitHubSchedule: async (every) => {
+    githubEvery = every;
+    return noGitHub();
+  },
+  stopGitHub: async () => noGitHub(),
   // The browser preview is never installed, so it never updates.
   updateState: async () => ({ kind: 'none' }),
   checkForUpdate: async () => 'dev',
@@ -185,6 +191,9 @@ export const previewVault: VaultBridge = {
   onUpdate: () => () => {},
   onUpdateCheckRequested: () => () => {},
 };
+
+let githubEvery: GitHubSchedule = '1h';
+const noGitHub = (): GitHubInfo => ({ mirrors: [], every: githubEvery });
 
 const notHosting = {
   hosting: false,
