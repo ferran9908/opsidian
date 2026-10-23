@@ -72,6 +72,9 @@ ${args}
   <true/>
   <key>ThrottleInterval</key>
   <integer>10</integer>
+  <!-- Room to send the last changes to GitHub when stopping; the default is 20 seconds. -->
+  <key>ExitTimeOut</key>
+  <integer>40</integer>
   <key>StandardOutPath</key>
   <string>${xml(where.log)}</string>
   <key>StandardErrorPath</key>

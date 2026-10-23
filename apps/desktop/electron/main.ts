@@ -18,6 +18,7 @@ import { pathToFileURL } from 'node:url';
 import {
   validateContent,
   validateName,
+  type GitHubSchedule,
   type RepositoryChoice,
   type VaultInfo,
 } from '@opsidian/core';
@@ -340,6 +341,9 @@ async function start() {
   });
   handle('github:sync', (notebook, confirm) =>
     hosting.syncGitHub(text(notebook, 200), confirm === true),
+  );
+  handle('github:schedule', (every) =>
+    hosting.setGitHubSchedule(text(every, 10) as GitHubSchedule),
   );
   handle('github:stop', (notebook) => hosting.stopGitHub(text(notebook, 200)));
   handle('backup:info', () => hosting.backups());

@@ -38,9 +38,140 @@ export class GitError extends Error {
     message: string,
     /** The repository could not be reached; trying again later may be enough. */
     readonly offline = false,
+    /**
+     * The repository asked to be left alone for a while, as GitHub does when it throttles: how
+     * long it asked for in milliseconds, or 0 when it did not say.
+     */
+    readonly throttled?: number,
   ) {
     super(message);
   }
+}
+
+/** How often copies go to their repositories. */
+export const SCHEDULES = ['live', '15m', '1h', '6h', '24h'] as const;
+export type Schedule = (typeof SCHEDULES)[number];
+/**
+ * Hourly unless changed. The copy is a backup, and a round an hour makes fewer commits that
+ * each say more, and asks the repository for far less than following every edit does.
+ */
+export const DEFAULT_SCHEDULE: Schedule = '1h';
+export const isSchedule = (value: unknown): value is Schedule =>
+  SCHEDULES.includes(value as Schedule);
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const PERIOD: Record<Schedule, number> = {
+  // Live rounds follow changes; this is how often it looks at the repository meanwhile.
+  live: MINUTE,
+  '15m': 15 * MINUTE,
+  '1h': HOUR,
+  '6h': 6 * HOUR,
+  '24h': 24 * HOUR,
+};
+/** The time between scheduled rounds. */
+export const period = (schedule: Schedule): number => PERIOD[schedule];
+/** The schedule a host has: the default when it has none, or one this version does not know. */
+export function scheduleOf(host: Pick<Host, 'mirrorSchedule'>): Schedule {
+  try {
+    const saved = host.mirrorSchedule();
+    return isSchedule(saved) ? saved : DEFAULT_SCHEDULE;
+  } catch {
+    return DEFAULT_SCHEDULE;
+  }
+}
+/**
+ * Whether a copy has gone unconfirmed for twice as long as its schedule allows, so it can no
+ * longer be trusted as a recent backup. Live copies count as every five minutes, so a minute's
+ * hiccup is no warning.
+ */
+export function isBehind(
+  status: MirrorStatus | undefined,
+  schedule: Schedule,
+  now = Date.now(),
+): boolean {
+  if (!status?.at) return false;
+  return now - status.at > 2 * Math.max(PERIOD[schedule], 5 * MINUTE);
+}
+
+/**
+ * How long to wait after a round failed, for the `count`th time in a row. When the repository
+ * asked to slow down: at least an hour, doubling while it keeps asking, and longer if it said
+ * so. Otherwise a short wait that doubles, never longer than the schedule's own period or an
+ * hour, so a scheduled copy retries a dropped connection well before its next round.
+ */
+export function backoff(error: unknown, count: number, schedule: Schedule): number {
+  const times = 2 ** Math.max(0, Math.min(count - 1, 10));
+  if (error instanceof GitError && error.throttled !== undefined)
+    return Math.min(Math.max(HOUR * times, error.throttled), 24 * HOUR);
+  if (schedule === 'live') return Math.min(5000 * times, 10 * MINUTE);
+  return Math.min(MINUTE * times, PERIOD[schedule], HOUR);
+}
+
+/** The ways GitHub, and git servers like it, say they are being asked too often. */
+const THROTTLED =
+  /\b(HTTP|error:?|status:?)\s*429\b|rate.?limit|abuse detection|too many requests/i;
+
+/** Says what went wrong with a git command in words a person can act on. */
+export function explainGit(output: string, remote: string, command = 'git'): GitError {
+  const text = output.trim();
+  const where = repositoryLabel(remote);
+  if (/ENOENT|spawn git/.test(text)) return new GitError('git is not installed on this machine.');
+  // Before the others: a throttled request also says "unable to access", and GitHub's
+  // secondary limit answers 403, which would read as a refused sign-in.
+  if (THROTTLED.test(text)) {
+    const hint = text.match(/retry[- ]after:?\s*(\d+)/i);
+    return new GitError(
+      `${isGitHub(remote) ? 'GitHub' : where} asked Opsidian to slow down.`,
+      true,
+      hint ? Number(hint[1]) * 1000 : 0,
+    );
+  }
+  if (
+    /Authentication failed|could not read Username|terminal prompts disabled|Invalid username or password|403|Permission to .* denied|Write access to repository not granted|Permission denied \(publickey/i.test(
+      text,
+    )
+  )
+    return new GitError(
+      isGitHub(remote)
+        ? `GitHub did not let this host write to ${where}. Sign in to GitHub again, with an account that can push to it.`
+        : `${where} did not accept this machine’s credentials.`,
+    );
+  if (
+    /Repository not found|does not appear to be a git repository|repository '.*' (not found|does not exist)/i.test(
+      text,
+    )
+  )
+    return new GitError(`${where} could not be found, or this account cannot see it.`);
+  if (
+    /Could not resolve host|unable to access|Connection (timed out|refused|reset)|Operation timed out|Network is unreachable|early EOF|The remote end hung up/i.test(
+      text,
+    )
+  )
+    return new GitError(`${where} could not be reached. Opsidian will keep trying.`, true);
+  const last = text.split('\n').filter(Boolean).at(-1) ?? `git ${command} failed.`;
+  return new GitError(last.replace(/^(fatal|error): /, ''));
+}
+
+/** Whether `task` settles within `ms`; it carries on regardless. */
+function within(task: Promise<unknown>, ms: number): Promise<boolean> {
+  if (ms <= 0) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    const done = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    task.then(done, done);
+  });
+}
+/** A time of day, as a person would say it: 14:05. */
+const clock = (at: number) =>
+  new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+/** A number from 0 to 1, always the same for a notebook, to spread copies apart in time. */
+function share(notebook: string): number {
+  let hash = 2166136261;
+  for (const char of notebook) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  return (hash >>> 0) / 2 ** 32;
 }
 
 interface Run {
@@ -84,10 +215,16 @@ export interface MirrorOptions {
   dataDir: string;
   /** The GitHub sign-in, read before each round so signing in again takes effect at once. */
   account?: () => Promise<GitHubAccount | undefined>;
-  /** How often to look for changes pushed to the repository. Default one minute. */
+  /** Live copies: how often to look for changes pushed to the repository. Default one minute. */
   interval?: number;
-  /** How long to let a burst of edits gather before committing them. Default ten seconds. */
+  /** Live copies: how long to let a burst of edits gather before committing. Default 10 s. */
   quiet?: number;
+  /**
+   * Scheduled copies: at most how far apart notebooks' rounds are spread, so a host with many
+   * does not ask the repository for all of them in the same second. Default a tenth of the
+   * period, up to five minutes; a catch-up round on starting is spread over 30 s at most.
+   */
+  spread?: number;
   log?: (text: string) => void;
   now?: () => number;
 }
@@ -102,6 +239,14 @@ export class Mirror {
   private work: Promise<unknown> = Promise.resolve();
   private allowDeletions = false;
   private stopped = false;
+  /** When the background rounds started, from which a catch-up round is spread. */
+  private began = 0;
+  /** Rounds that failed in a row, and of those, how many because the repository throttled. */
+  private failures = 0;
+  private throttles = 0;
+  /** No background round before this, after a failure. */
+  private retryAt = 0;
+  private logged: string | undefined;
 
   constructor(
     private record: MirrorRecord,
@@ -190,33 +335,7 @@ export class Mirror {
   }
   /** Says what went wrong in words a person can act on. */
   private explain(output: string, command = 'git'): GitError {
-    const text = output.trim();
-    const where = this.label;
-    if (/ENOENT|spawn git/.test(text)) return new GitError('git is not installed on this machine.');
-    if (
-      /Authentication failed|could not read Username|terminal prompts disabled|Invalid username or password|403|Permission to .* denied|Write access to repository not granted|Permission denied \(publickey/i.test(
-        text,
-      )
-    )
-      return new GitError(
-        isGitHub(this.record.remote)
-          ? `GitHub did not let this host write to ${where}. Sign in to GitHub again, with an account that can push to it.`
-          : `${where} did not accept this machine’s credentials.`,
-      );
-    if (
-      /Repository not found|does not appear to be a git repository|repository '.*' (not found|does not exist)/i.test(
-        text,
-      )
-    )
-      return new GitError(`${where} could not be found, or this account cannot see it.`);
-    if (
-      /Could not resolve host|unable to access|Connection (timed out|refused|reset)|Operation timed out|Network is unreachable|early EOF|The remote end hung up/i.test(
-        text,
-      )
-    )
-      return new GitError(`${where} could not be reached. Opsidian will keep trying.`, true);
-    const last = text.split('\n').filter(Boolean).at(-1) ?? `git ${command} failed.`;
-    return new GitError(last.replace(/^(fatal|error): /, ''));
+    return explainGit(output, this.record.remote, command);
   }
 
   private async head(): Promise<string | undefined> {
@@ -435,6 +554,13 @@ export class Mirror {
     const { engine } = await this.device();
     try {
       await engine.sync();
+      // The engine takes in what it sent itself only on its next pass. Taken in now, the
+      // host's latest change is the copy's own, so a scheduled round can tell that nothing
+      // new has happened since.
+      const after = await this.vault!.syncState();
+      const transport = httpTransport(HERE, this.record.token!, this.options.host.local);
+      if (after && (await transport.changes(after.cursor, 0)).head !== after.cursor)
+        await engine.sync();
     } catch (error) {
       if (error instanceof Unauthorized)
         throw new GitError(
@@ -465,6 +591,59 @@ export class Mirror {
    */
   sync(): Promise<MirrorStatus> {
     return this.serial(() => this.locked(() => this.round()));
+  }
+
+  /**
+   * A scheduled round. When neither side changed since the last one, it only asks the
+   * repository which commit its branch is at, a single small request, and records that the
+   * copy is still in step; otherwise it is a full round, and every edit since the last one
+   * becomes one commit.
+   */
+  scheduled(): Promise<MirrorStatus> {
+    return this.serial(() =>
+      this.locked(async () => {
+        let same: boolean;
+        try {
+          same = await this.unchanged();
+        } catch (error) {
+          this.report({
+            ...this.record.status!,
+            state: error instanceof GitError && error.offline ? 'offline' : 'error',
+            message: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        }
+        if (!same) return this.round();
+        const at = this.now();
+        return this.report({ ...this.record.status!, at, ...this.settled(at) });
+      }),
+    );
+  }
+  private async unchanged(): Promise<boolean> {
+    const last = this.record.status;
+    if (!last?.commit || (await this.pending())) return false;
+    const listed = await this.git(['ls-remote', 'origin', `refs/heads/${await this.branch()}`]);
+    return listed.out.split(/\s/)[0] === last.commit;
+  }
+  /**
+   * Whether this side has something the repository may not: the host has changes the copy has
+   * not taken, or the last round did not finish. Asks only the host, never the repository.
+   */
+  private async pending(): Promise<boolean> {
+    const last = this.record.status;
+    if (last?.state !== 'synced' || last.held || !this.record.token) return true;
+    if (!existsSync(join(this.folder, '.git'))) return true;
+    try {
+      const state = await (this.vault ??= await Vault.open(this.folder)).syncState();
+      if (!state || state.device !== this.record.device) return true;
+      const answer = await httpTransport(HERE, this.record.token, this.options.host.local).changes(
+        state.cursor,
+        0,
+      );
+      return answer.head !== state.cursor || answer.changes.length > 0;
+    } catch {
+      return true;
+    }
   }
 
   private async round(): Promise<MirrorStatus> {
@@ -500,9 +679,11 @@ export class Mirror {
       await rm(join(this.folder, '.trash'), { recursive: true, force: true });
       this.allowDeletions = false;
       const commit = await this.head();
+      const at = this.now();
       return this.report({
         state: outcome.problem ? 'error' : 'synced',
-        at: this.now(),
+        at,
+        ...this.settled(at),
         ...(commit ? { commit } : {}),
         ...(outcome.held
           ? {
@@ -524,13 +705,14 @@ export class Mirror {
   }
 
   private report(status: MirrorStatus): MirrorStatus {
-    const { state, at, commit, held, message } = status;
+    const { state, at, commit, held, message, next } = status;
     const clean: MirrorStatus = {
       state,
       ...(at ? { at } : {}),
       ...(commit ? { commit } : {}),
       ...(held ? { held } : {}),
       ...(message ? { message } : {}),
+      ...(next ? { next } : {}),
     };
     this.record = { ...this.record, status: clean };
     try {
@@ -587,32 +769,131 @@ export class Mirror {
     this.running = true;
     this.looping = this.loop();
   }
-  async stop(): Promise<void> {
+  /**
+   * Stops the background rounds. With `flush`, first sends what the repository does not have
+   * yet, waiting at most that many milliseconds in all: a host that is shutting down must not
+   * hang on a slow network. What is cut short goes in the next round after a restart.
+   */
+  async stop(flush = 0): Promise<void> {
+    const deadline = Date.now() + flush;
     this.running = false;
     this.stopped = true;
     this.wake?.();
-    await this.looping?.catch(() => {});
-    await this.work.catch(() => {});
+    const quiet = Promise.all([this.looping?.catch(() => {}), this.work.catch(() => {})]);
+    if (!flush) await quiet;
+    else {
+      let finished = await within(quiet, flush);
+      // Not while the repository has asked to be left alone.
+      const throttled = this.throttles > 0 && this.retryAt > this.now();
+      if (finished && !throttled && (await this.pending())) {
+        const last = this.sync().catch((error: unknown) =>
+          this.options.log?.(`${this.record.name} → ${this.label}: ${(error as Error).message}`),
+        );
+        finished = await within(last, deadline - Date.now());
+      }
+      if (!finished) {
+        this.options.log?.(
+          `${this.record.name} → ${this.label}: stopped before the latest changes were sent; they go when the host starts again.`,
+        );
+        // The round still holds the folder; the process is ending anyway.
+        return;
+      }
+    }
     this.vault?.close();
     this.vault = undefined;
   }
-  /** Something changed: sync without waiting. */
+  /**
+   * Something changed, such as the sign-in: a copy waiting after a failure tries again now,
+   * and a live copy syncs at once. A throttled copy keeps waiting as the repository asked.
+   */
   kick(): void {
+    if (!this.throttles) this.retryAt = 0;
+    this.wake?.();
+  }
+  /** The schedule changed: plan the next round again. */
+  reschedule(): void {
     this.wake?.();
   }
 
+  /**
+   * When the next background round is due. Live: now, unless waiting after a failure. On a
+   * schedule: a period after the last time the copy was in step, moved a little for each
+   * notebook so they do not all go at once; and soon after starting if that time has passed,
+   * as when the host was down, so a copy catches up.
+   */
+  private due(schedule: Schedule, at = this.record.status?.at ?? 0): number {
+    if (schedule === 'live') return this.retryAt;
+    const room = this.options.spread ?? Math.min(PERIOD[schedule] / 10, 5 * MINUTE);
+    const offset = share(this.record.notebook);
+    let due = at + PERIOD[schedule] + offset * room;
+    if (due < this.began) due = this.began + offset * Math.min(room, 30_000);
+    return Math.max(due, this.retryAt);
+  }
+  /**
+   * Takes up the status another process wrote meanwhile, as `host github sync` does, so a
+   * round made there counts and is not written over with an older one.
+   */
+  private reload(): void {
+    try {
+      const saved = this.options.host
+        .mirrors()
+        .find((each) => each.notebook === this.record.notebook)?.status;
+      if (saved && (saved.at ?? 0) > (this.record.status?.at ?? 0))
+        this.record = { ...this.record, status: saved };
+    } catch {
+      // The host closing; the loop is about to end.
+    }
+  }
+  /** A round went through: forget past failures, and say when the next one is. */
+  private settled(at: number): { next?: number } {
+    this.failures = this.throttles = this.retryAt = 0;
+    this.logged = undefined;
+    const schedule = scheduleOf(this.options.host);
+    return schedule === 'live' ? {} : { next: this.due(schedule, at) };
+  }
+  private failed(error: unknown, schedule: Schedule): void {
+    const throttled = error instanceof GitError && error.throttled !== undefined;
+    const count = throttled ? ++this.throttles : ++this.failures;
+    this.retryAt = this.now() + backoff(error, count, schedule);
+    const said = error instanceof Error ? error.message : String(error);
+    if (throttled)
+      // Not an error to fix: the status says when it carries on.
+      this.report({
+        ...this.record.status!,
+        state: 'offline',
+        message: `${said.replace(/\.$/, '')}; it will try again at ${clock(this.retryAt)}.`,
+        next: this.retryAt,
+      });
+    // The same trouble again is in the status already; the log says when it changes.
+    if (said !== this.logged)
+      this.options.log?.(
+        `${this.record.name} → ${this.label}: ${said}${throttled ? ` Next try at ${clock(this.retryAt)}.` : ''}`,
+      );
+    this.logged = said;
+  }
+
   private async loop(): Promise<void> {
-    let delay = 5000;
+    this.began = this.now();
     while (this.running) {
+      this.reload();
+      const schedule = scheduleOf(this.options.host);
+      const due = this.due(schedule);
+      const wait = due - this.now();
+      if (wait > 0) {
+        const status = this.record.status;
+        if (status && status.next !== due) this.report({ ...status, next: due });
+        // In slices, so a Mac that slept past the time, or a changed schedule, is noticed.
+        await this.pause(Math.min(wait, 5 * MINUTE));
+        continue;
+      }
       try {
-        await this.sync();
-        delay = 5000;
-        await this.idle();
+        if (schedule === 'live') {
+          await this.sync();
+          await this.idle();
+        } else await this.scheduled();
       } catch (error) {
         if (!this.running) break;
-        this.options.log?.(`${this.record.name} → ${this.label}: ${(error as Error).message}`);
-        await this.pause(delay);
-        delay = Math.min(delay * 2, 10 * 60_000);
+        this.failed(error, schedule);
       }
     }
   }
@@ -682,6 +963,7 @@ export class Mirrors {
   private timer: ReturnType<typeof setInterval> | undefined;
   /** Whether copies run here in the background, or only when asked, as from a command. */
   private started = false;
+  private schedule: Schedule | undefined;
 
   constructor(private readonly options: MirrorOptions) {}
 
@@ -694,13 +976,17 @@ export class Mirrors {
     this.refresh();
     this.timer = setInterval(() => this.refresh(), 5000);
   }
-  async stop(): Promise<void> {
+  /**
+   * Stops every copy. With `flush`, each first sends what its repository does not have yet,
+   * all at once and within that many milliseconds, as when the host shuts down.
+   */
+  async stop(flush = 0): Promise<void> {
     this.started = false;
     clearInterval(this.timer);
-    await Promise.all([...this.running.values()].map((each) => each.stop()));
+    await Promise.all([...this.running.values()].map((each) => each.stop(flush)));
     this.running.clear();
   }
-  /** Matches what runs to what the host's settings say. */
+  /** Matches what runs to what the host's settings say, the schedule included. */
   refresh(): void {
     if (!this.started) return;
     let records: MirrorRecord[];
@@ -709,6 +995,10 @@ export class Mirrors {
     } catch {
       return;
     }
+    const schedule = scheduleOf(this.options.host);
+    if (this.schedule && schedule !== this.schedule)
+      for (const mirror of this.running.values()) mirror.reschedule();
+    this.schedule = schedule;
     const wanted = new Map(records.map((record) => [record.notebook, record]));
     for (const [notebook, mirror] of this.running)
       if (wanted.get(notebook)?.remote !== mirror.remote) {

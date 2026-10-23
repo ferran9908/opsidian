@@ -119,6 +119,16 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Needs an OAuth app registered on GitHub** with the device flow enabled; its client id is in `apps/host/src/github.ts`. Until it is, the command line can sign in with a token (`gh auth token | opsidian host github login --with-token`).
 - **Not built:** Git LFS, choosing a branch other than the repository's default, and the iPhone app (which never hosts).
 
+## GitHub schedule — 2026-10-23
+
+- **Copies go to GitHub hourly by default.** Requested by the user, who keeps notebooks on GitHub as a backup and asked for "every hour-ish" without hitting GitHub's limits. Until now each copy followed every change: a commit and push about ten seconds after each burst of typing, and a fetch every minute per notebook.
+- **Why hourly:** the intent is a backup, which an hour's lag does not weaken; history is quieter, one commit per round holding everything since the last; and GitHub is asked far less. A round where neither side changed is one `git ls-remote`, so an idle notebook costs one small request an hour; a busy one at most three (check, fetch, push).
+- **One setting per host,** with the choices live, 15 minutes, 1 hour, 6 hours and 24 hours. Live is the previous behaviour, kept for those who want GitHub to follow along. **Sync now** and `host github sync` still run a round at once.
+- **The setting lives in the host's database,** not in `host.json` or the Mac app's `hosting.json`, so every way of running a host reads the same value (the service, `host run` in Docker, which has no settings file, and the Mac app's host thread), and the command line can change it while the host runs. A restore from backup brings back the setting the backup had.
+- **Stopping the host flushes,** within 20 seconds on a server and 8 in the Mac app so quitting never hangs. A host that was off catches up soon after it starts. Copies are spread a little apart so a host with many notebooks does not ask GitHub for all of them at once.
+- **Git traffic is not GitHub's REST API.** The API's 5,000 requests an hour covers only sign-in and listing or making repositories, never background rounds. Git requests are throttled by GitHub's undocumented secondary limits instead; when GitHub says so, the copy waits at least an hour and shows when it will try again.
+- **The host's own history remains the backup of record.** GitHub is a readable off-site copy; status warns when it is more than twice the schedule behind, rather than staying silent.
+
 ## Future AI direction
 
 Potential features: organize a messy thought, answer questions over notes with citations, and suggest related notes. A machine-hosted agent and supported Codex/ChatGPT sign-in were explored. No AI integration is committed for the initial milestones; re-check product access and integration documentation when that work begins.

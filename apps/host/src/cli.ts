@@ -21,7 +21,7 @@ import {
 import { service, type Service } from './service';
 import { github, readAccount, statusLine } from './github-cli';
 import { repositoryLabel } from './github';
-import { Mirrors } from './mirror';
+import { Mirrors, scheduleOf } from './mirror';
 
 const VERSION = process.env.OPSIDIAN_VERSION ?? 'development';
 // Said back in messages the way it was typed: from this repository, through npx, or installed.
@@ -69,6 +69,8 @@ const HELP = `Opsidian ${VERSION}: a host for your notebooks, so every device sy
   ${me} host restore BACKUP   Put the host back to a backup
   ${me} host github import you/notes      Make a notebook from a GitHub repository, and invite a device
   ${me} host github connect "Name" [REPO] Keep a notebook in a GitHub repository, both ways
+  ${me} host github every 1h              How often notebooks go to GitHub: live, 15m, 1h
+                                         (the default), 6h or 24h
   ${me} host github                       How each notebook on GitHub is doing; also login,
                                          sync, disconnect, logout
   ${me} host logs [-f]        What the host has been doing
@@ -239,10 +241,11 @@ async function status(): Promise<void> {
   const state = 'missing' in manager ? { running: false } : await manager.state();
   const reach = reachableAt(config);
   const answering = state.running && (await answers(reach));
-  const { notebooks, devices, mirrors } = await withHost((host) => ({
+  const { notebooks, devices, mirrors, schedule } = await withHost((host) => ({
     notebooks: host.notebooks(),
     devices: host.devices().filter((device) => !device.revoked),
     mirrors: host.mirrors(),
+    schedule: scheduleOf(host),
   }));
   let backups = backupLine(config);
   if (config.backup) {
@@ -264,7 +267,7 @@ async function status(): Promise<void> {
       `  Backups    ${backups}`,
       ...mirrors.map(
         (record, at) =>
-          `  ${at ? '          ' : 'GitHub   '}  ${record.name} → ${repositoryLabel(record.remote)}  ${statusLine(record.status)}`,
+          `  ${at ? '          ' : 'GitHub   '}  ${record.name} → ${repositoryLabel(record.remote)}  ${statusLine(record.status, schedule, { running: answering })}`,
       ),
       `  Data       ${where.data}`,
     ].join('\n'),
@@ -407,11 +410,16 @@ async function runHere(): Promise<void> {
   const timer = setInterval(() => void backUpIfDue().catch(() => {}), 10 * 60 * 1000);
   void backUpIfDue().catch(() => {});
 
+  let stopping = false;
   const stop = () => {
+    // Asked twice, as with a second Ctrl+C: stop without waiting for GitHub.
+    if (stopping) process.exit(0);
+    stopping = true;
     clearInterval(timer);
     log('Stopping.');
+    // What has not reached GitHub yet is sent first, for 20 seconds at most.
     void mirrors
-      .stop()
+      .stop(20_000)
       .then(() => host.close())
       .then(() => process.exit(0));
   };

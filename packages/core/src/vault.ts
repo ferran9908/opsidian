@@ -130,13 +130,21 @@ export interface GitHubMirror {
   at?: number;
   /** Deletions waiting to be confirmed, because most of the notebook vanished from GitHub. */
   held?: number;
+  /** When the host plans the next round: the next scheduled one, or the next try. */
+  next?: number;
+  /** Not in step for twice as long as the schedule allows: the copy is no recent backup. */
+  behind?: boolean;
 }
+/** How often the host copies notebooks to GitHub: following each change, or on a schedule. */
+export type GitHubSchedule = 'live' | '15m' | '1h' | '6h' | '24h';
 export interface GitHubInfo {
   /** Who is signed in to GitHub on this Mac. */
   account?: { login: string; name?: string };
   /** Why GitHub cannot be used here, such as git not being installed. */
   problem?: string;
   mirrors: GitHubMirror[];
+  /** For every notebook hosted here. */
+  every: GitHubSchedule;
 }
 export interface GitHubRepository {
   fullName: string;
@@ -237,6 +245,7 @@ export interface VaultBridge {
   /** Makes a notebook from a repository, hosted on this Mac, in a new folder, and opens it. */
   importFromGitHub(choice: RepositoryChoice, parent?: string): Promise<VaultInfo>;
   syncGitHub(notebook: string, confirmDeletions?: boolean): Promise<GitHubInfo>;
+  setGitHubSchedule(every: GitHubSchedule): Promise<GitHubInfo>;
   /** Stops keeping a notebook on GitHub. The repository and the notebook stay as they are. */
   stopGitHub(notebook: string): Promise<GitHubInfo>;
   /** This app's own update: where it stands, and what can be done about it. */

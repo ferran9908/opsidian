@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('opsidian', {
   keepOnGitHub: call('github:keep'),
   importFromGitHub: call('github:import'),
   syncGitHub: call('github:sync'),
+  setGitHubSchedule: call('github:schedule'),
   stopGitHub: call('github:stop'),
   // Whoever listens is waited for when the window closes, so listening is announced, and the
   // announcement taken back when it stops.
