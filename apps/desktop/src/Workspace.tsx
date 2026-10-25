@@ -20,6 +20,7 @@ import {
   linkResolver,
   noteFolder,
   noteTitle,
+  type MissingNotebook,
   type MoveResult,
   type SyncInfo,
   type VaultInfo,
@@ -36,6 +37,7 @@ import { Settings, type SettingsSection } from './Settings';
 import { HistoryDialog } from './HistoryDialog';
 import { Sidebar, type TreeSort } from './Sidebar';
 import { StatusBar, type NoteStatus } from './StatusBar';
+import { MissingNotice } from './MissingNotice';
 import { GraphView } from './graph/GraphView';
 import { defaultMode } from './preferences';
 import {
@@ -52,9 +54,29 @@ interface Props {
   theme: ReturnType<typeof useTheme>;
   /** Shows the welcome screen, to open another notebook or, with `github`, import one. */
   onSwitch(mode?: 'github'): void;
+  /** Another notebook, or this one downloaded again, was opened from the missing notice. */
+  onOpened(vault: VaultInfo): void;
+  /**
+   * This notebook, whose folder is gone, was closed: still `missing`, so the welcome screen
+   * offers it, or given up (null), with a `warning` worth showing.
+   */
+  onClose(missing: MissingNotebook | null, warning?: string): void;
 }
 
-export function Workspace({ vault, theme, onSwitch }: Props) {
+/** Puts text on the clipboard without asking for the clipboard permission, which is refused. */
+function copyText(text: string): Promise<void> {
+  const field = document.createElement('textarea');
+  field.value = text;
+  field.style.position = 'fixed';
+  field.style.opacity = '0';
+  document.body.append(field);
+  field.select();
+  const copied = document.execCommand('copy');
+  field.remove();
+  return copied ? Promise.resolve() : Promise.reject(new Error('Could not copy.'));
+}
+
+export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) {
   const storageKey = `opsidian-session:${vault.location}`;
   const [tree, setTree] = useState<VaultTree>();
   // `visit` counts openings, so the editor remounts on a new note but not on a rename.
@@ -81,6 +103,8 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
   const renaming = useRef(false);
   const [notice, setNotice] = useState('');
   const [version, setVersion] = useState(0);
+  // Set while the notebook's folder is not where it was.
+  const [gone, setGone] = useState<MissingNotebook | null>(null);
   const editor = useRef<NoteEditorHandle>(null);
   const state = useRef({ open, trail, tree });
   state.current = { open, trail, tree };
@@ -187,6 +211,14 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
   useEffect(() => {
     void bridge.syncInfo().then(setSync).catch(fail);
     return bridge.onSync(setSync);
+  }, []);
+  useEffect(() => {
+    void bridge.missing().then(setGone).catch(fail);
+    return bridge.onPresence((next) => {
+      setGone(next);
+      // Back where it was: what could not be saved meanwhile is saved now.
+      if (!next) void editor.current?.flush().catch(() => {});
+    });
   }, []);
   useEffect(
     () =>
@@ -539,6 +571,32 @@ export function Workspace({ vault, theme, onSwitch }: Props) {
           onSyncSettings={() => setSettings('sync')}
         />
       </main>
+      {gone && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[12vh]">
+          <div className="border-border bg-popover text-popover-foreground w-[min(560px,92vw)] rounded-xl border p-6 shadow-2xl">
+            <MissingNotice
+              missing={gone}
+              unsaved={
+                open && editor.current && !editor.current.settled()
+                  ? {
+                      note: noteTitle(open.path),
+                      copy: () => copyText(editor.current?.text() ?? ''),
+                    }
+                  : undefined
+              }
+              onOpened={(next) => {
+                if (next.location !== vault.location) return onOpened(next);
+                // Downloaded again into the same place: carry on, and save what waited.
+                setGone(null);
+                void refresh().catch(fail);
+                void editor.current?.flush().catch(() => {});
+              }}
+              onDone={(warning) => onClose(null, warning)}
+              onClose={() => void bridge.closeVault().then(() => onClose(gone), fail)}
+            />
+          </div>
+        </div>
+      )}
       {finding && (
         <QuickSwitcher
           notes={tree.notes}

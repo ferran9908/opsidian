@@ -77,8 +77,5 @@ export function syncLine(info: SyncInfo, colors: Colors): { color: string; text:
   if (info.state === 'error') return { color: colors.destructive, text: 'Sync needs attention' };
   return { color: colors.ring, text: 'Syncing…' };
 }
-/** Whether the host has stopped accepting this iPhone. */
-export const rejected = (info: SyncInfo) =>
-  info.connected &&
-  info.state === 'error' &&
-  /no longer connected|was lost/i.test(info.message ?? '');
+/** Whether the host has stopped accepting this iPhone, or its credential was lost. */
+export const rejected = (info: SyncInfo) => info.connected && Boolean(info.removed);

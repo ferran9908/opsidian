@@ -17,9 +17,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Host, listBackups, restoreBackup } from '../apps/host/src/host';
 import { Vault } from '../apps/desktop/electron/vault';
 import {
+  FolderGone,
   SyncEngine,
   Unauthorized,
   httpTransport,
+  leave,
   pair,
   type SyncState,
   type SyncStatus,
@@ -784,9 +786,117 @@ describe('the host', () => {
     a.engine.start();
     cleanup.push(() => a.engine.stop());
     await pause(300);
-    expect(a.engine.status).toMatchObject({ state: 'error' });
-    expect(a.engine.status.message).toContain('no longer connected');
+    expect(a.engine.status).toMatchObject({ state: 'error', removed: true });
+    expect(a.engine.status.message).toContain('removed from the host');
     expect(await a.read('Note.md')).toBe('still mine');
+  });
+
+  it('lets a device remove itself, and refuses its credential afterwards', async () => {
+    const server = await startHost();
+    const a = await device(server, 'Mac A');
+    const b = await device(server, 'Mac B');
+    expect(await leave(server.url, a.token)).toBe(true);
+    expect(server.host.devices().map(({ name, revoked }) => [name, revoked])).toEqual([
+      ['Mac A', true],
+      ['Mac B', false],
+    ]);
+    await expect(httpTransport(server.url, a.token).changes(0, 0)).rejects.toThrow(
+      'removed from the host',
+    );
+    // Leaving twice, or after being removed, has nothing left to do.
+    expect(await leave(server.url, a.token)).toBe(true);
+    await b.engine.sync();
+    // A host that cannot be reached is reported, not waited on forever.
+    await server.host.close();
+    expect(await leave(server.url, b.token)).toBe(false);
+  });
+
+  it('finds a device to remove by its name or the start of its id', async () => {
+    const server = await startHost();
+    await device(server, 'Mac A');
+    await device(server, 'iPhone');
+    await device(server, 'iPhone');
+    const [mac, phone] = server.host.devices();
+    expect(server.host.findDevices('mac a').map((each) => each.id)).toEqual([mac!.id]);
+    expect(server.host.findDevices(mac!.id.slice(0, 8)).map((each) => each.id)).toEqual([mac!.id]);
+    expect(server.host.findDevices('iPhone')).toHaveLength(2);
+    expect(server.host.findDevices(phone!.id).map((each) => each.id)).toEqual([phone!.id]);
+    expect(server.host.findDevices('ab')).toEqual([]);
+    server.host.revoke(mac!.id);
+    expect(server.host.findDevices('Mac A')).toEqual([]);
+  });
+});
+
+describe('a notebook folder that goes away', () => {
+  async function three(server: Server) {
+    const a = await device(server, 'Mac A');
+    const b = await device(server, 'Mac B');
+    for (const name of ['One', 'Two', 'Three']) await a.write(`${name}.md`, name);
+    await a.write('Projects/Plan.md', 'plan');
+    await settle(a, b);
+    return { a, b };
+  }
+  const everything = {
+    'One.md': 'One',
+    'Projects/Plan.md': 'plan',
+    'Three.md': 'Three',
+    'Two.md': 'Two',
+  };
+
+  it('deletes nothing elsewhere, and is not made again, when it is deleted', async () => {
+    const server = await startHost();
+    const { a, b } = await three(server);
+    await rm(a.root, { recursive: true });
+    await expect(a.engine.sync()).rejects.toBeInstanceOf(FolderGone);
+    // Saving sync's state must not bring back the folder, holding only that state.
+    await expect(a.vault.syncStore().save(a.engine.state)).rejects.toBeInstanceOf(FolderGone);
+    expect(existsSync(a.root)).toBe(false);
+    await b.engine.sync();
+    expect(await tree(b.root)).toEqual(everything);
+  });
+
+  it('stops while it is gone and carries on when it is put back', async () => {
+    const server = await startHost();
+    const { a, b } = await three(server);
+    // As when it is moved to the Trash, and then put back.
+    await rename(a.root, `${a.root}-trashed`);
+    a.engine.start();
+    cleanup.push(() => a.engine.stop());
+    await pause(200);
+    expect(a.engine.status).toMatchObject({ state: 'error' });
+    expect(a.engine.status.message).toContain('no longer where it was');
+    await rename(`${a.root}-trashed`, a.root);
+    await b.write('One.md', 'One, edited');
+    await b.engine.sync();
+    a.engine.kick();
+    for (let wait = 0; wait < 50 && (await a.read('One.md')) !== 'One, edited'; wait++)
+      await pause(100);
+    expect(await a.read('One.md')).toBe('One, edited');
+    expect(await tree(b.root)).toEqual({ ...everything, 'One.md': 'One, edited' });
+  });
+
+  it('does not take an empty folder made in its place for the notebook emptied', async () => {
+    const server = await startHost();
+    const { a, b } = await three(server);
+    await rm(a.root, { recursive: true });
+    await mkdir(a.root);
+    // Usually a different folder on disk, refused outright; if the disk reused the old one's
+    // number, every note missing at once is still held back.
+    await a.engine.sync().catch((error) => expect(error).toBeInstanceOf(FolderGone));
+    await b.engine.sync();
+    expect(await tree(b.root)).toEqual(everything);
+  });
+
+  it('holds back the deletion of every note, however few there are', async () => {
+    const server = await startHost();
+    const { a, b } = await three(server);
+    for (const path of Object.keys(everything)) await a.remove(path);
+    await a.engine.sync();
+    expect(a.engine.status).toMatchObject({ state: 'synced', held: 4 });
+    await b.engine.sync();
+    expect(await tree(b.root)).toEqual(everything);
+    a.engine.confirmDeletions();
+    expect(await settle(a, b)).toEqual({});
   });
 });
 
@@ -936,7 +1046,7 @@ describe('backing up and restoring the host', () => {
       'Later.md': 'wednesday',
     });
     // Going back in time does not give a removed device its access back.
-    await expect(lost.engine.sync()).rejects.toThrow('no longer connected');
+    await expect(lost.engine.sync()).rejects.toThrow('removed from the host');
     expect(host.devices().find((each) => each.name === 'Lost phone')).toMatchObject({
       revoked: true,
     });

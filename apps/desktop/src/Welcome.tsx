@@ -1,11 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import type { RepositoryChoice, VaultInfo } from '@opsidian/core';
+import type { MissingNotebook, RepositoryChoice, VaultInfo } from '@opsidian/core';
 import { bridge, message } from './bridge';
 import { RepositoryDialog, SignInDialog, useGitHub } from './GitHub';
+import { MissingNotice } from './MissingNotice';
 import { Button } from '@/components/ui/button';
 
 interface Props {
   error: string;
+  /** The notebook last open, whose folder has gone, shown before anything else. */
+  missing?: MissingNotebook | null;
+  onMissingDone?(warning?: string): void;
   onOpened(vault: VaultInfo): void;
   /** Present when a notebook is already open and this screen can be dismissed. */
   onCancel?(): void;
@@ -14,7 +18,14 @@ interface Props {
 }
 
 /** Starts a notebook, or joins one from a host, or makes one from a GitHub repository. */
-export function Welcome({ error: initialError, onOpened, onCancel, mode: initial }: Props) {
+export function Welcome({
+  error: initialError,
+  missing,
+  onMissingDone,
+  onOpened,
+  onCancel,
+  mode: initial,
+}: Props) {
   const [name, setName] = useState('Personal');
   const [parent, setParent] = useState<string>();
   const [fallback, setFallback] = useState('');
@@ -57,8 +68,22 @@ export function Welcome({ error: initialError, onOpened, onCancel, mode: initial
           : bridge.createVault(name.trim(), parent),
     );
   };
+  useEffect(() => setError(initialError), [initialError]);
   const field =
     'border-input bg-card focus:border-ring mt-2 h-12 w-full rounded-lg border px-4 outline-none';
+  if (missing)
+    return (
+      <div className="bg-secondary flex h-full flex-col">
+        <div className="drag h-14 shrink-0" />
+        <div className="mx-auto w-full max-w-[520px] px-6 pt-10">
+          <MissingNotice
+            missing={missing}
+            onOpened={onOpened}
+            onDone={(warning) => onMissingDone?.(warning)}
+          />
+        </div>
+      </div>
+    );
   // Where the notebook will be, written as the path it is: the folder, then the notebook's name.
   const folder = parent ?? fallback;
   const leaf =

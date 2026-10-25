@@ -1,5 +1,6 @@
 import { mergeText } from '@opsidian/core';
 import {
+  FolderGone,
   Moved,
   Unauthorized,
   pathKey,
@@ -72,6 +73,8 @@ export interface SyncStatus {
   held?: number;
   /** When the notebook last matched the host, milliseconds. */
   at?: number;
+  /** The host no longer accepts this device. Sync has stopped; the files stay as they are. */
+  removed?: boolean;
 }
 
 interface Options {
@@ -239,8 +242,16 @@ export class SyncEngine {
         if (!this.running) break;
         if (error instanceof Unauthorized) {
           this.running = false;
-          this.tell({ ...this.last, state: 'error', message: error.message });
+          this.tell({ ...this.last, state: 'error', message: error.message, removed: true });
           break;
+        }
+        if (error instanceof FolderGone) {
+          // Nothing is sent: a missing folder is not a request to delete anything. If it is
+          // put back where it was, the next try carries on.
+          this.tell({ ...this.last, state: 'error', message: error.message });
+          await this.pause(delay);
+          delay = Math.min(delay * 2, 30000);
+          continue;
         }
         if (error instanceof Moved && this.options.onMoved) {
           this.running = false;
@@ -658,7 +669,12 @@ export class SyncEngine {
         try {
           await this.apply(change, pending, view);
         } catch (error) {
-          if (error instanceof Busy || error instanceof Unauthorized || error instanceof Moved)
+          if (
+            error instanceof Busy ||
+            error instanceof Unauthorized ||
+            error instanceof Moved ||
+            error instanceof FolderGone
+          )
             throw error;
           // One change this device cannot apply must not hold up all the others.
           problems.push(
@@ -676,11 +692,14 @@ export class SyncEngine {
     await this.respell(view);
     let plan = this.plan(view, problems);
     // A folder that is suddenly mostly empty is more likely unmounted or mid-restore than
-    // deliberately cleared, so mass deletions wait for the user.
+    // deliberately cleared, so mass deletions wait for the user. So does a small notebook
+    // whose every file vanished at once, which is what emptying its folder looks like.
     const deletions = plan.filter((entry) => entry.op.hash === null).length;
     const tracked = Object.keys(this.state.files).length;
+    const live = Object.values(this.state.files).filter((file) => file.hash !== null).length;
+    const emptied = deletions >= 2 && deletions >= live;
     let held = 0;
-    if (deletions >= 10 && deletions * 2 > tracked && !this.allowDeletions) {
+    if (((deletions >= 10 && deletions * 2 > tracked) || emptied) && !this.allowDeletions) {
       held = deletions;
       plan = plan.filter((entry) => entry.op.hash !== null);
     }

@@ -344,6 +344,20 @@ export class Host {
     const done = this.db.prepare('update devices set revoked = 1 where id = ?').run(id);
     return done.changes > 0;
   }
+  /**
+   * The devices still syncing that `query` names: its id, the start of its id, or its name
+   * in any letter case. More than one means the name is shared and the id must be given.
+   */
+  findDevices(query: string): HostDevice[] {
+    const wanted = query.trim();
+    if (!wanted) return [];
+    const active = this.devices().filter((device) => !device.revoked);
+    const exact = active.filter((device) => device.id === wanted);
+    if (exact.length) return exact;
+    const named = active.filter((device) => device.name.toLowerCase() === wanted.toLowerCase());
+    if (named.length) return named;
+    return wanted.length >= 4 ? active.filter((device) => device.id.startsWith(wanted)) : [];
+  }
   notebooks(): HostNotebook[] {
     return this.db
       .prepare(
@@ -593,6 +607,16 @@ export class Host {
     return stat(this.blob(notebook, hash)).then(
       () => true,
       () => false,
+    );
+  }
+
+  /** Whether the request carries the credential of a device that was removed. */
+  private removed(request: FastifyRequest): boolean {
+    const header = request.headers.authorization;
+    const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
+    return Boolean(
+      token &&
+      this.db.prepare('select 1 from devices where token = ? and revoked = 1').get(sha(token)),
     );
   }
 
@@ -870,7 +894,14 @@ export class Host {
     const signedIn = (request: FastifyRequest): Device => {
       const device = this.device(request);
       if (!device)
-        throw Object.assign(new Error('This device is not connected.'), { statusCode: 401 });
+        throw Object.assign(
+          new Error(
+            this.removed(request)
+              ? 'This device was removed from the host. Its notes stay on it.'
+              : 'This device is no longer connected to the notebook.',
+          ),
+          { statusCode: 401 },
+        );
       return device;
     };
     const refuse = (statusCode: number, message: string) =>
@@ -942,6 +973,13 @@ export class Host {
         .prepare('insert into devices (id, notebook, name, token, created) values (?, ?, ?, ?, ?)')
         .run(device.id, notebook.id, name, sha(token), now);
       return { notebook, device, token };
+    });
+
+    /** A device that stops syncing removes itself, so its credential is no use to anyone. */
+    app.delete('/v1/device', async (request, reply) => {
+      const device = signedIn(request);
+      this.revoke(device.id);
+      return reply.code(204).send();
     });
 
     /** Tells a device whether the host still accepts it, for the connection check. */

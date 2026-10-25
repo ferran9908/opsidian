@@ -80,8 +80,19 @@ export interface Transport {
 
 /** Thrown by a transport when the host no longer accepts this device. */
 export class Unauthorized extends Error {
+  constructor(message = 'This device is no longer connected to the notebook.') {
+    super(message);
+  }
+}
+
+/**
+ * Thrown by a store when the notebook's folder is no longer there, or a different folder now
+ * stands at its path. Nothing may be read from or written to it: an empty folder in its place
+ * would look like every note deleted, and recreating it would bring back an empty notebook.
+ */
+export class FolderGone extends Error {
   constructor() {
-    super('This device is no longer connected to the notebook.');
+    super('The notebook’s folder is no longer where it was.');
   }
 }
 

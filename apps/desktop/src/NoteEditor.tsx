@@ -67,6 +67,8 @@ export interface NoteEditorHandle {
   restore(content: string): void;
   /** Whether there is nothing waiting to be saved. */
   settled(): boolean;
+  /** What the editor holds now, saved or not. */
+  text(): string;
   focusTitle(): void;
 }
 interface Props {
@@ -137,6 +139,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
       };
     },
     settled: () => saves.current?.settled ?? true,
+    text: () => editor.current?.view.state.doc.toString() ?? '',
     focusTitle: () => titleField.current?.select(),
   }));
 

@@ -13,17 +13,18 @@ import {
 } from 'electron';
 import { Hosting } from './hosting';
 import { lstat, readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
-import { dirname, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   validateContent,
   validateName,
   type GitHubSchedule,
+  type MissingNotebook,
   type RepositoryChoice,
   type VaultInfo,
 } from '@opsidian/core';
 import { themes } from '@opsidian/theme';
-import { Vault } from './vault';
+import { FolderGone, Vault } from './vault';
 import { desktopSync, hostAddress } from './sync';
 import { Updates } from './updates';
 
@@ -156,17 +157,54 @@ async function start() {
   // Whatever goes wrong with hosting, the notebook itself must still open.
   await hosting.load().catch(() => {});
   showTray();
-  async function use(directory: string, remember: boolean): Promise<VaultInfo> {
-    const next = await Vault.open(directory);
+  /** The open notebook's folder, or the remembered one, is no longer where it was. */
+  let missing: MissingNotebook | null = null;
+  const describe = async (location: string): Promise<MissingNotebook> => {
+    const connection = await sync.remembered(location);
+    return {
+      name: basename(location),
+      location,
+      ...(connection
+        ? { host: connection.host, notebook: connection.notebookName ?? basename(location) }
+        : {}),
+    };
+  };
+  const rememberVault = async (root: string | undefined) => {
+    await mkdir(dirname(settingsPath), { recursive: true });
+    await writeFile(settingsPath, JSON.stringify(root ? { vault: root } : {}));
+  };
+  /**
+   * Opens a notebook folder. Only a folder being made for a new notebook is created: one that
+   * is expected to exist and does not is reported missing, never quietly replaced by an empty one.
+   */
+  async function use(directory: string, remember: boolean, create = true): Promise<VaultInfo> {
+    const next = await Vault.open(directory, { create });
     vault?.close();
     vault = next;
+    missing = null;
     next.watch((paths) => window?.webContents.send('vault:changed', paths));
+    next.watchPresence((present) => void presence(next, present).catch(() => {}));
     await sync.attach(next);
-    if (remember) {
-      await mkdir(dirname(settingsPath), { recursive: true });
-      await writeFile(settingsPath, JSON.stringify({ vault: next.root }));
-    }
+    if (remember) await rememberVault(next.root);
     return { name: next.name, location: next.root };
+  }
+  /**
+   * The open notebook's folder went away (deleted, moved, its disk detached) or came back.
+   * While it is gone, sync stops, so nothing is sent as deleted and nothing is written in its
+   * place. The note on screen stays there with its unsaved text.
+   */
+  async function presence(which: Vault, present: boolean): Promise<void> {
+    if (vault !== which) return;
+    if (present) {
+      // Put back where it was, as from the Trash: start afresh on it.
+      await use(which.root, false, false);
+      window?.webContents.send('vault:presence', null);
+      window?.webContents.send('vault:changed', []);
+      return;
+    }
+    await sync.attach(null);
+    missing = await describe(which.root);
+    if (vault === which) window?.webContents.send('vault:presence', missing);
   }
   const open = (): Vault => {
     if (!vault) throw new Error('Open a notebook first.');
@@ -180,8 +218,12 @@ async function start() {
         .then((raw) => JSON.parse(raw).vault as unknown)
         .catch(() => undefined);
   const initial = forced ?? (typeof remembered === 'string' ? remembered : undefined);
-  // A remembered vault that has since moved or been deleted leads back to the welcome screen.
-  if (initial) await use(initial, false).catch(() => undefined);
+  // A remembered vault that has since moved or been deleted leads back to the welcome screen,
+  // which says so and offers to download it again.
+  if (initial)
+    await use(initial, false, Boolean(forced)).catch(async (reason) => {
+      if (reason instanceof FolderGone && !forced) missing = await describe(initial);
+    });
 
   const rendererRoot = resolve(__dirname, '../dist');
   protocol.handle('opsidian', async (request) => {
@@ -230,6 +272,39 @@ async function start() {
     });
 
   handle('vault:current', () => (vault ? { name: vault.name, location: vault.root } : null));
+  handle('vault:missing', () => missing);
+  /** Downloads a deleted notebook again into its old place, as the same device. */
+  handle('vault:restore', async () => {
+    if (!missing) throw new Error('No notebook is missing.');
+    const { location } = missing;
+    const info = await use(location, true);
+    // Put back meanwhile, with its own record of the host: nothing to download.
+    if (sync.info().connected) return info;
+    await sync.restore(open(), location);
+    return info;
+  });
+  /** Stops syncing a notebook whose folder is gone, and removes this Mac from its host. */
+  handle('vault:forget-missing', async () => {
+    if (!missing) return { hostTold: true };
+    const result = await sync.forget(missing.location);
+    if (vault?.root === missing.location) {
+      vault.close();
+      vault = null;
+    }
+    missing = null;
+    await rememberVault(undefined);
+    return result;
+  });
+  /** Leaves a notebook whose folder is gone for the welcome screen, which still offers it. */
+  handle('vault:close', async () => {
+    vault?.close();
+    vault = null;
+    if (!missing) await rememberVault(undefined);
+  });
+  handle('vault:dismiss-missing', async () => {
+    missing = null;
+    await rememberVault(undefined);
+  });
   handle('vault:default-parent', () => defaultParent);
   handle('vault:choose-parent', async () => {
     const result = await dialog.showOpenDialog(window!, {

@@ -41,6 +41,16 @@ export interface TrashEntry {
 }
 
 /** Whether this copy of the notebook is connected to a host, and how that is going. */
+/** A notebook whose folder is not where it was: deleted, moved, or on a disk not attached. */
+export interface MissingNotebook {
+  name: string;
+  /** Where the folder was. */
+  location: string;
+  /** Present when it synced, so its notes can be downloaded again from this host. */
+  host?: string;
+  notebook?: string;
+}
+
 export interface SyncInfo {
   connected: boolean;
   host?: string;
@@ -56,6 +66,8 @@ export interface SyncInfo {
   held?: number;
   /** When this copy last matched the host, milliseconds. */
   at?: number;
+  /** The host no longer accepts this device: it was removed there. Its notes stay here. */
+  removed?: boolean;
 }
 export interface NoteVersion {
   seq: number;
@@ -193,6 +205,18 @@ export interface BackupInfo extends BackupSettings {
 /** What the desktop interface needs from whatever stores the vault. */
 export interface VaultBridge {
   current(): Promise<VaultInfo | null>;
+  /** The notebook whose folder is no longer where it was, if any. */
+  missing(): Promise<MissingNotebook | null>;
+  /** Downloads the missing notebook again into its old place, and opens it. */
+  restoreVault(): Promise<VaultInfo>;
+  /** Stops syncing the missing notebook and removes this device from its host. */
+  forgetMissing(): Promise<{ hostTold: boolean }>;
+  /** Puts the missing notebook out of mind without touching its host. */
+  dismissMissing(): Promise<void>;
+  /** Closes the open notebook, for one whose folder is gone. */
+  closeVault(): Promise<void>;
+  /** The open notebook's folder went away (the notebook) or came back (null). */
+  onPresence(callback: (missing: MissingNotebook | null) => void): () => void;
   defaultParent(): Promise<string>;
   chooseParent(): Promise<string | null>;
   createVault(name: string, parent?: string): Promise<VaultInfo>;
@@ -229,7 +253,8 @@ export interface VaultBridge {
   /** Connects the open notebook to a host using a single-use invitation. */
   connect(host: string, code: string): Promise<SyncInfo>;
   /** Stops syncing. The notes stay on this device and on the host. */
-  disconnect(): Promise<void>;
+  /** Stops syncing here. `hostTold` is false when the host could not be reached to forget it. */
+  disconnect(): Promise<{ hostTold: boolean }>;
   confirmDeletions(): Promise<void>;
   /** Creates a folder for a notebook that lives on a host, and downloads it. */
   joinVault(host: string, code: string, parent?: string): Promise<VaultInfo>;
