@@ -17,7 +17,13 @@ import {
   mergeText,
   type VaultTree,
 } from '@opsidian/core';
-import { MAX_FILE_BYTES, type LocalFile, type SyncState, type SyncStore } from '@opsidian/sync';
+import {
+  FolderGone,
+  MAX_FILE_BYTES,
+  type LocalFile,
+  type SyncState,
+  type SyncStore,
+} from '@opsidian/sync';
 import {
   PENDING,
   atomicWrite,
@@ -84,8 +90,14 @@ export class Vault {
   private readonly hashes = new Map<string, { stamp: string; hash: string }>();
   private relocated: ((from: string, to: string) => void) | undefined;
   private touched: (() => void) | undefined;
+  /** Polls for the folder going away or coming back; see `watchPresence`. */
+  private presence: ReturnType<typeof setInterval> | undefined;
 
-  private constructor(readonly root: string) {}
+  private constructor(
+    readonly root: string,
+    /** Which folder on disk the notebook is, so one put in its place is not taken for it. */
+    private readonly identity: number | string,
+  ) {}
 
   private remember(content: string): string {
     const revision = revisionOf(content);
@@ -95,11 +107,47 @@ export class Vault {
     return revision;
   }
 
-  static async open(directory: string): Promise<Vault> {
-    await mkdir(directory, { recursive: true });
-    const vault = new Vault(await realpath(directory));
+  /**
+   * Opens the notebook in `directory`. Without `create`, a folder that is not there is an
+   * error rather than a new, empty notebook: it may have been moved, deleted or unmounted.
+   */
+  static async open(directory: string, { create = true } = {}): Promise<Vault> {
+    if (create) await mkdir(directory, { recursive: true });
+    const root = await realpath(directory).catch((error) => {
+      if (missing(error)) throw new FolderGone();
+      throw error;
+    });
+    const info = await lstat(root);
+    if (!info.isDirectory()) throw new FolderGone();
+    const vault = new Vault(root, info.ino);
     await vault.scan(true);
     return vault;
+  }
+
+  /** Whether the notebook's folder is still where it was, and is still the same folder. */
+  async present(): Promise<boolean> {
+    const info = await lstat(this.root).catch(() => undefined);
+    return Boolean(info?.isDirectory() && info.ino === this.identity);
+  }
+  /** Refuses to go on when the folder is gone, so nothing is written in its place. */
+  private async ensure(): Promise<void> {
+    if (!(await this.present())) throw new FolderGone();
+  }
+  /**
+   * Tells `listener` when the folder goes away (false) and when it is back where it was
+   * (true), as when it is put back from the Trash. A different folder made at the same path
+   * is not the notebook, so it counts as still gone.
+   */
+  watchPresence(listener: (present: boolean) => void, every = 2000): void {
+    clearInterval(this.presence);
+    let last = true;
+    const look = async () => {
+      const now = await this.present();
+      if (now === last) return;
+      last = now;
+      listener(now);
+    };
+    this.presence = setInterval(() => void look(), every);
   }
 
   get name(): string {
@@ -121,6 +169,7 @@ export class Vault {
       throw new Error('Invalid path.');
     const parts = path.split('/');
     if (parts.some((part) => !part || part.startsWith('.'))) throw new Error('Invalid path.');
+    await this.ensure();
     let current = this.root;
     for (const [position, part] of parts.entries()) {
       current = join(current, part);
@@ -231,6 +280,7 @@ export class Vault {
   }
   close(): void {
     clearTimeout(this.timer);
+    clearInterval(this.presence);
     this.watcher?.close();
   }
 
@@ -688,6 +738,7 @@ export class Vault {
       hash: digest,
       list: () =>
         this.serial(async () => {
+          await this.ensure();
           const files: LocalFile[] = [];
           const seen = new Set<string>();
           const walk = async (directory: string, relative: string): Promise<void> => {
@@ -757,8 +808,14 @@ export class Vault {
         }),
       save: (state) =>
         this.serial(async () => {
+          // Never `recursive`: that would make the notebook's folder again if it had gone,
+          // holding nothing but a record of every file, which the next sync would take for
+          // every note deleted.
+          await this.ensure();
           const folder = join(this.root, SYNC);
-          await mkdir(folder, { recursive: true });
+          await mkdir(folder).catch((error) => {
+            if ((error as { code?: string }).code !== 'EEXIST') throw error;
+          });
           if ((await lstat(folder)).isSymbolicLink())
             throw new Error('The sync folder is not usable.');
           await atomicWrite(join(folder, 'sync.json'), JSON.stringify(state));

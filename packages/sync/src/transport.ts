@@ -13,9 +13,9 @@ type Fetch = typeof fetch;
 const trim = (host: string) => host.replace(/\/+$/, '');
 
 async function fail(response: Response): Promise<never> {
-  if (response.status === 401) throw new Unauthorized();
   const body = (await response.json().catch(() => undefined)) as
     { error?: string; moved?: unknown } | undefined;
+  if (response.status === 401) throw new Unauthorized(body?.error);
   if (response.status === 410 && typeof body?.moved === 'string') throw new Moved(body.moved);
   throw new Error(body?.error ?? `The host answered ${response.status}.`);
 }
@@ -34,6 +34,29 @@ export async function pair(
   });
   if (!response.ok) await fail(response);
   return (await response.json()) as Pairing;
+}
+
+/**
+ * Asks the host to forget this device, as it stops syncing. Resolves to whether the host
+ * heard: false when it could not be reached, so it still lists the device until it is
+ * removed there. A credential the host already refuses has nothing left to remove.
+ */
+export async function leave(host: string, token: string, request: Fetch = fetch): Promise<boolean> {
+  // Not AbortSignal.timeout, which the iPhone's JavaScript engine lacks.
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), 5000);
+  try {
+    const response = await request(`${trim(host)}/v1/device`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}` },
+      signal: stop.signal,
+    });
+    return response.ok || response.status === 401;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** The host over HTTP. */

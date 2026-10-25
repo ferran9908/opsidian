@@ -280,6 +280,7 @@ export function Settings(props: Props) {
   const [moving, setMoving] = useState<'move' | 'take-over' | 'follow'>();
   const [confirm, setConfirm] = useState<
     | { kind: 'stop' }
+    | { kind: 'leave' }
     | { kind: 'remove'; id: string; name: string }
     | { kind: 'restore'; name: string; at: number }
   >();
@@ -539,14 +540,14 @@ export function Settings(props: Props) {
           </Row>
           <Row
             name="Stop syncing here"
-            description="Every note stays on this Mac and on the host. You can join again later."
+            description="Every note stays on this Mac and on the host. This Mac is removed from the host's devices."
           >
             <Button
               variant="secondary"
               disabled={busy}
-              onClick={() => run(() => bridge.disconnect())}
+              onClick={() => setConfirm({ kind: 'leave' })}
             >
-              Stop syncing
+              Stop syncing…
             </Button>
           </Row>
         </div>
@@ -1034,6 +1035,33 @@ export function Settings(props: Props) {
           <p>
             Your devices will not be able to sync until hosting is turned on again. Nothing is
             deleted: every note stays on each device, and the host’s history stays on this Mac.
+          </p>
+        </Confirm>
+      )}
+      {confirm?.kind === 'leave' && (
+        <Confirm
+          title="Stop syncing this notebook here?"
+          action="Stop syncing"
+          onCancel={() => setConfirm(undefined)}
+          onConfirm={() => {
+            setConfirm(undefined);
+            run(async () => {
+              const host = sync.host?.replace(/^https?:\/\//, '') ?? 'The host';
+              const { hostTold } = await bridge.disconnect();
+              if (!hostTold)
+                setError(
+                  `Stopped. ${host} could not be reached, so it still lists this Mac; remove it there, in Settings → Devices or with “host remove”.`,
+                );
+            });
+          }}
+        >
+          <p>
+            Every note stays in this folder as it is, and the notebook stays on the host and your
+            other devices. Changes stop travelling either way.
+          </p>
+          <p>
+            This Mac is removed from the host’s devices, so its access cannot be used again. To sync
+            here later, use a new invitation.
           </p>
         </Confirm>
       )}

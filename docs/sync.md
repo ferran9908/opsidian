@@ -22,7 +22,7 @@ pnpm host invite "Personal"     # prints an address and a single-use code
 
 On the first Mac, open the notebook, click the sync line at the bottom of the sidebar, and enter the address and code. On the second Mac, run `invite` again for a fresh code, then choose **Connect to a notebook** on the welcome screen. Each invitation works once and expires after 15 minutes.
 
-Other commands: `host devices` lists paired devices, `host revoke DEVICE-ID` stops one syncing, `host notebooks` lists what the host holds.
+Other commands: `host devices` lists paired devices, `host remove DEVICE` stops one syncing (by its name, or its id when two share a name), `host notebooks` lists what the host holds.
 
 **The connection is not encrypted by the host.** Use it over Tailscale, on a network you trust, or behind an HTTPS reverse proxy such as Caddy. Certificates and a guided setup are milestone 5.
 
@@ -61,7 +61,19 @@ Every local change sync makes is conditional: a write or move happens only if th
 - **A crash between any two steps is recoverable.** State is saved after the files it describes. On restart the folder is ahead of the state, and the next round finds that the "difference" already matches the host. The test kills the engine at every step of a scenario that merges, clashes, moves, trashes and creates.
 - **A damaged transfer is refused.** The host checks every upload against its hash, and a device checks every download.
 - **Clocks do not matter.** Order comes from the host's log. Timestamps are for display.
-- **A folder that suddenly looks mostly empty is not trusted.** If half or more of the notebook (and at least ten files) vanish at once, the deletions are held until confirmed in the sync dialog, in case the disk was unmounted or a restore was under way.
+- **A folder that suddenly looks mostly empty is not trusted.** If half or more of the notebook (and at least ten files) vanish at once, or every file does, however few, the deletions are held until confirmed in the sync dialog, in case the disk was unmounted or a restore was under way.
+- **A notebook folder that disappears is not a deletion.** A device remembers which folder on disk its notebook is, not only its path. If the folder is deleted, moved, or on a disk that is detached, sync stops: nothing is sent, and nothing is written where it was, so the folder is never made again holding only sync's record of every file, which would look like every note deleted. An empty folder made at the same path is not taken for the notebook either. Put back where it was, it carries on. See [a notebook folder that goes missing](#a-notebook-folder-that-goes-missing).
+
+## A notebook folder that goes missing
+
+Deleting a notebook's folder on one device is not a way to delete the notebook: the host and every other device keep it. The Mac app notices within a couple of seconds, stops syncing that notebook, and says so, keeping the note on screen with any text it could not save. Then:
+
+- **Put the folder back where it was**, from the Trash for example, and it carries on by itself.
+- **Download it again** fills a new, empty folder at the same place from the host, as the same device, so no invitation is needed. The Mac remembers which host each folder synced with in its own data (`notebooks.json`, beside the encrypted credentials), because the folder's own record went with it.
+- **Find it…** opens the folder where it was moved to.
+- **Stop syncing it**, for a notebook deleted on purpose, removes this Mac from the host and forgets the credential.
+
+A folder that is missing when the app starts is never made again, empty; the welcome screen offers the same choices. The iPhone keeps its notebook inside the app, out of reach of the Files app, so it does not have this screen; its sync stops in the same way if the folder is ever not there.
 
 ## Identity and renames
 
@@ -81,7 +93,9 @@ Sync writes to the file on disk, never into the editor. The editor's own save na
 
 ## Pairing and access
 
-`invite` creates a 12-character single-use code. A device exchanges it for a credential scoped to one notebook, which the desktop app stores outside the notebook folder, encrypted with the Mac's keychain. The host stores only hashes of codes and credentials. Guessing is limited to 20 attempts a minute. A revoked device is refused immediately and keeps its files.
+`invite` creates a 12-character single-use code. A device exchanges it for a credential scoped to one notebook, which the desktop app stores outside the notebook folder, encrypted with the Mac's keychain. The host stores only hashes of codes and credentials. Guessing is limited to 20 attempts a minute. A removed device is refused immediately, told that it was removed, and keeps its files; its sync status offers to stop syncing there.
+
+A device that stops syncing (**Settings → Sync → Stop syncing** on a Mac, **Disconnect this iPhone** on the phone) asks the host to remove it, so its credential is no use to anyone afterwards, and then forgets the host. Every file stays. If the host cannot be reached, the device still stops and says that the host lists it until it is removed there: in **Settings → Devices** on a hosting Mac, or with `host remove`.
 
 The host checks the credential before it reads a request's body, counts wrong invitation codes per caller, and caps what one notebook may store (50 GB by default).
 
@@ -99,6 +113,7 @@ All paths begin `/v1`. Everything except `pair` needs `Authorization: Bearer <cr
 | `HEAD` / `GET` / `PUT /blobs/:hash` | File content, addressed by sha256. An upload that does not match its hash is refused.           |
 | `GET /files/:id/history`            | Every version of a file, newest first.                                                          |
 | `GET /whoami`                       | The device's and notebook's names, for the connection check.                                    |
+| `DELETE /device`                    | The device stops syncing: the host removes it, and refuses its credential from then on.         |
 
 A host that has moved answers every request from a device it knows with `410` and `{ moved: "http://new-address" }`. The device checks that the new address is an Opsidian host that accepts its credential, then keeps the same state and carries on there. Moving itself uses `POST /v1/move` with a code from `host move`, then `/v1/move/files`, `/file`, `/freeze`, `/database` and `/finish` with the credential that returns. While frozen, changes are answered `503`. See [hosting](hosting.md#moving-the-host-to-another-machine).
 

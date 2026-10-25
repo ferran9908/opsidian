@@ -66,6 +66,12 @@ function relocate(path: string, next: string): MoveResult {
 
 export const previewVault: VaultBridge = {
   current: async () => info,
+  missing: async () => null,
+  restoreVault: async () => info,
+  forgetMissing: async () => ({ hostTold: true }),
+  dismissMissing: async () => {},
+  closeVault: async () => {},
+  onPresence: () => () => {},
   defaultParent: async () => 'Browser preview',
   chooseParent: async () => null,
   createVault: async () => info,
@@ -131,7 +137,7 @@ export const previewVault: VaultBridge = {
   connect: async () => {
     throw new Error('Sync needs the desktop app.');
   },
-  disconnect: async () => {},
+  disconnect: async () => ({ hostTold: true }),
   confirmDeletions: async () => {},
   joinVault: async () => {
     throw new Error('Sync needs the desktop app.');

@@ -163,7 +163,7 @@ Backups and the copy on GitHub protect the real host's data whatever happens on 
 
 ## Devices
 
-On a hosting Mac, **Settings → Devices** lists every device, when it was last seen, and invitations not yet used. Removing a device stops it syncing at once; the notes on it stay there. Without the app, use `host devices` and `host revoke`.
+On a hosting Mac, **Settings → Devices** lists every device, when it was last seen, and invitations not yet used. Removing a device stops it syncing at once; the notes on it stay there. Without the app, use `host devices` and `host remove`, which takes a device's name, or its id when two share a name. A device that stops syncing by itself removes itself, so it does not linger in the list.
 
 ## Backups
 

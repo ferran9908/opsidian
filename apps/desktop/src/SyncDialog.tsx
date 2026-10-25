@@ -10,6 +10,7 @@ const field =
 /** One line saying how sync is doing, in the words the status bar also uses. */
 export function syncLabel(info: SyncInfo): string {
   if (!info.connected) return 'Sync is off';
+  if (info.removed) return 'Removed from the host';
   const waiting = info.waiting
     ? ` · ${info.waiting} ${info.waiting === 1 ? 'change' : 'changes'} waiting`
     : '';
@@ -55,6 +56,28 @@ export function SyncDetails({ info, onSettings }: { info: SyncInfo; onSettings()
             : 'Nothing'}
         </dd>
       </dl>
+      {info.removed ? (
+        <div className="border-border space-y-2.5 border-t px-4 py-3 leading-5">
+          <p>
+            The host no longer accepts this Mac, so nothing syncs. Your notes stay here as they are.
+            Stop syncing to use the notebook on its own, or ask the host for a new invitation.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void bridge
+                .disconnect()
+                .catch((reason) => setError(message(reason)))
+                .finally(() => setBusy(false));
+            }}
+          >
+            Stop syncing here
+          </Button>
+        </div>
+      ) : null}
       {info.held ? (
         <div className="border-border space-y-2.5 border-t px-4 py-3 leading-5">
           <p>

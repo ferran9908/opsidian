@@ -4,6 +4,7 @@ import {
   type Check,
   SyncEngine,
   httpTransport,
+  leave,
   pair,
   type Pairing,
   type SyncState,
@@ -29,6 +30,22 @@ export interface Secrets {
   set(device: string, token: string | undefined): Promise<void>;
 }
 
+/** What a device needs to sync a notebook folder again, without the folder itself. */
+export type Connection = Pick<
+  SyncState,
+  'host' | 'notebook' | 'notebookName' | 'device' | 'deviceName'
+>;
+
+/**
+ * Which host each notebook folder syncs with, kept outside the folders. A folder's own record
+ * goes with it if it is deleted, and this is what lets its notes be downloaded again, or this
+ * device be removed from the host, afterwards.
+ */
+export interface Connections {
+  get(root: string): Promise<Connection | undefined>;
+  set(root: string, connection: Connection | undefined): Promise<void>;
+}
+
 /** Runs sync for whichever notebook is open. */
 export class SyncService {
   private vault: Vault | undefined;
@@ -40,6 +57,8 @@ export class SyncService {
   /** Tries again to follow a host that moved, while its new address does not answer yet. */
   private retry: ReturnType<typeof setTimeout> | undefined;
   private retries = 0;
+  /** The credential is gone from this device, so only a new invitation helps. */
+  private lost = false;
 
   constructor(
     private readonly secrets: Secrets,
@@ -50,6 +69,8 @@ export class SyncService {
     private readonly request?: typeof fetch,
     /** Stands in for `crypto.randomUUID` on devices that lack it. */
     private readonly newId?: () => string,
+    /** Where each folder's host is remembered; without it, only the folder knows. */
+    private readonly connections?: Connections,
   ) {}
 
   info(): SyncInfo {
@@ -62,6 +83,7 @@ export class SyncService {
       ...(this.state.notebookName ? { notebook: this.state.notebookName } : {}),
       ...(status ?? { state: 'error' as const, waiting: 0 }),
       ...(this.problem ? { state: 'error' as const, message: this.problem } : {}),
+      ...(this.lost ? { removed: true } : {}),
     };
   }
 
@@ -74,13 +96,17 @@ export class SyncService {
     // Nothing of the old notebook's sync may still be writing when the next one starts.
     await this.engine?.stop();
     this.engine = this.transport = this.state = this.problem = undefined;
+    this.lost = false;
     this.vault = vault ?? undefined;
     const state = await vault?.syncState();
     if (vault && state) {
       this.state = state;
       const token = await this.secrets.get(state.device);
-      if (!token) this.problem = 'This device’s connection to the host was lost. Connect again.';
-      else {
+      if (!token) {
+        this.problem = 'This device’s connection to the host was lost. Connect again.';
+        this.lost = true;
+      } else {
+        await this.connections?.set(vault.root, connectionOf(state)).catch(() => {});
         this.transport = httpTransport(state.host, token, this.request);
         this.engine = new SyncEngine(
           vault.syncStore(),
@@ -124,15 +150,57 @@ export class SyncService {
     });
     await this.attach(vault);
   }
-  async disconnect(): Promise<void> {
+  /**
+   * Stops syncing the open notebook. Every file stays; the host is asked to forget this
+   * device, so its credential is no use to anyone. Resolves to whether the host heard.
+   */
+  async disconnect(): Promise<{ hostTold: boolean }> {
     const { vault, state } = this;
-    if (!vault || !state) return;
+    if (!vault || !state) return { hostTold: true };
     vault.onRelocate(undefined);
     vault.onActivity(undefined);
     await this.engine?.stop();
-    await vault.forgetSync();
+    const hostTold = await this.leave(state);
+    await vault.forgetSync().catch(() => {});
     await this.secrets.set(state.device, undefined);
+    await this.connections?.set(vault.root, undefined);
     await this.attach(vault);
+    return { hostTold };
+  }
+  private async leave(connection: Connection): Promise<boolean> {
+    const token = await this.secrets.get(connection.device);
+    return token ? leave(connection.host, token, this.request) : true;
+  }
+
+  /** The host a notebook folder synced with, even if the folder is gone. */
+  async remembered(root: string): Promise<Connection | undefined> {
+    const connection = await this.connections?.get(root);
+    return connection && (await this.secrets.get(connection.device)) ? connection : undefined;
+  }
+  /**
+   * Fills an empty folder with the notebook a folder at `root` used to sync, as this same
+   * device: for a notebook folder that was deleted. Nothing needs to be invited again.
+   */
+  async restore(vault: Vault, root: string): Promise<void> {
+    const connection = await this.remembered(root);
+    if (!connection) throw new Error('This Mac no longer knows the host for that notebook.');
+    if ((await vault.syncStore().list()).length || (await vault.syncState()))
+      throw new Error('The folder is not empty, so the notebook was not downloaded into it.');
+    await vault.syncStore().save({ version: 1, ...connection, cursor: 0, files: {} });
+    if (root !== vault.root) await this.connections?.set(root, undefined);
+    await this.attach(vault);
+  }
+  /**
+   * Gives up a notebook whose folder is gone: the host forgets this device and this device
+   * forgets the host. Resolves to whether the host heard.
+   */
+  async forget(root: string): Promise<{ hostTold: boolean }> {
+    const connection = await this.connections?.get(root);
+    if (!connection) return { hostTold: true };
+    const hostTold = await this.leave(connection);
+    await this.secrets.set(connection.device, undefined);
+    await this.connections?.set(root, undefined);
+    return { hostTold };
   }
   /**
    * Syncs with the host at another address from now on: the same host, moved to another
@@ -221,6 +289,14 @@ export class SyncService {
     return new TextDecoder().decode(await this.transport.getBlob(hash));
   }
 }
+
+const connectionOf = ({ host, notebook, notebookName, device, deviceName }: SyncState) => ({
+  host,
+  notebook,
+  ...(notebookName ? { notebookName } : {}),
+  device,
+  deviceName,
+});
 
 /** Checks that `host` is an Opsidian host that accepts this device. */
 async function verifyHost(host: string, token: string, request: typeof fetch): Promise<void> {

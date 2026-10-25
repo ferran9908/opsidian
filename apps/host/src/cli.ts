@@ -64,7 +64,7 @@ const HELP = `Opsidian ${VERSION}: a host for your notebooks, so every device sy
   ${me} host status           Whether it is running, where, and what it holds
   ${me} host invite "Name"    Let a device join a notebook (a new name makes a new notebook)
   ${me} host devices          Every device, and when it was added
-  ${me} host revoke DEVICE    Stop a device syncing
+  ${me} host remove DEVICE    Stop a device syncing, by its name or id
   ${me} host notebooks        Every notebook on the host
   ${me} host backup FOLDER    Back up every night at 3 to FOLDER, and once now
   ${me} host backup now|off   Back up now, or stop backing up
@@ -670,13 +670,22 @@ async function main(): Promise<void> {
           );
       });
     case 'revoke':
-      return withHost((host) =>
-        console.log(
-          host.revoke(words[0] ?? '')
-            ? 'That device can no longer sync. The notes on it stay there.'
-            : `No device has that id. ${me} host devices lists them.`,
-        ),
-      );
+    case 'remove':
+      return withHost((host) => {
+        const found = host.findDevices(words.join(' '));
+        if (found.length === 1) {
+          host.revoke(found[0]!.id);
+          console.log(`${found[0]!.name} can no longer sync. The notes on it stay there.`);
+        } else if (found.length) {
+          console.log('More than one device has that name. Give the id of the one to remove:');
+          for (const device of found)
+            console.log(`  ${device.id}  ${device.name}  (${device.notebook})`);
+          process.exitCode = 1;
+        } else {
+          console.log(`No device is called that. ${me} host devices lists them.`);
+          process.exitCode = 1;
+        }
+      });
     case 'notebooks':
       return withHost((host) => {
         const all = host.notebooks();

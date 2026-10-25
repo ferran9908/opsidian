@@ -35,7 +35,7 @@ The host has no sign-in of its own, so it should only be reachable by your devic
 | `host start [--port 4810] [--address IP] [--backup DIR]` | Runs the host in the background, now and after restarts     |
 | `host status`                                            | Whether it is running, where, and what it holds             |
 | `host invite "Name"`                                     | A single-use invitation to a notebook, valid for 15 minutes |
-| `host devices` / `host revoke DEVICE`                    | Every device; stop one syncing                              |
+| `host devices` / `host remove DEVICE`                    | Every device; stop one syncing, by its name or id           |
 | `host notebooks`                                         | Every notebook on the host                                  |
 | `host backup DIR` / `now` / `off`                        | Back up every night at 3 and once now; back up now; stop    |
 | `host backups` / `host restore BACKUP`                   | The backups there are; put the host back to one             |

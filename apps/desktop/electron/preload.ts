@@ -12,6 +12,12 @@ const subscribe = (channel: string) => (callback: (...args: unknown[]) => void) 
 
 contextBridge.exposeInMainWorld('opsidian', {
   current: call('vault:current'),
+  missing: call('vault:missing'),
+  restoreVault: call('vault:restore'),
+  forgetMissing: call('vault:forget-missing'),
+  dismissMissing: call('vault:dismiss-missing'),
+  closeVault: call('vault:close'),
+  onPresence: subscribe('vault:presence'),
   defaultParent: call('vault:default-parent'),
   chooseParent: call('vault:choose-parent'),
   createVault: call('vault:create'),

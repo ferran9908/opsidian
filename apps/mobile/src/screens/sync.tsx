@@ -178,8 +178,8 @@ export function Sync() {
           Stop syncing this iPhone?
         </Text>
         <Muted style={{ paddingBottom: 16 }}>
-          Every note stays on this iPhone and on the host. To sync again you will need a new
-          invitation code.
+          Every note stays on this iPhone and on the host. The host removes this iPhone from its
+          devices, so to sync again you will need a new invitation code.
         </Muted>
         <Button
           kind="danger"
