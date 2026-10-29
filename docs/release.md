@@ -66,7 +66,7 @@ npm login
 npm trust github opsidian --file release.yml --repo ferran9908/opsidian --allow-publish
 ```
 
-Until then the job fails and says to run it; the Mac and iPhone releases are separate jobs and go ahead. `npm trust list opsidian` shows the link.
+Until then the job fails and says to run it; the Mac and iPhone releases are separate jobs and go ahead. Other refusals get their own message: a `TLOG_CREATE_ENTRY_ERROR` comes from Sigstore's transparency log, not npm, and passes when the job is run again. `npm trust list opsidian` shows the link.
 
 npm does not check the link when it is made, only at the first publish, and **a link not used within two days expires**. So once it is made, run the workflow (**Run workflow** on the Actions page) rather than waiting for the next change to the host. Publishing never asks for a one-time code: the job signs in with GitHub's identity token for that run, not an npm account, which also works with the package set to "Require two-factor authentication and disallow tokens". Provenance, which shows on npm which commit and workflow built each version, is added by itself. It works only on GitHub's own runners, and only because the repository and the package are public.
 

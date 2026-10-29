@@ -177,11 +177,19 @@ jobs:
           echo "Publishing opsidian $version"
       - name: Publish
         working-directory: apps/host
+        # Says how to link the publisher only when that is what npm refused for; npm reports a
+        # missing link as not being signed in, or as the package not being found.
         run: |
-          npm publish --access public || {
-            echo "::error::npm refused. If it says the package has no trusted publisher, run once: npm trust github opsidian --file release.yml --repo ferran9908/opsidian --allow-publish"
-            exit 1
-          }
+          set -o pipefail
+          if npm publish --access public 2>&1 | tee "$RUNNER_TEMP/publish.log"; then exit 0; fi
+          if grep -qiE 'trusted publish|oidc|ENEEDAUTH|E404' "$RUNNER_TEMP/publish.log"; then
+            echo "::error::npm has no trusted publisher for this workflow. Run once: npm trust github opsidian --file release.yml --repo ferran9908/opsidian --allow-publish"
+          elif grep -q 'TLOG' "$RUNNER_TEMP/publish.log"; then
+            echo "::error::Sigstore's transparency log refused the provenance statement, which passes. Run the job again."
+          else
+            echo "::error::npm refused to publish; its error is above."
+          fi
+          exit 1
 
   iphone:
     name: iPhone app
