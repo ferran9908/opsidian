@@ -11,6 +11,7 @@ import {
   History,
   PanelLeft,
   Pencil,
+  RefreshCw,
   Share2,
   Trash2,
   X,
@@ -31,6 +32,8 @@ import type { useTheme } from './theme';
 import { NoteEditor, type NoteEditorHandle } from './NoteEditor';
 import { FolderPicker } from './FolderPicker';
 import { QuickSwitcher } from './QuickSwitcher';
+import { CommandPalette, type PaletteCommand } from './CommandPalette';
+import { copyOutcome } from './GitHub';
 import { TrashDialog } from './TrashDialog';
 import { SyncDialog } from './SyncDialog';
 import { Settings, type SettingsSection } from './Settings';
@@ -85,6 +88,7 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [sidebar, setSidebar] = useState(true);
   const [finding, setFinding] = useState(false);
+  const [commanding, setCommanding] = useState(false);
   const [moving, setMoving] = useState<string | null>(null);
   const [trashOpen, setTrashOpen] = useState(false);
   const [sync, setSync] = useState<SyncInfo>({ connected: false });
@@ -240,9 +244,14 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
       else if (key === 'n') {
         event.preventDefault();
         void create('');
-      } else if (key === 'k' || key === 'o' || key === 'p') {
+      } else if (key === 'k' || key === 'o') {
         event.preventDefault();
+        setCommanding(false);
         setFinding(true);
+      } else if (key === 'p') {
+        event.preventDefault();
+        setFinding(false);
+        setCommanding(true);
       } else if (key === ',') {
         event.preventDefault();
         setSettings((open) => open ?? 'general');
@@ -257,6 +266,32 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
     window.addEventListener('keydown', keys);
     return () => window.removeEventListener('keydown', keys);
   });
+
+  /**
+   * Has the host copy this notebook to GitHub now, whatever its schedule. The note being
+   * written is saved first, so the copy has it.
+   */
+  async function syncWithGitHub() {
+    if (!sync.connected)
+      return setNotice(
+        'This notebook does not sync with a host, so it is not kept on GitHub. Set that up in Settings → GitHub.',
+      );
+    setNotice('Syncing with GitHub…');
+    try {
+      await editor.current?.flush();
+      setNotice(copyOutcome(await bridge.syncWithGitHub()));
+    } catch (reason) {
+      fail(reason);
+    }
+  }
+  const commands: PaletteCommand[] = [
+    {
+      id: 'sync-github',
+      title: 'Sync with GitHub',
+      icon: RefreshCw,
+      run: () => void syncWithGitHub(),
+    },
+  ];
 
   async function trash(path: string) {
     const gone = (other: string) => other === path || other.startsWith(`${path}/`);
@@ -597,6 +632,7 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
           </div>
         </div>
       )}
+      {commanding && <CommandPalette commands={commands} onClose={() => setCommanding(false)} />}
       {finding && (
         <QuickSwitcher
           notes={tree.notes}

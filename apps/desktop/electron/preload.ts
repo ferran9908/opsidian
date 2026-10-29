@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('opsidian', {
   history: call('sync:history'),
   versionText: call('sync:version'),
   onSync: subscribe('sync:info'),
+  githubCopy: call('sync:github'),
+  syncWithGitHub: call('sync:github-now'),
   checkConnection: call('sync:check'),
   openTailscale: call('sync:open-tailscale'),
   hosting: call('hosting:info'),

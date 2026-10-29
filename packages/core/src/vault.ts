@@ -181,6 +181,22 @@ export interface GitHubInfo {
   /** For every notebook hosted here. */
   every: GitHubSchedule;
 }
+/**
+ * The open notebook's copy on GitHub, as its host tells any device, whichever machine hosts
+ * it. Mirrors the sync package's own type.
+ */
+export interface GitHubCopy {
+  /** `you/notes`, or the repository's address when it is not on GitHub. */
+  repository: string;
+  state: 'syncing' | 'synced' | 'offline' | 'error';
+  message?: string;
+  /** When the repository last matched the notebook, milliseconds. */
+  at?: number;
+  /** When the host plans its next round. */
+  next?: number;
+  /** Deletions held back until confirmed on the host. */
+  held?: number;
+}
 export interface GitHubRepository {
   fullName: string;
   private: boolean;
@@ -265,6 +281,13 @@ export interface VaultBridge {
   history(path: string): Promise<NoteVersion[]>;
   versionText(hash: string): Promise<string>;
   onSync(callback: (info: SyncInfo) => void): () => void;
+  /** The open notebook's copy on GitHub, from its host. Null when it is not kept there. */
+  githubCopy(): Promise<GitHubCopy | null>;
+  /**
+   * Has the host copy the open notebook to GitHub now, whatever the schedule and whichever
+   * machine hosts it. This device's edits reach the host first, so they are in the copy.
+   */
+  syncWithGitHub(): Promise<GitHubCopy>;
   /** Why sync is not working, one step at a time. Empty when not connected. */
   checkConnection(): Promise<ConnectionCheck[]>;
   openTailscale(): Promise<void>;

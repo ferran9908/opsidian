@@ -66,6 +66,20 @@ export interface Pairing {
   token: string;
 }
 
+/** How a notebook's copy in a repository, such as GitHub, is doing, as the host tells devices. */
+export interface GitHubCopy {
+  /** `you/notes` for GitHub; otherwise the repository's address. */
+  repository: string;
+  state: 'syncing' | 'synced' | 'offline' | 'error';
+  message?: string;
+  /** When the repository last matched the notebook, milliseconds, host clock. */
+  at?: number;
+  /** When the host plans its next round. */
+  next?: number;
+  /** Deletions held back until confirmed on the host. */
+  held?: number;
+}
+
 /** How a device talks to the host. Every call may fail; all of them are safe to repeat. */
 export interface Transport {
   /** `wait` seconds is how long the host may hold the request until something changes. */

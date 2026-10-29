@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type {
+  GitHubCopy,
   GitHubInfo,
   GitHubMirror,
   GitHubRepository,
@@ -301,6 +302,79 @@ export function mirrorLabel(mirror: GitHubMirror, every: GitHubSchedule = 'live'
   }
 }
 
+/** How a copy the host told this device about is doing. */
+export function copyLabel(copy: GitHubCopy): string {
+  // Only a copy on a schedule has a next round planned; a live one follows each change.
+  return mirrorLabel({ notebook: '', ...copy }, copy.next ? '1h' : 'live');
+}
+/** What asking for a round came to, for a notice. */
+export function copyOutcome(copy: GitHubCopy): string {
+  if (copy.held)
+    return `Copied to ${copy.repository}, but ${copy.held} deletions wait to be confirmed on the host.`;
+  if (copy.state === 'synced') return `Synced with GitHub: ${copy.repository} is up to date.`;
+  return `${copy.repository} could not be synced: ${copy.message ?? 'the host did not say why.'}`;
+}
+
+/**
+ * The open notebook's copy on GitHub, as its host tells it, for a Mac that does not host it:
+ * a round can be asked for from any device.
+ */
+function NotebookCopy(props: { notebook: string }) {
+  const [copy, setCopy] = useState<GitHubCopy | null>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let live = true;
+    const load = () =>
+      void bridge.githubCopy().then(
+        (next) => live && setCopy(next),
+        () => live && setCopy(null),
+      );
+    load();
+    const timer = setInterval(load, 4000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, []);
+  if (!copy) return null;
+  const syncNow = () => {
+    setBusy(true);
+    setError('');
+    bridge
+      .syncWithGitHub()
+      .then(setCopy, (reason) => setError(message(reason)))
+      .finally(() => setBusy(false));
+  };
+  const failed = copy.state === 'error' || copy.held;
+  return (
+    <section>
+      <h3 className="text-muted-foreground pb-2 text-xs font-semibold tracking-[0.08em] uppercase">
+        This notebook
+      </h3>
+      <div
+        data-github-copy={props.notebook}
+        className="border-border flex min-h-14 items-center gap-4 border-y py-2.5 text-sm"
+      >
+        <span
+          className={`size-2 shrink-0 rounded-full ${copy.state === 'synced' && !copy.held ? 'bg-success' : failed ? 'bg-destructive' : 'bg-amber-500'}`}
+        />
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <p className="font-semibold">{props.notebook}</p>
+          <p
+            className={`text-[13px] leading-5 ${failed || error ? 'text-destructive' : 'text-muted-foreground'}`}
+          >
+            {copy.repository} · {error || (busy ? 'Syncing…' : copyLabel(copy))}
+          </p>
+        </div>
+        <Button size="sm" variant="secondary" disabled={busy} onClick={syncNow}>
+          {busy ? 'Syncing…' : 'Sync now'}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 /** The choices of how often, as the menu shows them. */
 const EVERY: Record<GitHubSchedule, string> = {
   live: 'Live',
@@ -364,6 +438,7 @@ export function GitHubSettings(props: {
           {error || info.problem}
         </p>
       )}
+      {!props.hosting.hosting && <NotebookCopy notebook={props.notebook} />}
       {!props.hosting.hosting ? (
         <div className="border-border flex items-center justify-between gap-6 rounded-xl border px-5 py-4 text-sm">
           <span>

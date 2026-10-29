@@ -145,6 +145,10 @@ export const previewVault: VaultBridge = {
   history: async () => [],
   versionText: async () => '',
   onSync: () => () => {},
+  githubCopy: async () => null,
+  syncWithGitHub: async () => {
+    throw new Error('This notebook is not kept on GitHub.');
+  },
   checkConnection: async () => [],
   openTailscale: async () => {},
   hosting: async () => notHosting,

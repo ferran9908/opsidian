@@ -20,11 +20,13 @@ import {
   pathKey,
   validPath,
   type Changes,
+  type GitHubCopy,
   type Op,
   type OpResult,
   type Pairing,
   type RemoteFile,
 } from '@opsidian/sync';
+import { repositoryLabel } from './github';
 
 const sha = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 const HASH = /^[0-9a-f]{64}$/;
@@ -245,6 +247,11 @@ export class Host {
    * paused while another machine copies the data, and resumed if that move is given up.
    */
   moveHooks: { pause?(): Promise<void>; resume?(): void } = {};
+  /**
+   * The copies kept in repositories, while they run beside this host, so a device can ask for
+   * a round of its notebook's copy now. Unset while they are paused or stopped. See mirror.ts.
+   */
+  copies: { ask(notebook: string): Promise<MirrorStatus> } | undefined;
 
   constructor(private readonly options: HostOptions) {
     this.maxWait = options.maxWait ?? 25;
@@ -1173,6 +1180,39 @@ export class Host {
           .run(device.notebook, hash, body.length);
       }
       return reply.code(204).send();
+    });
+
+    // The device's notebook's copy in a repository, such as GitHub, and a round of it now,
+    // whatever the schedule. Only the copy's state: never its address as git has it.
+    const copy = (record: MirrorRecord): GitHubCopy => {
+      const { state, message, at, next, held } = record.status ?? { state: 'syncing' as const };
+      return {
+        repository: repositoryLabel(record.remote).replace(/\/\/[^/@]*@/, '//'),
+        state,
+        ...(message ? { message } : {}),
+        ...(at ? { at } : {}),
+        ...(next ? { next } : {}),
+        ...(held ? { held } : {}),
+      };
+    };
+    const copyOf = (device: Device) =>
+      this.mirrors().find((each) => each.notebook === device.notebook);
+    app.get('/v1/github', async (request) => {
+      const record = copyOf(signedIn(request));
+      return record ? { copy: copy(record) } : {};
+    });
+    app.post('/v1/github/sync', async (request) => {
+      const device = signedIn(request);
+      if (!copyOf(device)) throw refuse(409, 'This notebook is not kept on GitHub.');
+      if (!this.copies)
+        throw refuse(503, 'The host is not copying notebooks to GitHub right now. Try again soon.');
+      // A round that fails says why in the copy's state, as one on the schedule does.
+      await this.copies.ask(device.notebook).catch((error: { statusCode?: number }) => {
+        if (error?.statusCode) throw error;
+      });
+      const record = copyOf(device);
+      if (!record) throw refuse(409, 'This notebook is no longer kept on GitHub.');
+      return { copy: copy(record) };
     });
 
     app.get('/v1/files/:file/history', async (request) => {

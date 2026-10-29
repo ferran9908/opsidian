@@ -107,15 +107,17 @@ The host validates every path and refuses anything hidden, absolute, or containi
 
 All paths begin `/v1`. Everything except `pair` needs `Authorization: Bearer <credential>`.
 
-| Request                             | Purpose                                                                                         |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `POST /pair` `{code, device}`       | Spend an invitation. Returns the notebook, the device id and its credential.                    |
-| `GET /changes?since=N&wait=S`       | Latest state of each file changed after `N`. Held open up to `S` seconds when idle.             |
-| `POST /ops` `{ops}`                 | Propose changes. Each answer is `accepted`, `stale`, `path-taken`, `missing-blob` or `invalid`. |
-| `HEAD` / `GET` / `PUT /blobs/:hash` | File content, addressed by sha256. An upload that does not match its hash is refused.           |
-| `GET /files/:id/history`            | Every version of a file, newest first.                                                          |
-| `GET /whoami`                       | The device's and notebook's names, for the connection check.                                    |
-| `DELETE /device`                    | The device stops syncing: the host removes it, and refuses its credential from then on.         |
+| Request                             | Purpose                                                                                          |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `POST /pair` `{code, device}`       | Spend an invitation. Returns the notebook, the device id and its credential.                     |
+| `GET /changes?since=N&wait=S`       | Latest state of each file changed after `N`. Held open up to `S` seconds when idle.              |
+| `POST /ops` `{ops}`                 | Propose changes. Each answer is `accepted`, `stale`, `path-taken`, `missing-blob` or `invalid`.  |
+| `HEAD` / `GET` / `PUT /blobs/:hash` | File content, addressed by sha256. An upload that does not match its hash is refused.            |
+| `GET /files/:id/history`            | Every version of a file, newest first.                                                           |
+| `GET /whoami`                       | The device's and notebook's names, for the connection check.                                     |
+| `DELETE /device`                    | The device stops syncing: the host removes it, and refuses its credential from then on.          |
+| `GET /github`                       | `{copy}`: the notebook's copy in a repository and how it is doing; `{}` when it has none.        |
+| `POST /github/sync`                 | Runs a round of that copy now and answers `{copy}` once done. `409`, `429` or `503` say why not. |
 
 A host that has moved answers every request from a device it knows with `410` and `{ moved: "http://new-address" }`. The device checks that the new address is an Opsidian host that accepts its credential, then keeps the same state and carries on there. Moving itself uses `POST /v1/move` with a code from `host move`, then `/v1/move/files`, `/file`, `/freeze`, `/database` and `/finish` with the credential that returns. While frozen, changes are answered `503`. See [hosting](hosting.md#moving-the-host-to-another-machine).
 

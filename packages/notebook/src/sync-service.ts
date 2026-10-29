@@ -1,6 +1,7 @@
-import type { NoteVersion, SyncInfo } from '@opsidian/core';
+import type { GitHubCopy, NoteVersion, SyncInfo } from '@opsidian/core';
 import {
   diagnose,
+  github,
   type Check,
   SyncEngine,
   httpTransport,
@@ -287,6 +288,34 @@ export class SyncService {
   }
   confirmDeletions(): void {
     this.engine?.confirmDeletions();
+  }
+  /** The open notebook's copy on GitHub, as the host tells it. Null when it has none, or no host. */
+  async githubCopy(): Promise<GitHubCopy | null> {
+    if (!this.state) return null;
+    const { host, token } = await this.credential();
+    return (await github(host, token, this.request ? { request: this.request } : {})) ?? null;
+  }
+  /**
+   * Has the host copy the open notebook to GitHub now. What this device changed is sent to
+   * the host first, so that it is in the copy; a host that does not answer is not waited on
+   * for long, and the round then has whatever the host already had.
+   */
+  async syncWithGitHub(): Promise<GitHubCopy> {
+    const { host, token } = await this.credential();
+    await this.inStep();
+    const copy = await github(host, token, {
+      sync: true,
+      ...(this.request ? { request: this.request } : {}),
+    });
+    if (!copy) throw new Error('This notebook is not kept on GitHub.');
+    return copy;
+  }
+  private async credential(): Promise<{ host: string; token: string }> {
+    const state = this.state;
+    if (!state) throw new Error('This notebook is not syncing.');
+    const token = this.lost ? undefined : await this.secrets.get(state.device);
+    if (!token) throw new Error('This device’s connection to the host was lost. Connect again.');
+    return { host: state.host, token };
   }
   /** Works out why this device and its host are not talking. Empty when not connected. */
   async check(device: string, online: () => Promise<boolean>): Promise<Check[]> {

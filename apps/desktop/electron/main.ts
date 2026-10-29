@@ -417,6 +417,8 @@ async function start() {
   handle('sync:confirm-deletions', () => sync.confirmDeletions());
   handle('sync:history', (path) => sync.history(text(path)));
   handle('sync:version', (hash) => sync.versionText(text(hash, 64)));
+  handle('sync:github', () => sync.githubCopy());
+  handle('sync:github-now', () => sync.syncWithGitHub());
   handle('sync:check', () => sync.check('this Mac', async () => net.isOnline()));
   handle('sync:open-tailscale', async () => {
     await shell.openPath('/Applications/Tailscale.app');

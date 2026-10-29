@@ -673,6 +673,36 @@ export class Mirror {
   }
 
   /**
+   * A round a device asked for. Asks made before it starts share it; one made while it runs
+   * gets the next, so it carries edits the device sent meanwhile. Not while the repository
+   * has asked to be left alone: that is refused with when it carries on.
+   */
+  asked(): Promise<MirrorStatus> {
+    if (this.throttles && this.retryAt > this.now())
+      return Promise.reject(
+        Object.assign(
+          new Error(
+            `GitHub asked Opsidian to slow down, so the copy waits until ${clock(this.retryAt)}.`,
+          ),
+          { statusCode: 429 },
+        ),
+      );
+    if (this.queued) return this.queued;
+    const round = this.serial(() => {
+      this.queued = undefined;
+      return this.locked(() => this.round());
+    });
+    this.queued = round;
+    // A failure counts as one on the schedule would, so a throttled repository is left alone.
+    round.catch((error: unknown) => {
+      if (this.queued === round) this.queued = undefined;
+      this.failed(error, scheduleOf(this.options.host));
+    });
+    return round;
+  }
+  private queued: Promise<MirrorStatus> | undefined;
+
+  /**
    * A scheduled round. When neither side changed since the last one, it only asks the
    * repository which commit its branch is at, a single small request, and records that the
    * copy is still in step; otherwise it is a full round, and every edit since the last one
@@ -1071,6 +1101,7 @@ export class Mirrors {
   /** Starts every copy, and looks for new or removed ones every few seconds. */
   start(): void {
     this.started = true;
+    this.options.host.copies = this;
     this.refresh();
     this.timer = setInterval(() => this.refresh(), 5000);
   }
@@ -1080,6 +1111,7 @@ export class Mirrors {
    */
   async stop(flush = 0): Promise<void> {
     this.started = false;
+    if (this.options.host.copies === this) this.options.host.copies = undefined;
     clearInterval(this.timer);
     await Promise.all([...this.running.values()].map((each) => each.stop(flush)));
     this.running.clear();
@@ -1142,6 +1174,13 @@ export class Mirrors {
     } finally {
       if (!this.running.has(record.notebook)) await mirror.stop();
     }
+  }
+  /** A round of notebook `id`'s copy now, for a device that asked. See `Mirror.asked`. */
+  async ask(id: string): Promise<MirrorStatus> {
+    this.refresh();
+    const mirror = this.running.get(id);
+    if (!mirror) throw new Error('This notebook is not kept on GitHub.');
+    return mirror.asked();
   }
   /** Stops keeping a copy. The repository keeps everything it has; the local checkout goes. */
   async disconnect(name: string): Promise<void> {

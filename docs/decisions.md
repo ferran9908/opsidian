@@ -199,6 +199,14 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Web addresses in cells are drawn short.** A bare address shows without `https://` or `www.`, cut with an ellipsis past 30 characters; `[text](address)` shows its text. The whole address shows on hover and stays in the file unchanged. They cannot be opened from the table yet: that needs the editor to ask the app to open an address, which neither the Mac nor the iPhone app has.
 - **Still to check on a real iPhone:** tapping a cell to edit it, and scrolling a wide table sideways inside the note.
 
+## Syncing with GitHub on demand, from any device — 2026-10-29
+
+- **Any device can ask the host for a GitHub round now.** Raised by the user, who wanted to sync with GitHub at once instead of waiting for the hourly schedule, from whichever Mac or iPhone they are on. Before, **Sync now** worked only in the Mac app of the machine hosting the notebook; a device syncing through a server had no way to ask. The host now answers `GET /v1/github` and `POST /v1/github/sync` for the device's own notebook, with its usual credential. A device cannot connect, stop, confirm deletions or change the schedule: those stay on the host.
+- **The device's edits go first.** The app saves the note being written and syncs with the host before asking, waiting 20 seconds at most, so the commit has what was just typed.
+- **Asking is cheap for GitHub.** Asks made before a round starts share it; one made during a round gets the next. While GitHub has asked Opsidian to slow down, asking is refused (`429`) with the time it carries on, and a failed round counts as a scheduled one would. Asking is not possible while the copies are paused, as during a move (`503`).
+- **`⌘P` is the command palette, as in Obsidian; `⌘K` and `⌘O` stay the note switcher.** Chosen by the user. Its one command is **Sync with GitHub** for now; more are to be added as they come up. No separate shortcut was added. Settings → GitHub on a Mac that does not host shows the open notebook's copy with **Sync now**, and the iPhone's sync details show **Sync with GitHub now**.
+- **Still to check on a real iPhone:** the button, against a host on another machine.
+
 ## Future AI direction
 
 Potential features: organize a messy thought, answer questions over notes with citations, and suggest related notes. A machine-hosted agent and supported Codex/ChatGPT sign-in were explored. No AI integration is committed for the initial milestones; re-check product access and integration documentation when that work begins.

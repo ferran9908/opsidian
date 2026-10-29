@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import * as Network from 'expo-network';
 import type { Check as Step } from '@opsidian/sync';
-import { noteTitle, type NoteVersion } from '@opsidian/core';
+import { noteTitle, type GitHubCopy, type NoteVersion } from '@opsidian/core';
 import { disconnect, refresh, store } from '../notebook';
 import { rejected, syncLine, useNavigation } from '../nav';
 import {
@@ -56,6 +56,41 @@ export function Sync() {
   const [left, setLeft] = useState('');
   const line = syncLine(sync, colors);
   const out = rejected(sync);
+  // The notebook's copy on GitHub, which its host keeps; any device can ask for a round.
+  const [copy, setCopy] = useState<GitHubCopy | null>(null);
+  const [copying, setCopying] = useState(false);
+  const [copied, setCopied] = useState('');
+  useEffect(() => {
+    if (!sync.connected || out) return setCopy(null);
+    let live = true;
+    void store.notebook?.sync.githubCopy().then(
+      (next) => live && setCopy(next),
+      () => live && setCopy(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [sync.connected, out]);
+  const syncWithGitHub = () => {
+    setCopying(true);
+    setCopied('');
+    void store
+      .notebook!.sync.syncWithGitHub()
+      .then(
+        (next) => {
+          setCopy(next);
+          setCopied(
+            next.state === 'synced' && !next.held
+              ? `${next.repository} is up to date.`
+              : next.held
+                ? `${next.held} deletions wait to be confirmed on the host.`
+                : (next.message ?? 'GitHub could not be synced.'),
+          );
+        },
+        (reason) => setCopied(message(reason)),
+      )
+      .finally(() => setCopying(false));
+  };
   const state = !sync.connected
     ? 'Not syncing'
     : out
@@ -131,6 +166,12 @@ export function Sync() {
             <Fact label="Notebook" value={sync.notebook ?? '—'} />
             <Fact label="Host" value={(sync.host ?? '').replace(/^https?:\/\//, '')} />
             <Fact label="This device" value={sync.device ?? '—'} />
+            {copy ? (
+              <Fact
+                label="GitHub"
+                value={`${copy.repository}${copy.at ? ` · ${when(copy.at)}` : ''}`}
+              />
+            ) : null}
             <View style={{ borderTopWidth: 0.5, borderTopColor: colors.border }} />
             <Muted style={{ fontSize: 15, lineHeight: 23, paddingTop: 22 }}>
               While Opsidian is open, changes travel in about a second. When it is closed, they wait
@@ -152,6 +193,19 @@ export function Sync() {
               label="See what is in the way"
               onPress={() => navigation.push({ name: 'check' })}
             />
+          ) : null}
+          {copy ? (
+            <>
+              <Button
+                kind="secondary"
+                label={copying ? 'Syncing with GitHub…' : 'Sync with GitHub now'}
+                disabled={copying}
+                onPress={syncWithGitHub}
+              />
+              {copied ? (
+                <Muted style={{ fontSize: 13, textAlign: 'center' }}>{copied}</Muted>
+              ) : null}
+            </>
           ) : null}
           {sync.held ? (
             <Button

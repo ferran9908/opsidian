@@ -142,6 +142,28 @@ app.on('will-quit', () => {
   // Hourly unless changed. Live makes the rest of this test quick.
   assert.equal(await evaluate('document.querySelector("#github-every").value'), '1h');
   assert.equal((await info()).every, '1h');
+
+  // On the hourly schedule, a note goes to GitHub at once only when asked: ⌘P, then the command.
+  await click('Close settings');
+  writeFileSync(join(vault, 'Asked.md'), 'sent when asked\n');
+  await evaluate(
+    `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', metaKey: true, bubbles: true }))`,
+  );
+  await waitFor(
+    () => evaluate('Boolean(document.querySelector(\'[data-command="sync-github"]\'))'),
+    'the command palette',
+  );
+  await shot('4a-command-palette');
+  await evaluate(`document.querySelector('[data-command="sync-github"]').click()`);
+  await waitFor(
+    () => shows(`Synced with GitHub: ${USER.login}/my-notes is up to date.`),
+    'the notice',
+  );
+  assert.ok(tracked(mine).includes('Asked.md'));
+  pass('⌘P → Sync with GitHub sent a new note at once, on the hourly schedule');
+  await click('Settings');
+  await button('GitHub');
+  await waitFor(() => evaluate('Boolean(document.querySelector("#github-every"))'), 'GitHub again');
   await evaluate(`(() => {
     const select = document.querySelector('#github-every');
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, 'live');

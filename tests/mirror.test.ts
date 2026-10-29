@@ -18,7 +18,14 @@ import {
 import { statusLine } from '../apps/host/src/github-cli';
 import { parseRepository, repositoryName } from '../apps/host/src/github';
 import { Vault } from '../apps/desktop/electron/vault';
-import { SyncEngine, httpTransport, pair, type SyncState } from '../packages/sync/src/index';
+import {
+  SyncEngine,
+  github as askGitHub,
+  httpTransport,
+  pair,
+  type SyncState,
+} from '../packages/sync/src/index';
+import { SyncService } from '../packages/notebook/src/index';
 
 const cleanup: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
@@ -699,6 +706,103 @@ describe('copying on a schedule', () => {
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(logged).toHaveLength(1);
     expect(remoteFiles(github)).toEqual(['Note.md']);
+  });
+});
+
+/** A device as the apps run one, through the sync service, which any app asks GitHub through. */
+async function app(server: Server, notebook = 'Notes') {
+  const root = await folder();
+  const vault = await Vault.open(root);
+  const tokens = new Map<string, string>();
+  const sync = new SyncService(
+    {
+      get: async (id) => tokens.get(id),
+      set: async (id, token) => void (token ? tokens.set(id, token) : tokens.delete(id)),
+    },
+    () => 'iPhone',
+    () => {},
+  );
+  const { code } = server.host.invite(notebook);
+  await sync.adopt(vault, server.url, await sync.invite(server.url, code));
+  cleanup.push(async () => {
+    await sync.attach(null);
+    vault.close();
+  });
+  return { root, sync, token: () => [...tokens.values()][0]! };
+}
+
+describe('a round asked for from a device', () => {
+  it('sends what the device just wrote to the repository, whatever the schedule', async () => {
+    const github = await repository({ 'Note.md': 'one\n' });
+    const server = await startHost();
+    await server.mirrors.connect('Notes', github.remote);
+    const phone = await app(server);
+    // Copies that do not run beside the host, as while it is being moved, cannot be asked.
+    await expect(phone.sync.syncWithGitHub()).rejects.toThrow('not copying notebooks');
+
+    server.mirrors.start();
+    expect(await phone.sync.githubCopy()).toMatchObject({
+      repository: github.remote,
+      state: 'synced',
+    });
+    // On the hourly schedule, with the last round just made: only asking sends it now.
+    await writeFile(join(phone.root, 'Idea.md'), 'from the phone\n');
+    const copy = await phone.sync.syncWithGitHub();
+    expect(copy).toMatchObject({ repository: github.remote, state: 'synced' });
+    expect(copy.next).toBeGreaterThan(Date.now() + 50 * 60_000);
+    github.pull();
+    expect(await github.read('Idea.md')).toBe('from the phone\n');
+    expect(github.log()[0]).toBe('Add Idea');
+  });
+
+  it('shares a round among devices that ask before it starts', async () => {
+    const github = await repository({ 'Note.md': 'one\n' });
+    const server = await startHost();
+    await server.mirrors.connect('Notes', github.remote);
+    server.mirrors.start();
+    const [mac, phone] = [await app(server), await app(server)];
+    await writeFile(join(mac.root, 'Mac.md'), 'mac\n');
+    await writeFile(join(phone.root, 'Phone.md'), 'phone\n');
+    const copies = await Promise.all([mac.sync.syncWithGitHub(), phone.sync.syncWithGitHub()]);
+    expect(copies.map((each) => each.state)).toEqual(['synced', 'synced']);
+    github.pull();
+    expect(github.tracked()).toEqual(['Mac.md', 'Note.md', 'Phone.md']);
+  });
+
+  it('says so for a notebook that is not kept on GitHub, or a host too old to ask', async () => {
+    const server = await startHost();
+    server.mirrors.start();
+    const phone = await app(server, 'Private');
+    expect(await phone.sync.githubCopy()).toBeNull();
+    await expect(phone.sync.syncWithGitHub()).rejects.toThrow('not kept on GitHub');
+    const old = async () => new Response('{}', { status: 404 });
+    await expect(askGitHub(server.url, 'token', { sync: true, request: old })).rejects.toThrow(
+      'too old',
+    );
+  });
+
+  it('leaves the repository alone while it has asked Opsidian to slow down', async () => {
+    const github = await repository({ 'Note.md': 'one\n' });
+    const server = await startHost();
+    const { notebook } = await server.mirrors.connect('Notes', github.remote).then(() => ({
+      notebook: server.host.mirrors()[0]!.notebook,
+    }));
+    server.mirrors.start();
+    const phone = await app(server);
+    // The repository answers this round with "too many requests".
+    const mirror = (server.mirrors as unknown as { running: Map<string, Mirror> }).running.get(
+      notebook,
+    )!;
+    Object.assign(mirror, {
+      round: async () => {
+        throw new GitError('GitHub asked Opsidian to slow down.', true, 0);
+      },
+    });
+    const first = await askGitHub(server.url, phone.token(), { sync: true });
+    expect(first).toMatchObject({ state: 'offline', message: /try again at/ });
+    await expect(askGitHub(server.url, phone.token(), { sync: true })).rejects.toThrow(
+      'slow down, so the copy waits until',
+    );
   });
 });
 

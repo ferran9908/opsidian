@@ -2,6 +2,7 @@ import {
   Moved,
   Unauthorized,
   type Changes,
+  type GitHubCopy,
   type Op,
   type OpResult,
   type Pairing,
@@ -97,4 +98,43 @@ export function httpTransport(host: string, token: string, request: Fetch = fetc
       return ((await response.json()) as { versions: RemoteFile[] }).versions;
     },
   };
+}
+
+/**
+ * The device's notebook's copy on GitHub, or undefined when it is not kept there. With
+ * `sync`, the host runs a round of it now, whatever the schedule, and answers once it is done.
+ */
+export async function github(
+  host: string,
+  token: string,
+  options: { sync?: boolean; request?: Fetch } = {},
+): Promise<GitHubCopy | undefined> {
+  // Not AbortSignal.timeout, which the iPhone's JavaScript engine lacks. A round sends and
+  // fetches the notebook's changes, so it is given longer than a question.
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), options.sync ? 120_000 : 10_000);
+  let response: Response;
+  try {
+    response = await (options.request ?? fetch)(
+      `${trim(host)}/v1/github${options.sync ? '/sync' : ''}`,
+      {
+        method: options.sync ? 'POST' : 'GET',
+        headers: { authorization: `Bearer ${token}` },
+        signal: stop.signal,
+      },
+    );
+  } catch {
+    throw new Error(
+      stop.signal.aborted
+        ? 'The host took too long to answer. The copy may still finish there.'
+        : 'The host could not be reached.',
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+  // A host from before devices could ask.
+  if (response.status === 404)
+    throw new Error('The host is too old to sync with GitHub from here. Update it first.');
+  if (!response.ok) await fail(response);
+  return ((await response.json()) as { copy?: GitHubCopy }).copy;
 }
