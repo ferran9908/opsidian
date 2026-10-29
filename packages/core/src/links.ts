@@ -218,3 +218,15 @@ export function linkTarget(path: string, resolve: (target: string) => string | u
   const title = noteTitle(path);
   return resolve(title) === path ? title : path.replace(/\.md$/i, '');
 }
+
+/**
+ * A web address as a table shows it: without `https://`, `www.` or a closing slash, and cut
+ * with an ellipsis past `max` characters. Only what is drawn changes; the note keeps the address.
+ */
+export function shortUrl(url: string, max = 30): string {
+  const text = url
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '')
+    .replace(/\/$/, '');
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}

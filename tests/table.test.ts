@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cellOffset, parseTable, splitLink, splitRow } from '../packages/core/src/index';
+import { cellOffset, parseTable, shortUrl, splitLink, splitRow } from '../packages/core/src/index';
 
 describe('tables', () => {
   it('reads the header, body and alignment', () => {
@@ -41,5 +41,14 @@ describe('tables', () => {
     expect(cellOffset('a | b', 0)).toBe(0);
     expect('a | b'.slice(cellOffset('a | b', 1))).toBe('b');
     expect(cellOffset('| a |', 5)).toBe(5);
+  });
+  it('shortens a web address for display', () => {
+    expect(shortUrl('https://ferran.sh/writing/qm-review')).toBe('ferran.sh/writing/qm-review');
+    expect(shortUrl('http://www.example.com/')).toBe('example.com');
+    expect(shortUrl('https://x.com/ferran9908/status/2085841727500460321')).toBe(
+      'x.com/ferran9908/status/20858…',
+    );
+    expect(shortUrl('https://x.com/ferran9908/status/2085841727500460321')).toHaveLength(30);
+    expect(shortUrl('someone@example.com')).toBe('someone@example.com');
   });
 });

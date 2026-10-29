@@ -58,7 +58,7 @@ On these numbers the in-memory index is enough, so the planned SQLite index is n
 - **Heading and block completion.** `[[Note#` does not suggest headings, and `[[Note^block]]` references are not supported.
 - **Embeds inside embeds** are shown as links, and embeds are read-only.
 - **Footnotes and callouts** are shown as plain Markdown in Live Preview.
-- **Tables are edited as Markdown.** Cells cannot be edited in place, and rows and columns are added by typing bars. Tables inside quotes and lists, and Markdown links and images inside cells, are shown as written.
+- **Tables are edited as Markdown.** Cells cannot be edited in place, and rows and columns are added by typing bars. Tables inside quotes and lists, and images inside cells, are shown as written. Web addresses in cells are drawn short, with the whole address on hover, and cannot be opened from the table. Columns cannot be resized.
 - **Code blocks made by indentation alone.** Links inside one are treated as real links; fenced blocks and code spans are not.
 
 ## Checks

@@ -222,11 +222,21 @@
   border: 1px solid var(--border);
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  /* A word is broken only when it cannot fit on a line of its own. */
+  overflow-wrap: break-word;
+}
+.op-table .op-cell-short {
+  white-space: nowrap;
+}
+.op-table .op-cell-long {
+  min-width: 10em;
 }
 .op-table th {
   font-weight: 600;
   background: var(--muted);
+}
+.op-weblink {
+  color: var(--link);
 }
 .cm-placeholder {
   color: var(--muted-foreground);
