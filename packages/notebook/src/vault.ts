@@ -724,7 +724,11 @@ export class Vault {
   }
   /** Forgets the host. Every file stays exactly as it is. */
   async forgetSync(): Promise<void> {
-    await rm(join(this.root, SYNC, 'sync.json'), { force: true });
+    await Vault.forgetSync(this.root);
+  }
+  /** Forgets which host a notebook folder synced with, without opening it. Its notes stay. */
+  static async forgetSync(root: string): Promise<void> {
+    await rm(join(root, SYNC, 'sync.json'), { force: true });
   }
 
   /** The notebook as sync sees it: every visible file, changed only by conditional writes. */

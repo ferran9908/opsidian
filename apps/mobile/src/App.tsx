@@ -124,6 +124,14 @@ function Stack() {
   useEffect(() => {
     if (current) prefs.set({ last: current });
   }, [current]);
+  // The notebook was deleted from this iPhone on disconnecting: start again from nothing.
+  useEffect(() => {
+    if (notebook) return;
+    started.current = false;
+    setTrail(EMPTY);
+    setRoutes([{ name: 'notes' }]);
+    setWelcoming('welcome');
+  }, [notebook]);
   // Start on a note as soon as there is one: at once, or when the first download brings some.
   useEffect(() => {
     if (started.current || !notebook) return;

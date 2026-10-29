@@ -130,6 +130,28 @@ async function start(): Promise<Notebook> {
   return notebook;
 }
 
+/**
+ * Stops syncing this iPhone. With `empty`, its notebook is then deleted from the phone, but
+ * only if every note in it had reached the host first (`emptied`); otherwise it stays. The app
+ * then starts afresh, as before it held a notebook.
+ */
+export async function disconnect(empty: boolean): Promise<{ hostTold: boolean; emptied: boolean }> {
+  const opened = notebook;
+  if (!opened) return { hostTold: true, emptied: false };
+  const { hostTold, inStep } = await opened.sync.disconnect({ settle: empty });
+  if (!empty || !inStep || notebook !== opened) return { hostTold, emptied: false };
+  await opened.sync.attach(null);
+  opened.vault.close();
+  notebook = undefined;
+  if (home.exists) home.delete();
+  tree = { notes: [], folders: [], images: [] };
+  info = { connected: false };
+  changedNotes = [];
+  version++;
+  announce();
+  return { hostTold, emptied: true };
+}
+
 /** Spends an invitation and ties this iPhone's notebook to that host. */
 export async function connect(host: string, code: string): Promise<void> {
   const address = hostAddress(host);

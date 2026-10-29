@@ -12,7 +12,7 @@ import {
   Tray,
 } from 'electron';
 import { Hosting } from './hosting';
-import { lstat, readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
+import { lstat, readFile, writeFile, mkdir, readdir, rm } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -25,7 +25,7 @@ import {
 } from '@opsidian/core';
 import { themes } from '@opsidian/theme';
 import { FolderGone, Vault } from './vault';
-import { desktopSync, hostAddress } from './sync';
+import { desktopSync, hostAddress, rememberedFolders } from './sync';
 import { Updates } from './updates';
 
 protocol.registerSchemesAsPrivileged([
@@ -386,7 +386,34 @@ async function start() {
     await sync.adopt(open(), address, await sync.invite(address, text(code, 100)));
     return sync.info();
   });
-  handle('sync:disconnect', () => sync.disconnect());
+  /**
+   * Stops syncing the open notebook. With `trash`, its folder then goes to the Trash, but only
+   * once every note in it is on the host; a notebook this Mac hosts itself is never trashed.
+   */
+  handle('sync:disconnect', async (options) => {
+    const trash = (options as { trash?: unknown } | undefined)?.trash === true;
+    const current = vault;
+    const own = sync.info().host === hosting.localAddress;
+    if (!trash || !current || own) return { ...(await sync.disconnect()), trashed: false };
+    const { hostTold, inStep } = await sync.disconnect({ settle: true });
+    if (!inStep || vault !== current) return { hostTold, trashed: false };
+    // Closed first, so the folder going is not taken for one that went missing.
+    await sync.attach(null);
+    current.close();
+    vault = null;
+    missing = null;
+    await rememberVault(undefined);
+    try {
+      await shell.trashItem(current.root);
+    } catch (reason) {
+      // Left open as it was, only no longer syncing.
+      await use(current.root, true, false);
+      throw new Error(
+        `Stopped syncing, but the folder could not be moved to the Trash: ${(reason as Error).message}`,
+      );
+    }
+    return { hostTold, trashed: true };
+  });
   handle('sync:confirm-deletions', () => sync.confirmDeletions());
   handle('sync:history', (path) => sync.history(text(path)));
   handle('sync:version', (hash) => sync.versionText(text(hash, 64)));
@@ -502,6 +529,33 @@ async function start() {
   handle('updates:check', () => updates.check());
   handle('updates:download', () => updates.download());
   handle('updates:restart', () => updates.restart());
+  /**
+   * Starts over, as on a fresh install. Every notebook folder keeps its notes and stops
+   * syncing; everything Opsidian kept beside them goes, and the app starts again.
+   */
+  handle('app:reset', async () => {
+    const userData = app.getPath('userData');
+    await hosting.reset(async () => {
+      // Hosts are told, so they no longer list this Mac. The open notebook first: its host
+      // may be the one about to go.
+      if (sync.info().connected) await sync.disconnect().catch(() => {});
+      for (const root of await rememberedFolders(userData)) {
+        if (root === vault?.root) continue;
+        await sync.forget(root).catch(() => {});
+        await Vault.forgetSync(root).catch(() => {});
+      }
+    });
+    await sync.attach(null);
+    vault?.close();
+    vault = null;
+    for (const name of ['settings.json', 'notebooks.json', 'devices.json'])
+      await rm(join(userData, name), { force: true });
+    // The window's own preferences: theme, editor mode, the graph's settings.
+    await session.defaultSession.clearStorageData({ storages: ['localstorage'] });
+    if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: false });
+    app.relaunch();
+    app.exit(0);
+  });
   handle('app:version', () => app.getVersion());
   handle('app:help', () => shell.openExternal('https://github.com/ferran9908/opsidian#readme'));
   handle('edit:clipboard', (action) => {

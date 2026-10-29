@@ -252,9 +252,12 @@ export interface VaultBridge {
   syncInfo(): Promise<SyncInfo>;
   /** Connects the open notebook to a host using a single-use invitation. */
   connect(host: string, code: string): Promise<SyncInfo>;
-  /** Stops syncing. The notes stay on this device and on the host. */
-  /** Stops syncing here. `hostTold` is false when the host could not be reached to forget it. */
-  disconnect(): Promise<{ hostTold: boolean }>;
+  /**
+   * Stops syncing here. `hostTold` is false when the host could not be reached to forget it.
+   * With `trash`, the folder then goes to the system Trash, but only if every note in it had
+   * reached the host (`trashed`); otherwise it stays as it is.
+   */
+  disconnect(options?: { trash?: boolean }): Promise<{ hostTold: boolean; trashed?: boolean }>;
   confirmDeletions(): Promise<void>;
   /** Creates a folder for a notebook that lives on a host, and downloads it. */
   joinVault(host: string, code: string, parent?: string): Promise<VaultInfo>;
@@ -278,6 +281,12 @@ export interface VaultBridge {
    * backups are set up. Devices keep their notes; the open notebook stops syncing with it.
    */
   deleteHostedNotebook(name: string): Promise<HostingInfo>;
+  /**
+   * Puts Opsidian on this Mac back as it was when first installed: the host and everything it
+   * holds, settings, the GitHub sign-in, and every connection to a host. Notebook folders and
+   * their notes stay. Backs the host up first when backups are set up; then the app restarts.
+   */
+  resetApp(): Promise<void>;
   backups(): Promise<BackupInfo>;
   /** Asks for a folder. Null if cancelled. */
   chooseBackupFolder(): Promise<BackupInfo | null>;

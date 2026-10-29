@@ -81,7 +81,7 @@ describe('stopping syncing on a device', () => {
     await writeFile(join(a.vault.root, 'Note.md'), 'mine');
     a.service.kick();
     await a.synced();
-    expect(await a.service.disconnect()).toEqual({ hostTold: true });
+    expect(await a.service.disconnect()).toEqual({ hostTold: true, inStep: false });
     expect(server.host.devices()).toMatchObject([{ name: 'Mac A', revoked: true }]);
     expect(a.info).toEqual({ connected: false });
     expect(a.secrets.size).toBe(0);
@@ -95,7 +95,7 @@ describe('stopping syncing on a device', () => {
     const a = await joined(server, 'Mac A');
     await a.synced();
     await server.host.close();
-    expect(await a.service.disconnect()).toEqual({ hostTold: false });
+    expect(await a.service.disconnect()).toEqual({ hostTold: false, inStep: false });
     expect(a.info).toEqual({ connected: false });
     expect(a.secrets.size).toBe(0);
   });
@@ -108,8 +108,75 @@ describe('stopping syncing on a device', () => {
     a.service.kick();
     for (let wait = 0; wait < 50 && !a.info.removed; wait++) await pause(50);
     expect(a.info).toMatchObject({ connected: true, state: 'error', removed: true });
-    expect(await a.service.disconnect()).toEqual({ hostTold: true });
+    expect(await a.service.disconnect()).toEqual({ hostTold: true, inStep: false });
     expect(a.info).toEqual({ connected: false });
+  });
+});
+
+describe('stopping syncing to delete the copy here', () => {
+  /** What the host holds, as a second device downloading it sees. */
+  async function onHost(server: Awaited<ReturnType<typeof startHost>>) {
+    const other = await joined(server, 'Checker');
+    await other.synced();
+    const notes: Record<string, string> = {};
+    for (const name of ['Note.md', 'Later.md'])
+      if (existsSync(join(other.vault.root, name)))
+        notes[name] = await readFile(join(other.vault.root, name), 'utf8');
+    return notes;
+  }
+
+  it('sends what is left, then says the folder matches the host', async () => {
+    const server = await startHost();
+    const a = await joined(server, 'Mac A');
+    await writeFile(join(a.vault.root, 'Note.md'), 'first');
+    a.service.kick();
+    await a.synced();
+    // Saved just before leaving, with no time for the usual round to pick it up.
+    await writeFile(join(a.vault.root, 'Later.md'), 'written last');
+    expect(await a.service.disconnect({ settle: true })).toEqual({ hostTold: true, inStep: true });
+    expect(await onHost(server)).toEqual({ 'Note.md': 'first', 'Later.md': 'written last' });
+  });
+
+  it('says it does not when the host cannot be reached', async () => {
+    const server = await startHost();
+    const a = await joined(server, 'Mac A');
+    await a.synced();
+    await server.host.close();
+    await writeFile(join(a.vault.root, 'Note.md'), 'only here');
+    expect(await a.service.disconnect({ settle: true })).toEqual({
+      hostTold: false,
+      inStep: false,
+    });
+  });
+
+  it('says it does not when a file in it cannot be synced', async () => {
+    const server = await startHost();
+    const a = await joined(server, 'Mac A');
+    await a.synced();
+    // A name with a leading space never reaches the host.
+    await writeFile(join(a.vault.root, ' Odd name.md'), 'only here');
+    expect(await a.service.disconnect({ settle: true })).toMatchObject({ inStep: false });
+  });
+
+  it('says it does not when the host has removed it', async () => {
+    const server = await startHost();
+    const a = await joined(server, 'Mac A');
+    await a.synced();
+    server.host.revoke(server.host.devices()[0]!.id);
+    expect(await a.service.disconnect({ settle: true })).toMatchObject({ inStep: false });
+  });
+
+  it('holds back when deletions are waiting to be confirmed', async () => {
+    const server = await startHost();
+    const a = await joined(server, 'Mac A');
+    await writeFile(join(a.vault.root, 'Note.md'), 'text');
+    await writeFile(join(a.vault.root, 'Later.md'), 'more');
+    a.service.kick();
+    await a.synced();
+    // Every file vanishing at once is held back, not sent as deletions.
+    await rm(join(a.vault.root, 'Note.md'));
+    await rm(join(a.vault.root, 'Later.md'));
+    expect(await a.service.disconnect({ settle: true })).toMatchObject({ inStep: false });
   });
 });
 

@@ -60,6 +60,7 @@ contextBridge.exposeInMainWorld('opsidian', {
   cancelInvitation: call('hosting:cancel-invitation'),
   removeDevice: call('hosting:remove-device'),
   deleteHostedNotebook: call('hosting:delete-notebook'),
+  resetApp: call('app:reset'),
   backups: call('backup:info'),
   chooseBackupFolder: call('backup:choose-folder'),
   setBackupSchedule: call('backup:schedule'),

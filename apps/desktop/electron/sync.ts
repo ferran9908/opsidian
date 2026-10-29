@@ -67,6 +67,15 @@ function folders(userData: string): Connections {
   };
 }
 
+/** Every notebook folder this Mac remembers a host for, for starting over. */
+export async function rememberedFolders(userData: string): Promise<string[]> {
+  try {
+    return Object.keys(JSON.parse(await readFile(join(userData, 'notebooks.json'), 'utf8')));
+  } catch {
+    return [];
+  }
+}
+
 /** Sync for the Mac app. The device is named after the Mac. */
 export const desktopSync = (userData: string, notify: (info: SyncInfo) => void) =>
   new SyncService(

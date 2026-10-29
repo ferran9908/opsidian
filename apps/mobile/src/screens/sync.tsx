@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import * as Network from 'expo-network';
 import type { Check as Step } from '@opsidian/sync';
 import { noteTitle, type NoteVersion } from '@opsidian/core';
-import { refresh, store } from '../notebook';
+import { disconnect, refresh, store } from '../notebook';
 import { rejected, syncLine, useNavigation } from '../nav';
 import {
   Button,
@@ -51,6 +51,9 @@ export function Sync() {
   const navigation = useNavigation();
   const { sync, tree } = useStore();
   const [leaving, setLeaving] = useState(false);
+  /** Whether disconnecting also deletes the notebook from this iPhone. */
+  const [empty, setEmpty] = useState(true);
+  const [left, setLeft] = useState('');
   const line = syncLine(sync, colors);
   const out = rejected(sync);
   const state = !sync.connected
@@ -165,10 +168,11 @@ export function Sync() {
                 onPress={() => setLeaving(true)}
               />
               <Muted style={{ fontSize: 13, textAlign: 'center' }}>
-                Your notes stay here and on the host.
+                Your notes stay on the host.
               </Muted>
             </>
           ) : null}
+          {left ? <Muted style={{ fontSize: 13, textAlign: 'center' }}>{left}</Muted> : null}
         </View>
       </ScrollView>
       <Sheet open={leaving} onClose={() => setLeaving(false)}>
@@ -178,15 +182,39 @@ export function Sync() {
           Stop syncing this iPhone?
         </Text>
         <Muted style={{ paddingBottom: 16 }}>
-          Every note stays on this iPhone and on the host. The host removes this iPhone from its
-          devices, so to sync again you will need a new invitation code.
+          The notebook stays on the host and your other devices. The host removes this iPhone from
+          its devices, so to sync again you will need a new invitation code.
         </Muted>
+        {out ? (
+          <Muted style={{ paddingBottom: 16 }}>Every note stays on this iPhone.</Muted>
+        ) : (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 16 }}>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ fontSize: 17, color: colors.foreground }}>
+                Delete the notes from this iPhone
+              </Text>
+              <Muted style={{ fontSize: 13 }}>
+                Only once every note has reached the host. If anything has not, they stay here.
+              </Muted>
+            </View>
+            <Switch value={empty} onValueChange={setEmpty} />
+          </View>
+        )}
         <Button
           kind="danger"
-          label="Disconnect"
+          label={empty && !out ? 'Disconnect and delete' : 'Disconnect'}
           onPress={() => {
             setLeaving(false);
-            void store.notebook?.sync.disconnect().catch(() => {});
+            setLeft('');
+            void disconnect(empty && !out).then(
+              ({ emptied }) => {
+                if (empty && !out && !emptied)
+                  setLeft(
+                    'Disconnected. Your notes were kept on this iPhone, because not every change had reached the host.',
+                  );
+              },
+              (reason) => setLeft(message(reason)),
+            );
           }}
         />
       </Sheet>

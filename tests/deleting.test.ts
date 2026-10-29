@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -260,7 +260,7 @@ describe('deleting a notebook kept on GitHub', () => {
   });
 });
 
-describe('host delete, on the command line', () => {
+describe('host delete and host reset, on the command line', () => {
   let cli: string;
   beforeAll(async () => {
     cli = join(await mkdtemp(join(tmpdir(), 'opsidian-cli-')), 'opsidian.mjs');
@@ -279,13 +279,17 @@ describe('host delete, on the command line', () => {
   });
   afterAll(() => rm(dirname(cli), { recursive: true, force: true }));
 
-  const run = (home: string, ...args: string[]) => {
-    const done = spawnSync(process.execPath, [cli, 'host', ...args], {
-      env: { ...process.env, OPSIDIAN_HOME: home },
-      encoding: 'utf8',
+  /** Runs the command without blocking this process, where the test's host answers. */
+  const run = (home: string, ...args: string[]) =>
+    new Promise<{ code: number | null; out: string }>((resolve) => {
+      const child = spawn(process.execPath, [cli, 'host', ...args], {
+        env: { ...process.env, OPSIDIAN_HOME: home },
+      });
+      let out = '';
+      child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));
+      child.stderr.on('data', (chunk: Buffer) => (out += chunk.toString()));
+      child.on('close', (code) => resolve({ code, out }));
     });
-    return { code: done.status, out: done.stdout + done.stderr };
-  };
 
   it('says what goes and deletes nothing until --yes; backs up first when backups are on', async () => {
     const home = await folder();
@@ -300,7 +304,7 @@ describe('host delete, on the command line', () => {
     await mac.write('Note.md', 'text');
     await mac.engine.sync();
 
-    const asked = run(home, 'delete', 'personal');
+    const asked = await run(home, 'delete', 'personal');
     expect(asked.code).toBe(1);
     expect(asked.out).toContain('Deleting “Personal” takes from this host:');
     expect(asked.out).toContain('1 file, and their whole history: 1 version');
@@ -309,7 +313,7 @@ describe('host delete, on the command line', () => {
     expect(asked.out).toContain('host delete "Personal" --yes');
     expect(host.notebooks()).toHaveLength(2);
 
-    const missing = run(home, 'delete', 'Nope', '--yes');
+    const missing = await run(home, 'delete', 'Nope', '--yes');
     expect(missing.code).toBe(1);
     expect(missing.out).toContain('There is no notebook called “Nope” here.');
 
@@ -322,10 +326,10 @@ describe('host delete, on the command line', () => {
         backup: { folder: backups, keep: 3, hour: 3 },
       }),
     );
-    expect(run(home, 'delete', 'Personal').out).toContain(
+    expect((await run(home, 'delete', 'Personal')).out).toContain(
       `The host is backed up first, to ${backups}; restoring that backup brings it back.`,
     );
-    const done = run(home, 'delete', 'Personal', '--yes');
+    const done = await run(home, 'delete', 'Personal', '--yes');
     expect(done.out).toContain('Backed up the host first');
     expect(done.out).toContain('Deleted “Personal” from the host.');
     expect(done.code).toBe(0);
@@ -335,5 +339,58 @@ describe('host delete, on the command line', () => {
     const [backup] = await listBackups(backups);
     expect(backup!.notebooks.map((each) => each.name)).toEqual(['Personal', 'Work']);
     expect(await readdir(join(data, 'blobs'))).toHaveLength(0);
+  });
+
+  it('resets: says what goes, refuses a host still running, backs up, then wipes', async () => {
+    const home = await folder();
+    const data = join(home, 'host');
+    let host = new Host({ dataDir: data });
+    const url = await host.listen(0, '127.0.0.1');
+    cleanup.push(() => host.close());
+    const mac = await device({ host, url, data }, 'Mac', 'Personal');
+    await device({ host, url, data }, 'Phone', 'Work');
+    await mac.write('Note.md', 'text');
+    await mac.engine.sync();
+    const backups = join(home, '..', `${home.split('/').at(-1)}-backups`);
+    cleanup.push(() => rm(backups, { recursive: true, force: true }));
+    // Where this host listens, as `host start` would have written it.
+    await writeFile(
+      join(home, 'host.json'),
+      JSON.stringify({
+        port: Number(new URL(url).port),
+        address: '127.0.0.1',
+        backup: { folder: backups, keep: 3, hour: 3 },
+      }),
+    );
+
+    const asked = await run(home, 'reset');
+    expect(asked.code).toBe(1);
+    expect(asked.out).toContain(`Resetting takes everything in ${home}:`);
+    expect(asked.out).toContain('Personal (1 files), Work (0 files), with their whole history');
+    expect(asked.out).toContain('Mac, Phone, which stop syncing and keep the notes they have');
+    expect(asked.out).toContain(`The host is backed up first, to ${backups}.`);
+    expect(asked.out).toContain('host reset --yes');
+    expect(existsSync(join(data, 'host.sqlite'))).toBe(true);
+
+    // Run here, not by the service: whoever started it stops it first.
+    const running = await run(home, 'reset', '--yes');
+    expect(running.code).toBe(1);
+    expect(running.out).toContain('The host is running. Stop it first');
+    expect(existsSync(join(data, 'host.sqlite'))).toBe(true);
+
+    await host.close();
+    const done = await run(home, 'reset', '--yes');
+    expect(done.out).toContain('Backed up the host first');
+    expect(done.out).toContain('Reset. Nothing of the host is left');
+    expect(done.code).toBe(0);
+    expect(existsSync(home)).toBe(false);
+    // The backup still has everything, so restoring it undoes the reset.
+    const [backup] = await listBackups(backups);
+    expect(backup!.notebooks.map((each) => each.name)).toEqual(['Personal', 'Work']);
+    expect((await run(home, 'reset')).out).toContain('Nothing to reset');
+    // Started again from nothing, the host knows none of what it had.
+    host = new Host({ dataDir: data });
+    expect(host.notebooks()).toEqual([]);
+    expect(host.devices()).toEqual([]);
   });
 });

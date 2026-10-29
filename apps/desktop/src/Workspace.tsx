@@ -638,6 +638,29 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
             setSettings(undefined);
             onSwitch('github');
           }}
+          onStopSyncing={async (trash) => {
+            // The note being written goes up with the rest before anything is let go of.
+            await editor.current?.flush();
+            const host = sync.host?.replace(/^https?:\/\//, '') ?? 'The host';
+            const { hostTold, trashed } = await bridge.disconnect({ trash });
+            const unheard = hostTold
+              ? ''
+              : `${host} could not be reached, so it still lists this Mac; remove it there, in Settings → Devices or with “host remove”.`;
+            if (trashed) {
+              onClose(null, unheard && `Moved “${vault.name}” to the Trash. ${unheard}`);
+              return undefined;
+            }
+            const kept = !trash
+              ? ''
+              : sync.removed
+                ? 'The folder was kept: the host no longer accepts this Mac, so what is in it could not be checked against the host. Move it to the Trash yourself once you have checked it.'
+                : 'The folder was kept: not every change in it had reached the host, so deleting it could have lost notes. Move it to the Trash yourself once you have checked it.';
+            return [unheard && `Stopped. ${unheard}`, kept].filter(Boolean).join(' ') || undefined;
+          }}
+          onReset={async () => {
+            await editor.current?.flush();
+            await bridge.resetApp();
+          }}
           onClose={() => setSettings(undefined)}
         />
       )}

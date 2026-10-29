@@ -84,6 +84,8 @@ const HELP = `Opsidian ${VERSION}: a host for your notebooks, so every device sy
                                          sync, disconnect, logout
   ${me} host logs [-f]        What the host has been doing
   ${me} host stop             Stop it, and stop it starting by itself
+  ${me} host reset            Start over as on a fresh install: every notebook, device, setting and
+                              the GitHub sign-in go. Says what goes first; --yes resets
   ${me} host uninstall        Stop it and remove the program; --delete-data removes your notebooks too
   ${me} host run              Run in this terminal instead (for Docker, or to watch it)
 
@@ -473,6 +475,75 @@ async function deleteNotebook(): Promise<void> {
   );
 }
 
+/**
+ * Wipes this machine's host, as before it was first set up: notebooks, devices, settings, the
+ * GitHub sign-in and the service. Says what goes first; with --yes, backs up and wipes.
+ */
+async function reset(): Promise<void> {
+  if (flags.has('data'))
+    fail(`Reset works on a whole host folder. Point OPSIDIAN_HOME at it instead of --data.`);
+  if (!existsSync(where.home)) return console.log(`Nothing to reset: ${where.home} is not there.`);
+  const config = await readConfig(where);
+  const held = existsSync(join(where.data, 'host.sqlite'))
+    ? await withHost((host) => ({
+        notebooks: host.notebooks(),
+        devices: host.devices().filter((each) => !each.revoked),
+        mirrors: host.mirrors(),
+      }))
+    : { notebooks: [], devices: [], mirrors: [] };
+  const signedIn = await readAccount(where);
+  if (!flags.has('yes') && !flags.has('y')) {
+    const github = new Set(held.mirrors.map((each) => each.device));
+    const devices = held.devices.filter((each) => !github.has(each.id));
+    console.log(
+      [
+        `Resetting takes everything in ${where.home}:`,
+        `  Notebooks  ${held.notebooks.map((each) => `${each.name} (${each.files} files)`).join(', ') || 'none'}, with their whole history`,
+        `  Devices    ${devices.length ? `${devices.map((each) => each.name).join(', ')}, which stop syncing and keep the notes they have` : 'none'}`,
+        ...(held.mirrors.length || signedIn
+          ? [
+              `  GitHub     ${signedIn ? `the sign-in as ${signedIn.login}` : 'no sign-in'}${held.mirrors.length ? `, and ${held.mirrors.length} copies, which stop; the repositories stay` : ''}`,
+            ]
+          : []),
+        `  Settings   the address, port and backup settings, and the service that keeps it running`,
+        config?.backup
+          ? `The host is backed up first, to ${config.backup.folder}. Backups there are kept.`
+          : 'Backups are off, so none of it can be brought back.',
+        '',
+        `To reset: ${me} host reset --yes`,
+      ].join('\n'),
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const found = service(where);
+  const manager = 'missing' in found ? undefined : found;
+  const managed = (await manager?.state())?.running === true;
+  // A host this program does not manage, such as `host run` in Docker or a terminal, must be
+  // stopped by whoever started it: its data is about to go from under it.
+  const port = config?.port ?? defaultPort();
+  const live = [`127.0.0.1:${port}`, ...(config ? [reachableAt(config)] : [])];
+  if (!managed && (await Promise.all(live.map(answers))).some(Boolean))
+    fail('The host is running. Stop it first (Ctrl+C, or docker stop), then reset.');
+  if (config?.backup && held.notebooks.length) {
+    const { folder, keep } = config.backup;
+    const made = await withHost((host) => host.backup(folder, keep + 1)).catch((reason: unknown) =>
+      fail(
+        `Nothing was reset: the backup made first failed. ${(reason as Error).message}\n` +
+          `Fix that and try again, or turn backups off with: ${me} host backup off`,
+      ),
+    );
+    console.log(`Backed up the host first, as ${made.name}.`);
+  }
+  // Only a service that was set up: one never started has nothing to stop.
+  if (manager && (managed || existsSync(manager.file))) await manager.remove();
+  await rm(where.home, { recursive: true, force: true });
+  console.log(
+    `Reset. Nothing of the host is left in ${where.home}.\n` +
+      `To host again: ${me} host start, then ${me} host invite "Personal"`,
+  );
+}
+
 /** Prints what to run on the machine that will host from now on. */
 async function move(): Promise<void> {
   const moved = await withHost((host) => host.moved());
@@ -760,6 +831,8 @@ async function main(): Promise<void> {
       });
     case 'delete':
       return deleteNotebook();
+    case 'reset':
+      return reset();
     case 'backup':
       return backup();
     case 'backups': {

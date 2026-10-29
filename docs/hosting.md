@@ -179,7 +179,18 @@ What happens:
 - **Its copy on GitHub stops,** and the host's checkout of it goes. The repository stays as it is.
 - **It can be undone only from a backup.** When backups are set up, the host is backed up first, and nothing is deleted if that backup fails. Restoring the backup brings the notebook back with its history; the devices it had stay removed, so each joins again with a new invitation. Older backups keep the notebook too, until they are replaced.
 
+To delete everything a host holds at once, [start over](#starting-over).
+
 A device cannot delete a notebook from the host, only the host's own machine can: a lost phone must not be able to delete what every other device holds. On a host that moved to another machine, delete notebooks on the new one.
+
+## Starting over
+
+Resetting puts a host back as it was before it was first set up, as on a fresh install.
+
+- **On a Mac:** in **Settings → Sync**, choose **Reset…** under _Reset Opsidian on this Mac_ and type `reset`. Everything Opsidian keeps on the Mac goes: the host with every notebook and its history, the GitHub sign-in, settings, backup settings, and its access to any other host. Each host it synced with is told, so none lists it afterwards. Notebook folders stay, with every note, no longer syncing. The app then restarts, as when first installed.
+- **Without the app:** `host reset` says what goes and deletes nothing; `host reset --yes` stops the service and removes the host's folder (`~/.opsidian`, or `OPSIDIAN_HOME`): every notebook, device and setting, the GitHub sign-in and the log. A host started by hand or in Docker must be stopped first. Start again with `host start`.
+
+When backups are set up, the host is backed up first and nothing is reset if that fails; backups already in the folder are kept, so restoring one undoes the reset. Without backups, it cannot be undone. Devices keep their notes and stop syncing; repositories on GitHub stay as they are.
 
 ## Backups
 

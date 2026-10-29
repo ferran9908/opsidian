@@ -1,4 +1,5 @@
 import { app, clipboard, safeStorage, shell } from 'electron';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
@@ -217,6 +218,10 @@ export class Hosting {
 
   get keepRunning(): boolean {
     return Boolean(this.host) && this.saved.keepRunning;
+  }
+  /** The address this Mac's own notebooks sync with its host at. */
+  get localAddress(): string {
+    return `http://127.0.0.1:${this.saved.port}`;
   }
 
   /** Reads the settings and, if this Mac was hosting, starts hosting again. */
@@ -499,6 +504,41 @@ export class Hosting {
       );
       await this.save();
       return this.tell();
+    });
+  }
+
+  /**
+   * Wipes the host and everything kept beside it, as before the app was first used. The host
+   * is backed up first when backups are set up, and nothing is wiped if that fails. `between`
+   * runs once the backup is made and while the host still serves, for the app to let go of
+   * the notebooks that sync with it.
+   */
+  reset(between: () => Promise<void>): Promise<void> {
+    return this.serial(async () => {
+      const { folder, keep } = this.saved.backup;
+      if (folder && existsSync(this.data)) {
+        if (!this.host)
+          throw new Error(
+            'Nothing was reset. Turn hosting on first, so the host can be backed up before it goes.',
+          );
+        await this.host.call({ op: 'backup', folder, keep: keep + 1 }).catch((reason: unknown) => {
+          throw new Error(
+            `Nothing was reset: the backup made first failed. ${backupProblem(reason)}`,
+          );
+        });
+      }
+      await between();
+      clearInterval(this.timer);
+      this.signingIn?.abort.abort();
+      const host = this.host;
+      this.host = undefined;
+      // What GitHub does not have yet is sent first: its repositories stay.
+      await host?.end(FLUSH);
+      for (const path of [this.data, this.file, this.githubFile])
+        await rm(path, { recursive: true, force: true });
+      this.saved = fresh();
+      this.account = undefined;
+      this.error = undefined;
     });
   }
 

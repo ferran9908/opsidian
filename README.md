@@ -17,7 +17,7 @@ pnpm dev:desktop
 
 `pnpm dev:preview` opens a browser development preview. `pnpm ios` builds and installs the iPhone app on a connected phone; `pnpm dev:mobile` starts Expo for a development build. See [prototype setup, storage, and device checks](docs/editor-prototype.md).
 
-Run `pnpm check` for formatting, typechecks, and behavioral tests. Run `pnpm test:desktop` to drive the real Electron app end to end and then kill it mid-save to check nothing is lost, `pnpm test:sync` to run it against a real host, `pnpm test:github` to drive its GitHub screens, and `pnpm test:move` to move a host into the app and on again. `pnpm format` formats the repository.
+Run `pnpm check` for formatting, typechecks, and behavioral tests. Run `pnpm test:desktop` to drive the real Electron app end to end and then kill it mid-save to check nothing is lost, `pnpm test:sync` to run it against a real host, `pnpm test:github` to drive its GitHub screens, `pnpm test:move` to move a host into the app and on again, and `pnpm test:leaving` to stop syncing, delete a hosted notebook and reset the app. `pnpm format` formats the repository.
 
 ## Workspace
 

@@ -153,10 +153,18 @@ export class SyncService {
   /**
    * Stops syncing the open notebook. Every file stays; the host is asked to forget this
    * device, so its credential is no use to anyone. Resolves to whether the host heard.
+   *
+   * With `settle`, what is left is sent first, and `inStep` says whether the folder and the
+   * host then matched exactly: nothing waiting, held back or refused. Only then may the
+   * device delete its copy, since the host has every note in it.
    */
-  async disconnect(): Promise<{ hostTold: boolean }> {
+  async disconnect(options: { settle?: boolean } = {}): Promise<{
+    hostTold: boolean;
+    inStep: boolean;
+  }> {
     const { vault, state } = this;
-    if (!vault || !state) return { hostTold: true };
+    if (!vault || !state) return { hostTold: true, inStep: false };
+    const inStep = options.settle ? await this.inStep() : false;
     vault.onRelocate(undefined);
     vault.onActivity(undefined);
     await this.engine?.stop();
@@ -165,7 +173,30 @@ export class SyncService {
     await this.secrets.set(state.device, undefined);
     await this.connections?.set(vault.root, undefined);
     await this.attach(vault);
-    return { hostTold };
+    return { hostTold, inStep };
+  }
+  /** Syncs now, and says whether this folder and the host match exactly afterwards. */
+  private async inStep(): Promise<boolean> {
+    const engine = this.engine;
+    if (!engine || this.lost || this.problem) return false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const synced = await Promise.race([
+      // Twice: the first may join a round that began before the latest save.
+      engine
+        .sync()
+        .then(() => engine.sync())
+        .then(
+          () => true,
+          () => false,
+        ),
+      // A host that has gone quiet is not waited on for long.
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), 20_000);
+      }),
+    ]);
+    clearTimeout(timer);
+    const { state, waiting, held, problems } = engine.status;
+    return synced && state === 'synced' && !waiting && !held && !problems;
   }
   private async leave(connection: Connection): Promise<boolean> {
     const token = await this.secrets.get(connection.device);

@@ -231,10 +231,14 @@ function Confirm(props: {
   action: string;
   /** For what cannot be taken back at all. */
   destructive?: boolean;
+  /** A word to type before the action can be taken, for what wipes everything. */
+  typed?: string;
   children: ReactNode;
   onCancel(): void;
   onConfirm(): void;
 }) {
+  const [typing, setTyping] = useState('');
+  const ready = !props.typed || typing.trim().toLowerCase() === props.typed;
   return (
     <div
       className="fixed inset-0 z-40 flex items-center justify-center bg-black/40"
@@ -249,11 +253,28 @@ function Confirm(props: {
         <div className="text-muted-foreground space-y-3 text-sm leading-[22px]">
           {props.children}
         </div>
+        {props.typed && (
+          <label className="block space-y-1.5 text-sm">
+            <span>
+              Type <b>{props.typed}</b> to confirm.
+            </span>
+            <input
+              autoFocus
+              value={typing}
+              onChange={(event) => setTyping(event.target.value)}
+              className="border-border bg-secondary h-9 w-full rounded-md border px-3 outline-none"
+            />
+          </label>
+        )}
         <div className="flex justify-end gap-2.5 pt-1">
           <Button variant="secondary" onClick={props.onCancel}>
             Cancel
           </Button>
-          <Button variant={props.destructive ? 'destructive' : 'default'} onClick={props.onConfirm}>
+          <Button
+            variant={props.destructive ? 'destructive' : 'default'}
+            disabled={!ready}
+            onClick={props.onConfirm}
+          >
             {props.action}
           </Button>
         </div>
@@ -272,6 +293,13 @@ interface Props {
   onConnect(): void;
   /** Opens the screen that makes a notebook from a GitHub repository. */
   onImport(): void;
+  /**
+   * Stops syncing the open notebook, moving its folder to the Trash if asked and every note
+   * in it has reached the host. Resolves to anything the user should be told.
+   */
+  onStopSyncing(trash: boolean): Promise<string | undefined>;
+  /** Starts Opsidian over on this Mac, as on a fresh install; the app restarts. */
+  onReset(): Promise<void>;
   onClose(): void;
 }
 
@@ -287,10 +315,13 @@ export function Settings(props: Props) {
     | { kind: 'leave' }
     | { kind: 'remove'; id: string; name: string }
     | { kind: 'delete'; name: string }
+    | { kind: 'reset' }
     | { kind: 'restore'; name: string; at: number }
   >();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  /** Whether stopping sync here also moves the notebook's folder to the Trash. */
+  const [trashFolder, setTrashFolder] = useState(true);
   const run = (task: () => Promise<unknown>) => {
     setBusy(true);
     setError('');
@@ -376,6 +407,25 @@ export function Settings(props: Props) {
     >
       <Button variant="secondary" className="shrink-0" onClick={() => setMoving('take-over')}>
         Take over hosting…
+      </Button>
+    </Row>
+  );
+
+  const resetRow = (
+    <Row
+      name="Reset Opsidian on this Mac"
+      description="Starts over as if just installed: the host and every notebook it holds, settings and sign-ins go. Your notebook folders stay."
+    >
+      <Button
+        variant="secondary"
+        className="shrink-0"
+        disabled={busy}
+        onClick={() => {
+          void bridge.backups().then(setBackups);
+          setConfirm({ kind: 'reset' });
+        }}
+      >
+        Reset…
       </Button>
     </Row>
   );
@@ -493,6 +543,7 @@ export function Settings(props: Props) {
               Stop hosting…
             </Button>
           </Row>
+          {resetRow}
         </div>
       </>
     ) : sync.connected && own ? (
@@ -520,7 +571,10 @@ export function Settings(props: Props) {
           Everything the host holds is still on this Mac. Your devices pick up where they left off
           when it is turned on again.
         </p>
-        <div>{checkRow}</div>
+        <div>
+          {checkRow}
+          {resetRow}
+        </div>
       </>
     ) : sync.connected ? (
       <>
@@ -1061,28 +1115,35 @@ export function Settings(props: Props) {
       {confirm?.kind === 'leave' && (
         <Confirm
           title="Stop syncing this notebook here?"
-          action="Stop syncing"
+          action={trashFolder ? 'Stop syncing and move to Trash' : 'Stop syncing'}
           onCancel={() => setConfirm(undefined)}
           onConfirm={() => {
             setConfirm(undefined);
             run(async () => {
-              const host = sync.host?.replace(/^https?:\/\//, '') ?? 'The host';
-              const { hostTold } = await bridge.disconnect();
-              if (!hostTold)
-                setError(
-                  `Stopped. ${host} could not be reached, so it still lists this Mac; remove it there, in Settings → Devices or with “host remove”.`,
-                );
+              const warning = await props.onStopSyncing(trashFolder);
+              if (warning) setError(warning);
             });
           }}
         >
           <p>
-            Every note stays in this folder as it is, and the notebook stays on the host and your
-            other devices. Changes stop travelling either way.
+            The notebook stays on the host and your other devices. This Mac is removed from the
+            host’s devices, so its access cannot be used again; to sync here later, use a new
+            invitation.
           </p>
-          <p>
-            This Mac is removed from the host’s devices, so its access cannot be used again. To sync
-            here later, use a new invitation.
-          </p>
+          <label className="text-foreground flex items-start gap-3">
+            <input
+              type="checkbox"
+              className="accent-primary mt-1 size-4 shrink-0"
+              checked={trashFolder}
+              onChange={(event) => setTrashFolder(event.target.checked)}
+            />
+            <span>
+              <b>Move the folder to the Trash.</b> Only once every note in it has reached the host;
+              if anything has not, the folder is kept and you are told why. It can be put back from
+              the Trash.
+            </span>
+          </label>
+          {!trashFolder && <p>Every note stays in this folder as it is.</p>}
           <p>
             To delete the notebook itself, do it where it is hosted: in Settings → Sync on a Mac
             that hosts it, or with <code>opsidian host delete "{sync.notebook}"</code> on a server.
@@ -1155,6 +1216,55 @@ export function Settings(props: Props) {
             </Confirm>
           );
         })()}
+      {confirm?.kind === 'reset' && (
+        <Confirm
+          title="Reset Opsidian on this Mac?"
+          action="Reset and restart"
+          destructive
+          typed="reset"
+          onCancel={() => setConfirm(undefined)}
+          onConfirm={() => {
+            setConfirm(undefined);
+            run(() => props.onReset());
+          }}
+        >
+          <p>Opsidian starts over as if it had just been installed. These go from this Mac:</p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              The host, with{' '}
+              {hosting?.notebooks.length
+                ? `${hosting.notebooks.map((each) => `“${each.name}”`).join(', ')} and their whole history`
+                : 'everything it holds'}
+              .{' '}
+              {(() => {
+                const others = hosting?.devices.filter((each) => !each.self && !each.github) ?? [];
+                return others.length
+                  ? `${count(others.length, 'device')} stop syncing, and keep the notes they have.`
+                  : '';
+              })()}
+            </li>
+            <li>The GitHub sign-in, and copies kept on GitHub; the repositories stay.</li>
+            <li>Settings, backup settings, and this Mac’s access to every host it syncs with.</li>
+          </ul>
+          <p>
+            <b className="text-foreground">Your notebook folders stay,</b> with every note, and no
+            longer sync.
+          </p>
+          <p className="bg-secondary text-foreground rounded-lg px-4 py-3">
+            {backups?.folder ? (
+              <>
+                <b>The host is backed up first,</b> to {backups.folder}. Backups already there are
+                kept, so restoring one brings everything back.
+              </>
+            ) : (
+              <>
+                <b>This cannot be undone.</b> Backups are off, so nothing keeps a copy of the host’s
+                history.
+              </>
+            )}
+          </p>
+        </Confirm>
+      )}
       {confirm?.kind === 'restore' && (
         <Confirm
           title={`Restore the backup from ${day(confirm.at)}?`}
