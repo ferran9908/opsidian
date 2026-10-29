@@ -2,7 +2,7 @@ import { RangeSetBuilder, StateEffect, StateField, type EditorState } from '@cod
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 import { GFM, parser } from '@lezer/markdown';
-import { cellOffset, parseTable, splitLink, type Table } from '@opsidian/core';
+import { cellOffset, parseTable, shortUrl, splitLink, type Table } from '@opsidian/core';
 import { wikiLink, type PreviewOptions } from './live-preview';
 
 /**
@@ -93,9 +93,12 @@ function renderCell(parent: HTMLElement, text: string, options: PreviewOptions) 
     }
     into.append(part.slice(at));
   };
-  const walk = (node: Node, into: HTMLElement) => {
-    let at = node.from;
+  /** Draws `node`'s children that lie between `from` and `to`. */
+  const walk = (node: Node, into: HTMLElement, from = node.from, to = node.to) => {
+    let at = from;
     for (let child = node.firstChild; child; child = child.nextSibling) {
+      if (child.from < from) continue;
+      if (child.to > to) break;
       append(into, masked.slice(at, child.from));
       at = child.to;
       if (child.name.endsWith('Mark')) continue;
@@ -108,6 +111,22 @@ function renderCell(parent: HTMLElement, text: string, options: PreviewOptions) 
         if (/^ .*\S.* $/.test(body)) body = body.slice(1, -1);
         code.textContent = body;
         into.append(code);
+      } else if (child.name === 'URL' || child.name === 'Autolink' || child.name === 'Link') {
+        const url = child.name === 'URL' ? child : child.getChild('URL');
+        if (!url) {
+          append(into, masked.slice(child.from, child.to));
+          continue;
+        }
+        const address = unmask(masked.slice(url.from, url.to));
+        // Drawn short, with the whole address on hover. It is not opened from the table.
+        const link = document.createElement('span');
+        link.className = 'op-weblink';
+        link.title = address;
+        // `[text](address)` shows its text; a bare address shows itself, shortened.
+        const [open, close] = child.getChildren('LinkMark');
+        if (child.name === 'Link' && open && close) walk(child, link, open.to, close.from);
+        if (!link.textContent) link.textContent = shortUrl(address);
+        into.append(link);
       } else if (STYLES[child.name]) {
         const span = document.createElement('span');
         span.className = STYLES[child.name]!;
@@ -115,10 +134,13 @@ function renderCell(parent: HTMLElement, text: string, options: PreviewOptions) 
         into.append(span);
       } else append(into, masked.slice(child.from, child.to));
     }
-    append(into, masked.slice(at, node.to));
+    append(into, masked.slice(at, to));
   };
   walk(inline.parse(masked).topNode, parent);
 }
+
+/** The most characters a cell may have for its column to stay on one line. */
+const SHORT_CELL = 16;
 
 class TableWidget extends WidgetType {
   constructor(
@@ -139,6 +161,11 @@ class TableWidget extends WidgetType {
     table.className = 'op-table';
     const head = document.createElement('thead'),
       body = document.createElement('tbody');
+    // A column of short cells, such as dates or numbers, is kept on one line; any other
+    // column is kept wide enough to read, and the table scrolls sideways when it runs out.
+    const short = this.table.header.map((_, index) =>
+      this.table.rows.every((cells) => cells[index]!.length <= SHORT_CELL),
+    );
     const addRow = (section: HTMLElement, cells: string[], tag: 'th' | 'td', line: number) => {
       const row = document.createElement('tr');
       row.dataset.line = String(line);
@@ -146,6 +173,7 @@ class TableWidget extends WidgetType {
         const cell = document.createElement(tag);
         const align = this.table.align[index];
         if (align) cell.style.textAlign = align;
+        cell.className = short[index] ? 'op-cell-short' : 'op-cell-long';
         renderCell(cell, text, this.options);
         row.append(cell);
       });
