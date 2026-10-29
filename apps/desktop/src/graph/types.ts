@@ -17,6 +17,7 @@ export interface GraphColors {
   unresolved: string;
   active: string;
   highlight: string;
+  tag: string;
   link: string;
   linkHighlight: string;
   label: string;
@@ -27,6 +28,7 @@ export interface RenderNode {
   id: string;
   title: string;
   exists: boolean;
+  tag?: boolean;
   degree: number;
   x: number;
   y: number;

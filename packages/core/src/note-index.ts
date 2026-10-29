@@ -1,4 +1,5 @@
 import { buildNoteGraph, type NoteGraph } from './graph';
+import { parseTags, tagKey } from './frontmatter';
 import {
   linkResolver,
   linkTarget,
@@ -18,6 +19,11 @@ export interface SearchResult {
   /** Present when the match is in the note body rather than only its title. */
   excerpt?: string;
 }
+export interface TagCount {
+  tag: string;
+  /** How many notes carry it. */
+  notes: number;
+}
 
 const EXCERPT = 160;
 function excerptAround(content: string, from: number, to: number): string {
@@ -32,13 +38,21 @@ function excerptAround(content: string, from: number, to: number): string {
 
 /** Rebuildable in-memory index of a vault's notes: link graph and text search. */
 export class NoteIndex {
-  private readonly notes = new Map<string, { content: string; lower: string; links: WikiLink[] }>();
+  private readonly notes = new Map<
+    string,
+    { content: string; lower: string; links: WikiLink[]; tags: string[] }
+  >();
   /** Rebuilt lazily whenever the set of note paths changes. */
   private resolver: ((target: string) => string | undefined) | undefined;
 
   set(path: string, content: string): void {
     if (!this.notes.has(path)) this.resolver = undefined;
-    this.notes.set(path, { content, lower: content.toLowerCase(), links: parseLinks(content) });
+    this.notes.set(path, {
+      content,
+      lower: content.toLowerCase(),
+      links: parseLinks(content),
+      tags: parseTags(content),
+    });
   }
   delete(path: string): void {
     if (this.notes.delete(path)) this.resolver = undefined;
@@ -62,6 +76,21 @@ export class NoteIndex {
   resolve(target: string): string | undefined {
     this.resolver ??= linkResolver(this.notes.keys());
     return this.resolver(target);
+  }
+  /** The tags of one note, as first written. */
+  tagsOf(path: string): string[] {
+    return this.notes.get(path)?.tags ?? [];
+  }
+  /** Every tag in the notebook with how many notes carry it, most used first. */
+  tags(): TagCount[] {
+    const counts = new Map<string, TagCount>();
+    for (const note of this.notes.values())
+      for (const tag of note.tags) {
+        const entry = counts.get(tagKey(tag));
+        if (entry) entry.notes += 1;
+        else counts.set(tagKey(tag), { tag, notes: 1 });
+      }
+    return [...counts.values()].sort((a, b) => b.notes - a.notes || a.tag.localeCompare(b.tag));
   }
 
   /**
@@ -114,21 +143,30 @@ export class NoteIndex {
    * The notebook's link graph in one pass: every note, every unresolved target, and
    * each unique directed edge. Self-links are dropped. Degrees count those edges.
    */
-  graph(): NoteGraph {
-    return buildNoteGraph(this.notes, (target) => this.resolve(target));
+  graph(options: { tags?: boolean } = {}): NoteGraph {
+    return buildNoteGraph(this.notes, (target) => this.resolve(target), options);
   }
 
-  /** Notes containing every word of `query`, title matches first. */
+  /**
+   * Notes containing every word of `query`, title matches first. A word written `#tag` matches
+   * notes carrying that tag, or one nested under it (`#work` finds `#work/client`).
+   */
   search(query: string, limit = 30): SearchResult[] {
-    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-    if (!terms.length) return [];
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const wanted = words.filter((word) => /^#.+/.test(word)).map((word) => word.slice(1));
+    const terms = words.filter((word) => !/^#.+/.test(word));
+    if (!terms.length && !wanted.length) return [];
     const scored: { score: number; result: SearchResult }[] = [];
     for (const [path, note] of this.notes) {
       const title = noteTitle(path).toLowerCase();
+      const tagged = wanted.every((tag) =>
+        note.tags.some((own) => tagKey(own) === tag || tagKey(own).startsWith(`${tag}/`)),
+      );
+      if (!tagged) continue;
       if (!terms.every((term) => title.includes(term) || note.lower.includes(term))) continue;
-      const inTitle = terms.every((term) => title.includes(term));
+      const inTitle = terms.length > 0 && terms.every((term) => title.includes(term));
       const whole = terms.join(' ');
-      const score = title === whole ? 4 : title.startsWith(whole) ? 3 : inTitle ? 2 : 1;
+      const score = title === whole ? 4 : whole && title.startsWith(whole) ? 3 : inTitle ? 2 : 1;
       const term = terms.find((candidate) => note.lower.includes(candidate));
       const at = term ? note.lower.indexOf(term) : -1;
       scored.push({

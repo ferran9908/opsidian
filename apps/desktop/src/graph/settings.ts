@@ -3,6 +3,8 @@ import type { DisplaySettings, ForceSettings } from './types';
 export interface GraphSettings extends ForceSettings, DisplaySettings {
   orphans: boolean;
   existingOnly: boolean;
+  /** Draw each tag as a node, linked from the notes that carry it. */
+  tags: boolean;
   depth: number;
   global: boolean;
 }
@@ -18,6 +20,7 @@ export const GRAPH_DEFAULTS: GraphSettings = {
   linkThickness: 1,
   orphans: true,
   existingOnly: false,
+  tags: false,
   depth: 1,
   global: false,
 };
@@ -45,6 +48,7 @@ export function loadGraphSettings(): GraphSettings {
       orphans: typeof saved.orphans === 'boolean' ? saved.orphans : GRAPH_DEFAULTS.orphans,
       existingOnly:
         typeof saved.existingOnly === 'boolean' ? saved.existingOnly : GRAPH_DEFAULTS.existingOnly,
+      tags: typeof saved.tags === 'boolean' ? saved.tags : GRAPH_DEFAULTS.tags,
       depth: number(saved.depth, GRAPH_DEFAULTS.depth, 1, 3),
       global: typeof saved.global === 'boolean' ? saved.global : GRAPH_DEFAULTS.global,
     };

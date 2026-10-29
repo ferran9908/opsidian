@@ -1,13 +1,16 @@
 import { noteTitle } from './links';
+import { tagKey } from './frontmatter';
 
 /** A note or an unresolved wiki-link target in the notebook graph. */
 export interface GraphNode {
-  /** Vault-relative path. Unresolved targets use the same shape (`Name.md`). */
+  /** Vault-relative path. Unresolved targets use the same shape (`Name.md`); tags are `#tag`. */
   path: string;
   title: string;
   exists: boolean;
   inDegree: number;
   outDegree: number;
+  /** Set on a tag node, which every note carrying the tag links to. */
+  tag?: true;
 }
 
 /** One directed link between two graph nodes. Duplicates and self-links are dropped. */
@@ -108,15 +111,25 @@ export function filterGraph(
   };
 }
 
-/** Build a graph from outgoing wiki-link targets. `resolve` is the notebook's link resolver. */
+/** Identity of a tag's node in the graph. */
+export function tagNodePath(tag: string): string {
+  return `#${tag}`;
+}
+
+/**
+ * Build a graph from outgoing wiki-link targets. `resolve` is the notebook's link resolver.
+ * With `tags`, each tag is a node too, linked from every note that carries it.
+ */
 export function buildNoteGraph(
-  notes: Iterable<[string, { links: { target: string }[] }]>,
+  notes: Iterable<[string, { links: { target: string }[]; tags?: string[] }]>,
   resolve: (target: string) => string | undefined,
+  options: { tags?: boolean } = {},
 ): NoteGraph {
   const nodes = new Map<
     string,
-    { title: string; exists: boolean; inDegree: number; outDegree: number }
+    { title: string; exists: boolean; inDegree: number; outDegree: number; tag?: true }
   >();
+  const tagNodes = new Map<string, string>();
   const unresolved = new Map<string, string>();
   for (const [path] of notes) {
     nodes.set(path, { title: noteTitle(path), exists: true, inDegree: 0, outDegree: 0 });
@@ -139,17 +152,30 @@ export function buildNoteGraph(
   const edges = new Map<string, GraphEdge>();
   for (const [source, note] of notes) {
     const seen = new Set<string>();
-    for (const link of note.links) {
-      if (!link.target) continue;
-      const to = targetOf(link.target);
-      if (!to || to === source || seen.has(to)) continue;
+    const connect = (to: string) => {
+      if (to === source || seen.has(to)) return;
       seen.add(to);
       const fromNode = nodes.get(source);
       const toNode = nodes.get(to);
-      if (!fromNode || !toNode) continue;
+      if (!fromNode || !toNode) return;
       edges.set(`${source}\0${to}`, { from: source, to });
       fromNode.outDegree += 1;
       toNode.inDegree += 1;
+    };
+    for (const link of note.links) {
+      if (!link.target) continue;
+      const to = targetOf(link.target);
+      if (to) connect(to);
+    }
+    if (!options.tags) continue;
+    for (const tag of note.tags ?? []) {
+      let path = tagNodes.get(tagKey(tag));
+      if (!path) {
+        path = tagNodePath(tag);
+        tagNodes.set(tagKey(tag), path);
+        nodes.set(path, { title: path, exists: true, inDegree: 0, outDegree: 0, tag: true });
+      }
+      connect(path);
     }
   }
 

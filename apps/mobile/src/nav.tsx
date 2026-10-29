@@ -5,7 +5,7 @@ import type { Colors } from './ui';
 export type Route =
   /** The notes themselves: the open note, the files drawer, and the bar at the bottom. */
   | { name: 'notes' }
-  | { name: 'search' }
+  | { name: 'search'; query?: string }
   | { name: 'settings' }
   | { name: 'trash' }
   | { name: 'sync' }

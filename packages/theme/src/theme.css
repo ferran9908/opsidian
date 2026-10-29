@@ -46,6 +46,7 @@
   --color-graph-node-unresolved: var(--graph-node-unresolved);
   --color-graph-node-active: var(--graph-node-active);
   --color-graph-node-highlight: var(--graph-node-highlight);
+  --color-graph-node-tag: var(--graph-node-tag);
   --color-graph-link: var(--graph-link);
   --color-graph-link-highlight: var(--graph-link-highlight);
   --color-graph-label: var(--graph-label);

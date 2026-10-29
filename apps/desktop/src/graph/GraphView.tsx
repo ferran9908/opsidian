@@ -26,6 +26,8 @@ interface Props {
   dark: boolean;
   onOpen(path: string): void;
   onCreate(name: string): void;
+  /** A tag node was clicked. */
+  onTag(tag: string): void;
 }
 
 interface Camera {
@@ -42,6 +44,7 @@ function readColors() {
     unresolved: take('--graph-node-unresolved'),
     active: take('--graph-node-active'),
     highlight: take('--graph-node-highlight'),
+    tag: take('--graph-node-tag'),
     link: take('--graph-link'),
     linkHighlight: take('--graph-link-highlight'),
     label: take('--graph-label'),
@@ -90,7 +93,7 @@ function recenter(camera: Camera, node: { x: number; y: number }, width: number,
 }
 
 export function GraphView(props: Props) {
-  const { center, version, dark, onOpen, onCreate } = props;
+  const { center, version, dark, onOpen, onCreate, onTag } = props;
   const canvas = useRef<HTMLCanvasElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const renderer = useRef<GraphRenderer | undefined>(undefined);
@@ -152,6 +155,7 @@ export function GraphView(props: Props) {
         id: node.path,
         title: node.title,
         exists: node.exists,
+        ...(node.tag ? { tag: true } : {}),
         degree: node.inDegree + node.outDegree,
         x: at?.x ?? 0,
         y: at?.y ?? 0,
@@ -265,7 +269,7 @@ export function GraphView(props: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    void bridge.graph().then((graph) => {
+    void bridge.graph({ tags: settings.tags }).then((graph) => {
       if (cancelled) return;
       snapshot.current = graph;
       applyVisible(visibleGraph(graph, settingsRef.current, centerRef.current), 'sync');
@@ -273,7 +277,7 @@ export function GraphView(props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [version]);
+  }, [version, settings.tags]);
 
   useEffect(() => {
     if (!snapshot.current || !ready) return;
@@ -371,7 +375,8 @@ export function GraphView(props: Props) {
       const graph = snapshot.current;
       const node = graph?.nodes.find((item) => item.path === drag.id);
       if (!node) return;
-      if (node.exists) onOpen(node.path);
+      if (node.tag) onTag(node.path.slice(1));
+      else if (node.exists) onOpen(node.path);
       else onCreate(noteTitle(node.path));
     }
   };
@@ -549,6 +554,7 @@ export function GraphView(props: Props) {
             checked={settings.existingOnly}
             onChange={(existingOnly) => update({ existingOnly })}
           />
+          <Toggle label="Tags" checked={settings.tags} onChange={(tags) => update({ tags })} />
           <button
             type="button"
             className="text-muted-foreground hover:text-foreground mt-3 flex items-center gap-1.5 self-start text-[12px]"

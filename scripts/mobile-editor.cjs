@@ -37,6 +37,10 @@ app.whenReady().then(async () => {
   // Shown and focused: a window without focus gets no focus or blur events, as a phone would.
   const win = new BrowserWindow({ width: 400, height: 800 });
   const web = win.webContents;
+  // Errors in the page would otherwise be reported only as "Script failed to execute".
+  web.on('console-message', (_event, level, text) => {
+    if (level >= 2) console.error(`page: ${text}`);
+  });
   const run = (code) => web.executeJavaScript(code);
   const open = async (path, content, others = {}) => {
     await win.loadURL(`data:text/html;base64,${Buffer.from(editorHtml).toString('base64')}`);
@@ -167,6 +171,79 @@ app.whenReady().then(async () => {
     assert.equal(await run(`document.getElementById('title').isContentEditable`), true);
     assert.equal(await run(`document.querySelector('.cm-content').isContentEditable`), true);
     pass('reading view locks the name and the text, and editing unlocks both');
+
+    const note =
+      '---\ntitle: Japan trip\ntags: [travel, food]\n---\nRamen with #noodles and `#code`.\n';
+    await open('Japan.md', note);
+    const properties = () =>
+      run(`[...document.querySelectorAll('.op-property')].map((row) =>
+      row.querySelector('.op-property-key').textContent + '=' +
+      [...row.querySelectorAll('.op-property-value > *')].map((e) => e.textContent).join(','))`);
+    assert.deepEqual(await properties(), ['title=Japan trip', 'tags=#travel,#food']);
+    assert.deepEqual(
+      await run(`[...document.querySelectorAll('.cm-content .op-tag')].map((e) => e.textContent)`),
+      ['#travel', '#food', '#noodles'],
+    );
+    assert.equal(await run(`document.querySelector('.op-frontmatter')`), null);
+    // The cursor starts in the text, not in the properties.
+    await run(`document.querySelector('.cm-content').focus()`);
+    await web.insertText('Hot ');
+    await delay(400);
+    assert.equal((await files())['Japan.md'], note.replace('Ramen', 'Hot Ramen'));
+    pass('frontmatter is drawn as properties, with tags as pills, and typing lands below it');
+
+    await run(
+      `document.querySelector('.op-properties').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`,
+    );
+    await delay(100);
+    assert.equal(await run(`document.querySelector('.op-properties')`), null);
+    assert.equal(await run(`document.querySelectorAll('.op-frontmatter').length`), 4);
+    await run(`document.querySelector('.cm-content').blur()`);
+    await delay(100);
+    assert.notEqual(await run(`document.querySelector('.op-properties')`), null);
+    pass('clicking the properties shows their Markdown; leaving them draws them again');
+
+    await run(
+      `document.querySelector('.cm-content .op-tag[data-tag="noodles"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))`,
+    );
+    await delay(200);
+    assert.deepEqual(await run(`test.out.filter((m) => m.note === 'tag').map((m) => m.tag)`), [
+      'noodles',
+    ]);
+    await run(`document.querySelector('.op-tag').click()`);
+    await delay(200);
+    assert.deepEqual(await run(`test.out.filter((m) => m.note === 'tag').map((m) => m.tag)`), [
+      'noodles',
+      'travel',
+    ]);
+    pass('a tag in the text or the properties tells the app which tag was tapped');
+
+    await run(`window.OpsidianHost.receive({ event: 'mode', mode: 'reading' })`);
+    await delay(100);
+    assert.deepEqual(await properties(), ['title=Japan trip', 'tags=#travel,#food']);
+    await run(`window.OpsidianHost.receive({ event: 'mode', mode: 'source' })`);
+    await delay(100);
+    assert.equal(await run(`document.querySelector('.op-properties')`), null);
+    await run(`window.OpsidianHost.receive({ event: 'mode', mode: 'live' })`);
+    pass('reading view draws the properties; source mode shows the Markdown');
+
+    await run(`document.querySelector('.cm-content').focus()`);
+    // The editor's Mod key is ⌘ on a Mac and Control elsewhere, as it is for ⌘B.
+    const mod = process.platform === 'darwin' ? 'meta' : 'control';
+    web.sendInputEvent({ type: 'keyDown', keyCode: 'f', modifiers: [mod, 'alt'] });
+    web.sendInputEvent({ type: 'keyUp', keyCode: 'f', modifiers: [mod, 'alt'] });
+    await delay(200);
+    assert.equal(
+      await run(`document.querySelector('.op-find [aria-expanded]').getAttribute('aria-expanded')`),
+      'true',
+    );
+    assert.equal(await run(`document.activeElement.placeholder`), 'Replace with');
+    await run(`(() => { const p = document.querySelector('.op-find'); const [find, replace] = p.querySelectorAll('input');
+      find.value = 'Ramen'; find.dispatchEvent(new Event('input')); replace.value = 'Udon'; replace.dispatchEvent(new Event('input'));
+      p.querySelector('[aria-label="Replace all matches"]').click(); })()`);
+    await delay(300);
+    assert.equal((await files())['Japan.md'].includes('Hot Udon with'), true);
+    pass('⌥⌘F opens find and replace with the replacement field focused, and replace all replaces');
     app.exit(0);
   } catch (error) {
     console.error(`FAIL ${error.stack ?? error}`);

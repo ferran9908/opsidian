@@ -505,6 +505,8 @@ function Note(props: {
           String(value.target ?? ''),
           typeof value.heading === 'string' ? value.heading : undefined,
         ).catch((reason) => setNotice({ text: message(reason) }));
+      else if (value.note === 'tag' && typeof value.tag === 'string')
+        navigation.push({ name: 'search', query: `#${value.tag}` });
       return;
     }
     if (typeof value.id !== 'number' || typeof value.method !== 'string') return;

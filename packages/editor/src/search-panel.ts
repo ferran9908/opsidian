@@ -8,7 +8,18 @@ import {
   replaceNext,
   replaceAll,
   closeSearchPanel,
+  openSearchPanel,
 } from '@codemirror/search';
+
+/** How to show each open panel's replacement row, so a shortcut can ask for it. */
+const panels = new WeakMap<EditorView, (replace: boolean) => void>();
+
+/** Opens find, or find and replace, with the field focused. */
+export function openFind(view: EditorView, replace = false): boolean {
+  openSearchPanel(view);
+  panels.get(view)?.(replace && !view.state.readOnly);
+  return true;
+}
 
 /** Keep CodeMirror's search engine and shortcuts, with notebook-native controls. */
 export function createSearchPanel(view: EditorView): Panel {
@@ -75,12 +86,22 @@ export function createSearchPanel(view: EditorView): Panel {
     const found = (previous ? findPrevious : findNext)(view);
     if (query.valid) status.textContent = found ? '' : 'No matches';
   }
+  const showReplace = (shown: boolean) => {
+    replacement.hidden = !shown;
+    expand.setAttribute('aria-expanded', String(shown));
+    if (shown) {
+      replace.focus();
+      replace.select();
+    } else {
+      find.focus();
+      find.select();
+    }
+  };
   const expand = button('Show replacement options', 'Replace', () => {
-    replacement.hidden = !replacement.hidden;
-    expand.setAttribute('aria-expanded', String(!replacement.hidden));
-    if (!replacement.hidden) replace.focus();
+    showReplace(Boolean(replacement.hidden));
   });
   expand.setAttribute('aria-expanded', 'false');
+  panels.set(view, showReplace);
   row.append(
     find,
     toggle('Match case', 'Aa', 'caseSensitive'),
@@ -129,6 +150,9 @@ export function createSearchPanel(view: EditorView): Panel {
     mount() {
       find.focus();
       find.select();
+    },
+    destroy() {
+      panels.delete(view);
     },
     update(update: ViewUpdate) {
       if (update.transactions.some((tr) => tr.effects.some((effect) => effect.is(setSearchQuery))))

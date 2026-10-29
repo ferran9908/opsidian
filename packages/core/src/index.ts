@@ -1,9 +1,10 @@
 export { SaveQueue, type SaveStatus } from './save-queue';
 export { initialMarkdown, noteSuggestions } from './sample';
 export * from './links';
+export * from './frontmatter';
 export * from './table';
 import { encodeDestination } from './links';
-export { NoteIndex, type Backlink, type SearchResult } from './note-index';
+export { NoteIndex, type Backlink, type SearchResult, type TagCount } from './note-index';
 export * from './graph';
 export * from './vault';
 export { mergeText } from './merge';

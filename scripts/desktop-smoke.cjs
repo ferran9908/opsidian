@@ -46,7 +46,10 @@ const text = (name) => (existsSync(note(name)) ? readFileSync(note(name), 'utf8'
     await waitFor(() => evaluate(`Boolean(${find})`), `${item} in the menu`);
     await evaluate(`${find}.click()`);
   };
+  // ⌘ on a Mac; elsewhere the same shortcuts take Control, which lets this run on Linux.
+  const mod = process.platform === 'darwin' ? 'meta' : 'control';
   const key = (keyCode, modifiers = []) => {
+    modifiers = modifiers.map((modifier) => (modifier === 'meta' ? mod : modifier));
     web.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
     web.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
   };
@@ -444,6 +447,118 @@ const text = (name) => (existsSync(note(name)) ? readFileSync(note(name), 'utf8'
   await waitFor(() => present('.op-wikilink'), 'preview survives odd input');
   assert.equal(await present('main [role="alert"] .text-destructive, main p[role="alert"]'), false);
   console.log('PASS typing during a rename, preview survives odd input');
+
+  // Properties and tags: frontmatter draws as a box, a tag pill searches for the tag.
+  if (!(await present('[data-command]'))) {
+    await evaluate(
+      `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', metaKey: true, bubbles: true }))`,
+    );
+    await waitFor(() => present('[data-command="source"]'), 'the command palette');
+    // Live Preview whatever mode the note was left in; the command toggles.
+    if (
+      (await evaluate(`document.querySelector('[data-command="source"]').textContent`)).includes(
+        'Live',
+      )
+    )
+      await evaluate(`document.querySelector('[data-command="source"]').click()`);
+    else key('Escape');
+    await waitFor(async () => !(await present('[data-command]')), 'palette closed');
+  }
+  await replace('---\ntags: [travel]\n---\nRamen #noodles');
+  await waitFor(() => text('Sunday').startsWith('---'), 'save');
+  await blur();
+  await waitFor(() => present('.op-properties'), 'properties');
+  assert.equal(
+    await evaluate(
+      `[...document.querySelectorAll('.cm-content .op-tag')].map((e) => e.textContent).join(' ')`,
+    ),
+    '#travel #noodles',
+  );
+  await evaluate(
+    `document.querySelector('.cm-content .op-tag[data-tag="noodles"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))`,
+  );
+  await waitFor(() => present('[aria-label="Find or create a note"]'), 'find dialog');
+  assert.equal(
+    await evaluate(`document.querySelector('[aria-label="Find or create a note"]').value`),
+    '#noodles',
+  );
+  await waitFor(
+    () =>
+      evaluate(
+        `[...document.querySelectorAll('[role="dialog"] li')].some((li) => li.textContent.includes('Sunday'))`,
+      ),
+    'the tagged note in the results',
+  );
+  assert.equal(
+    await evaluate(
+      `[...document.querySelectorAll('[role="dialog"] li')].some((li) => li.textContent.startsWith('Create'))`,
+    ),
+    false,
+  );
+  key('Escape');
+  await waitFor(
+    async () => !(await present('[aria-label="Find or create a note"]')),
+    'dialog closed',
+  );
+  console.log('PASS properties and tags');
+
+  // The command palette lists every action with its shortcut, and runs one.
+  await evaluate(
+    `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', metaKey: true, bubbles: true }))`,
+  );
+  await waitFor(() => present('[aria-label="Type a command"]'), 'the command palette');
+  const commands = await evaluate(
+    `[...document.querySelectorAll('[data-command]')].map((b) => b.dataset.command)`,
+  );
+  for (const expected of [
+    'new-note',
+    'find-note',
+    'find-in-note',
+    'replace-in-note',
+    'reading',
+    'source',
+    'graph',
+    'trash',
+    'settings-general',
+    'sync-github',
+  ])
+    assert.ok(commands.includes(expected), `palette lists ${expected}`);
+  assert.equal(
+    await evaluate(`document.querySelector('[data-command="new-note"] kbd').textContent`),
+    '⌘N',
+  );
+  await web.insertText('reading');
+  await waitFor(
+    () =>
+      evaluate(`document.querySelector('[data-selected="true"]')?.dataset.command === 'reading'`),
+    'reading view at the top',
+  );
+  key('Enter');
+  await waitFor(() => present('[aria-label="Edit"]'), 'reading view from the palette');
+  await click('Edit');
+  await waitFor(() => present('[aria-label="Reading view"]'), 'back to editing');
+  console.log('PASS command palette');
+
+  // The graph draws tags as nodes when asked.
+  key('G', ['meta']);
+  await waitFor(() => present('[aria-label="Note graph"]'), 'graph');
+  const counted = () =>
+    evaluate(
+      `parseInt(([...document.querySelectorAll('span')].find((s) => /^\\d+ notes?$/.test(s.textContent.trim())) ?? { textContent: '0' }).textContent, 10)`,
+    );
+  await waitFor(async () => (await counted()) > 0, 'graph count');
+  const withoutTags = await counted();
+  await evaluate(
+    `[...document.querySelectorAll('label')].find((l) => l.textContent.trim() === 'Tags').querySelector('input').click()`,
+  );
+  await waitFor(async () => (await counted()) === withoutTags + 2, 'two tag nodes');
+  await evaluate(
+    `[...document.querySelectorAll('label')].find((l) => l.textContent.trim() === 'Tags').querySelector('input').click()`,
+  );
+  await waitFor(async () => (await counted()) === withoutTags, 'tags hidden again');
+  key('G', ['meta']);
+  await waitFor(() => present('.cm-content'), 'editor again');
+  console.log('PASS tags in the graph');
 
   await openFromSidebar('Brand new');
   await pick('More options', 'Move to trash');

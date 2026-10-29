@@ -217,7 +217,7 @@ function Stack() {
         ) : top.name === 'settings' ? (
           <Settings />
         ) : top.name === 'search' ? (
-          <Search />
+          <Search query={top.query} />
         ) : top.name === 'trash' ? (
           <Trash />
         ) : top.name === 'sync' ? (

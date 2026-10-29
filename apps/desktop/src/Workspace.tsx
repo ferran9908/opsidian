@@ -4,15 +4,22 @@ import {
   ArrowRight,
   BookOpen,
   Check,
+  CircleHelp,
   Code,
   Ellipsis,
+  FilePlus2,
   FolderInput,
+  FolderOpen,
   FolderSearch,
   History,
   PanelLeft,
   Pencil,
   RefreshCw,
+  Replace,
+  Search,
+  Settings as SettingsIcon,
   Share2,
+  TextSearch,
   Trash2,
   X,
 } from 'lucide-react';
@@ -24,6 +31,7 @@ import {
   type MissingNotebook,
   type MoveResult,
   type SyncInfo,
+  type TagCount,
   type VaultInfo,
   type VaultTree,
 } from '@opsidian/core';
@@ -36,7 +44,7 @@ import { CommandPalette, type PaletteCommand } from './CommandPalette';
 import { copyOutcome } from './GitHub';
 import { TrashDialog } from './TrashDialog';
 import { SyncDialog } from './SyncDialog';
-import { Settings, type SettingsSection } from './Settings';
+import { Settings, SETTINGS_SECTIONS, type SettingsSection } from './Settings';
 import { HistoryDialog } from './HistoryDialog';
 import { Sidebar, type TreeSort } from './Sidebar';
 import { StatusBar, type NoteStatus } from './StatusBar';
@@ -82,12 +90,14 @@ function copyText(text: string): Promise<void> {
 export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) {
   const storageKey = `opsidian-session:${vault.location}`;
   const [tree, setTree] = useState<VaultTree>();
+  const [tags, setTags] = useState<TagCount[]>([]);
   // `visit` counts openings, so the editor remounts on a new note but not on a rename.
   const [open, setOpen] = useState<{ path: string; visit: number; heading?: string } | null>(null);
   const [trail, setTrail] = useState<{ paths: string[]; at: number }>({ paths: [], at: -1 });
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [sidebar, setSidebar] = useState(true);
-  const [finding, setFinding] = useState(false);
+  // The find dialog's starting text, or null while it is closed.
+  const [finding, setFinding] = useState<string | null>(null);
   const [commanding, setCommanding] = useState(false);
   const [moving, setMoving] = useState<string | null>(null);
   const [trashOpen, setTrashOpen] = useState(false);
@@ -114,8 +124,9 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
   state.current = { open, trail, tree };
 
   const refresh = useCallback(async () => {
-    const next = await bridge.tree();
+    const [next, tagged] = await Promise.all([bridge.tree(), bridge.tags()]);
     setTree(next);
+    setTags(tagged);
     setVersion((count) => count + 1);
     return next;
   }, []);
@@ -247,10 +258,10 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
       } else if (key === 'k' || key === 'o') {
         event.preventDefault();
         setCommanding(false);
-        setFinding(true);
+        setFinding('');
       } else if (key === 'p') {
         event.preventDefault();
-        setFinding(false);
+        setFinding(null);
         setCommanding(true);
       } else if (key === ',') {
         event.preventDefault();
@@ -284,13 +295,134 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
       fail(reason);
     }
   }
+  /** Searches the notebook for a tag, as clicking one does. A tag just typed is saved first. */
+  const findTag = (tag: string) => {
+    setCommanding(false);
+    void (editor.current?.flush() ?? Promise.resolve())
+      .catch(() => {})
+      .then(() => setFinding(`#${tag}`));
+  };
+  const setEditing = (next: EditorMode) => {
+    editing.current = next;
+    setMode(next);
+  };
   const commands: PaletteCommand[] = [
+    { id: 'new-note', title: 'New note', icon: FilePlus2, keys: '⌘N', run: () => void create('') },
+    { id: 'find-note', title: 'Find a note', icon: Search, keys: '⌘K', run: () => setFinding('') },
+    ...(open && !graphOpen
+      ? [
+          {
+            id: 'find-in-note',
+            title: 'Find in note',
+            icon: TextSearch,
+            keys: '⌘F',
+            run: () => editor.current?.find(false),
+          },
+          ...(mode !== 'reading'
+            ? [
+                {
+                  id: 'replace-in-note',
+                  title: 'Find and replace in note',
+                  icon: Replace,
+                  keys: '⌥⌘F',
+                  run: () => editor.current?.find(true),
+                },
+              ]
+            : []),
+          {
+            id: 'reading',
+            title: mode === 'reading' ? 'Edit note' : 'Reading view',
+            icon: mode === 'reading' ? Pencil : BookOpen,
+            keys: '⌘E',
+            run: toggleReading,
+          },
+          {
+            id: 'source',
+            title: mode === 'source' ? 'Live Preview' : 'Source mode',
+            icon: Code,
+            run: () => setEditing(mode === 'source' ? 'live' : 'source'),
+          },
+          {
+            id: 'rename',
+            title: 'Rename note',
+            icon: Pencil,
+            run: () => {
+              if (mode === 'reading') setMode(editing.current);
+              setTimeout(() => editor.current?.focusTitle(), 0);
+            },
+          },
+          {
+            id: 'move',
+            title: 'Move note to…',
+            icon: FolderInput,
+            run: () => setMoving(open.path),
+          },
+          {
+            id: 'reveal',
+            title: 'Show note in Finder',
+            icon: FolderSearch,
+            run: () => void bridge.reveal(open.path).catch(fail),
+          },
+          ...(sync.connected
+            ? [
+                {
+                  id: 'history',
+                  title: 'Version history',
+                  icon: History,
+                  run: () => setHistoryOpen(true),
+                },
+              ]
+            : []),
+          {
+            id: 'trash-note',
+            title: 'Move note to trash',
+            icon: Trash2,
+            run: () => void trash(open.path),
+          },
+        ]
+      : []),
+    {
+      id: 'graph',
+      title: graphOpen ? 'Close graph' : 'Open local graph',
+      icon: Share2,
+      keys: '⌘G',
+      run: toggleGraph,
+    },
+    { id: 'back', title: 'Back', icon: ArrowLeft, keys: '⌥⌘←', run: () => step(-1) },
+    { id: 'forward', title: 'Forward', icon: ArrowRight, keys: '⌥⌘→', run: () => step(1) },
+    {
+      id: 'sidebar',
+      title: sidebar ? 'Hide sidebar' : 'Show sidebar',
+      icon: PanelLeft,
+      run: () => setSidebar(!sidebar),
+    },
+    { id: 'trash', title: 'Open trash', icon: Trash2, run: () => setTrashOpen(true) },
+    {
+      id: 'sync-status',
+      title: 'Sync status',
+      icon: RefreshCw,
+      run: () => (sync.connected ? setSyncOpen(true) : setSettings('sync')),
+    },
     {
       id: 'sync-github',
       title: 'Sync with GitHub',
       icon: RefreshCw,
       run: () => void syncWithGitHub(),
     },
+    ...SETTINGS_SECTIONS.map(([id, label]) => ({
+      id: `settings-${id}`,
+      title: `Settings: ${label}`,
+      icon: SettingsIcon,
+      ...(id === 'general' ? { keys: '⌘,' } : {}),
+      run: () => setSettings(id),
+    })),
+    {
+      id: 'switch',
+      title: 'Switch notebook',
+      icon: FolderOpen,
+      run: () => void (editor.current?.flush() ?? Promise.resolve()).then(() => onSwitch(), fail),
+    },
+    { id: 'help', title: 'Help', icon: CircleHelp, run: () => void bridge.openHelp().catch(fail) },
   ];
 
   async function trash(path: string) {
@@ -565,6 +697,7 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
               dark={theme.dark}
               onOpen={(path) => void show(path).catch(fail)}
               onCreate={(name) => void create('', name)}
+              onTag={findTag}
             />
           </div>
         )}
@@ -574,6 +707,7 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
             ref={editor}
             path={open.path}
             notes={tree.notes}
+            tags={tags.map((entry) => entry.tag)}
             heading={open.heading}
             resolve={resolve}
             locateImage={locateImage}
@@ -581,6 +715,7 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
             version={version}
             onOpenLink={follow}
             onOpen={(path) => void show(path).catch(fail)}
+            onTag={findTag}
             onRename={(name) => relocate(open.path, () => bridge.rename(open.path, name))}
             onChanged={() => void refresh().catch(fail)}
             onNotice={setNotice}
@@ -593,7 +728,7 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
               <button className="text-link" onClick={() => void create('')}>
                 New note <kbd className="text-muted-foreground pl-1 font-sans text-xs">⌘ N</kbd>
               </button>
-              <button className="text-link" onClick={() => setFinding(true)}>
+              <button className="text-link" onClick={() => setFinding('')}>
                 Find a note <kbd className="text-muted-foreground pl-1 font-sans text-xs">⌘ K</kbd>
               </button>
             </div>
@@ -633,19 +768,20 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
         </div>
       )}
       {commanding && <CommandPalette commands={commands} onClose={() => setCommanding(false)} />}
-      {finding && (
+      {finding !== null && (
         <QuickSwitcher
           notes={tree.notes}
           recent={[...trail.paths].reverse()}
+          initial={finding}
           onOpen={(path) => {
-            setFinding(false);
+            setFinding(null);
             void show(path).catch(fail);
           }}
           onCreate={(name) => {
-            setFinding(false);
+            setFinding(null);
             void create('', name);
           }}
-          onClose={() => setFinding(false)}
+          onClose={() => setFinding(null)}
         />
       )}
       {moving && (

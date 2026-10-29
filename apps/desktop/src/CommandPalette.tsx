@@ -7,6 +7,8 @@ export interface PaletteCommand {
   id: string;
   title: string;
   icon: ComponentType<{ size?: number; className?: string }>;
+  /** The shortcut that does the same, shown beside the name. */
+  keys?: string;
   run(): void;
 }
 
@@ -77,7 +79,12 @@ export function CommandPalette({ commands, onClose }: Props) {
                 onClick={() => choose(command)}
               >
                 <command.icon size={16} className="text-muted-foreground shrink-0" />
-                {command.title}
+                <span className="flex-1 truncate">{command.title}</span>
+                {command.keys && (
+                  <kbd className="text-muted-foreground shrink-0 font-sans text-xs tracking-wide">
+                    {command.keys}
+                  </kbd>
+                )}
               </button>
             </li>
           ))}

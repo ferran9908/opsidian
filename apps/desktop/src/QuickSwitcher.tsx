@@ -8,14 +8,16 @@ interface Props {
   notes: string[];
   /** Most recently opened first; shown before anything is typed. */
   recent: string[];
+  /** What the search starts with, for example `#tag`. */
+  initial?: string;
   onOpen(path: string): void;
   onCreate(name: string): void;
   onClose(): void;
 }
 type Row = SearchResult | { create: string };
 
-export function QuickSwitcher({ notes, recent, onOpen, onCreate, onClose }: Props) {
-  const [query, setQuery] = useState('');
+export function QuickSwitcher({ notes, recent, initial, onOpen, onCreate, onClose }: Props) {
+  const [query, setQuery] = useState(initial ?? '');
   const [found, setFound] = useState<SearchResult[]>([]);
   const [selected, setSelected] = useState(0);
   const list = useRef<HTMLUListElement>(null);
@@ -37,9 +39,9 @@ export function QuickSwitcher({ notes, recent, onOpen, onCreate, onClose }: Prop
     .filter((path) => notes.includes(path))
     .slice(0, 30)
     .map((path): Row => ({ path }));
-  const rows: Row[] = trimmed
-    ? [...found, ...(resolveLink(trimmed, notes) ? [] : [{ create: trimmed }])]
-    : idle;
+  // A search by tag does not offer to create a note called `#tag`.
+  const creatable = trimmed && !trimmed.startsWith('#') && !resolveLink(trimmed, notes);
+  const rows: Row[] = trimmed ? [...found, ...(creatable ? [{ create: trimmed }] : [])] : idle;
   useEffect(() => setSelected(0), [query, found.length]);
   useEffect(() => {
     list.current?.children[selected]?.scrollIntoView({ block: 'nearest' });
@@ -64,7 +66,7 @@ export function QuickSwitcher({ notes, recent, onOpen, onCreate, onClose }: Prop
           <input
             autoFocus
             value={query}
-            placeholder="Find or create a note…"
+            placeholder="Find or create a note, or #tag…"
             aria-label="Find or create a note"
             className="placeholder:text-faint h-12 flex-1 bg-transparent outline-none"
             onChange={(event) => setQuery(event.target.value)}
@@ -120,7 +122,9 @@ export function QuickSwitcher({ notes, recent, onOpen, onCreate, onClose }: Prop
             </li>
           ))}
           {!rows.length && (
-            <li className="text-muted-foreground px-3 py-6 text-center text-sm">No notes yet.</li>
+            <li className="text-muted-foreground px-3 py-6 text-center text-sm">
+              {trimmed.startsWith('#') ? 'No note carries that tag.' : 'No notes yet.'}
+            </li>
           )}
         </ul>
       </div>

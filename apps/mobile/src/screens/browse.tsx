@@ -83,12 +83,12 @@ function NoteRow(props: {
   );
 }
 
-/** Looks through note names and everything written inside them. */
-export function Search() {
+/** Looks through note names and everything written inside them, or by `#tag`. */
+export function Search(props: { query?: string | undefined }) {
   const colors = useColors();
   const navigation = useNavigation();
   const { version } = useStore();
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(props.query ?? '');
   const asked = query.trim();
   const results: SearchResult[] = useMemo(
     () => (asked ? (store.notebook?.vault.search(asked) ?? []).slice(0, 100) : []),
@@ -149,6 +149,19 @@ export function Search() {
                 />
               ))}
             </>
+          ) : asked.startsWith('#') ? (
+            <View style={{ paddingTop: 40, gap: 10 }}>
+              <Text
+                style={{
+                  fontSize: 24,
+                  lineHeight: 30,
+                  fontWeight: '700',
+                  color: colors.foreground,
+                }}
+              >
+                No note carries {asked}.
+              </Text>
+            </View>
           ) : asked ? (
             <View style={{ paddingTop: 40, gap: 10 }}>
               <Text

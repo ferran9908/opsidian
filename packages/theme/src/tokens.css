@@ -39,6 +39,7 @@
   --graph-node-unresolved: #ababab;
   --graph-node-active: #8a5cf5;
   --graph-node-highlight: #8a5cf5;
+  --graph-node-tag: #08b94e;
   --graph-link: #d4d4d4;
   --graph-link-highlight: #8a5cf5;
   --graph-label: #5c5c5c;
@@ -79,6 +80,7 @@
   --graph-node-unresolved: #666666;
   --graph-node-active: #a68af9;
   --graph-node-highlight: #a68af9;
+  --graph-node-tag: #44cf6e;
   --graph-link: #3f3f3f;
   --graph-link-highlight: #a68af9;
   --graph-label: #b3b3b3;

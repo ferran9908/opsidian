@@ -34,7 +34,7 @@ const FENCE = /^(?:[ \t]|>|[-*+][ \t]|\d+[.)][ \t])*(`{3,}(?!.*`)|~{3,})/;
  * The note with fenced and inline code blanked out, so offsets still match the original.
  * Code blocks made only by indentation are not recognised.
  */
-function prose(markdown: string): string {
+export function prose(markdown: string): string {
   let fence: string | undefined;
   return markdown
     .split('\n')

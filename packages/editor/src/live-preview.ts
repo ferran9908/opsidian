@@ -1,4 +1,4 @@
-import { RangeSetBuilder } from '@codemirror/state';
+import { EditorState, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import {
   Decoration,
@@ -8,7 +8,14 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view';
-import { encodeDestination, linkLabel, splitLink } from '@opsidian/core';
+import {
+  encodeDestination,
+  inlineTags,
+  linkLabel,
+  parseFrontmatter,
+  splitLink,
+  type Frontmatter,
+} from '@opsidian/core';
 import { drawnTables, tablePreview } from './table';
 
 export interface PreviewOptions {
@@ -23,6 +30,8 @@ export interface PreviewOptions {
   embedStamp?(): number;
   /** Supplied by the editor: draws Markdown read-only and returns how to remove it. */
   renderEmbed?(parent: HTMLElement, content: string): () => void;
+  /** Called when a `#tag` is clicked, in the text or in the properties above it. */
+  onTag?(tag: string): void;
 }
 
 const IMAGE_NAME = /\.(png|jpe?g|gif|webp)$/i;
@@ -180,6 +189,92 @@ class EmbedWidget extends WidgetType {
   }
 }
 
+/** The note's frontmatter drawn as properties, the way Obsidian shows them above the text. */
+class PropertiesWidget extends WidgetType {
+  constructor(
+    readonly raw: string,
+    readonly frontmatter: Frontmatter,
+    readonly onTag: PreviewOptions['onTag'],
+  ) {
+    super();
+  }
+  eq(other: PropertiesWidget) {
+    return this.raw === other.raw;
+  }
+  toDOM(view: EditorView) {
+    const box = document.createElement('div');
+    box.className = 'op-properties';
+    box.setAttribute('role', 'group');
+    box.setAttribute('aria-label', 'Properties');
+    const edit = (event: Event) => {
+      if (view.state.readOnly) return;
+      event.preventDefault();
+      // Put the cursor on the first property, where the Markdown shows for editing.
+      const line = view.state.doc.lineAt(Math.min(4, view.state.doc.length));
+      view.dispatch({ selection: { anchor: line.to } });
+      view.focus();
+    };
+    for (const { key, value } of this.frontmatter.properties) {
+      const row = document.createElement('div');
+      row.className = 'op-property';
+      const name = document.createElement('span');
+      name.className = 'op-property-key';
+      name.textContent = key;
+      const values = document.createElement('span');
+      values.className = 'op-property-value';
+      const isTags = key === 'tags' || key === 'tag';
+      for (const item of Array.isArray(value) ? value : [value]) {
+        if (isTags && this.onTag) {
+          values.append(tagPill(item.replace(/^#/, ''), this.onTag));
+          continue;
+        }
+        const chip = document.createElement('span');
+        chip.className = Array.isArray(value) ? 'op-property-item' : 'op-property-text';
+        chip.textContent = item;
+        values.append(chip);
+      }
+      row.append(name, values);
+      box.append(row);
+    }
+    if (!this.frontmatter.properties.length) {
+      const empty = document.createElement('span');
+      empty.className = 'op-property-text';
+      empty.textContent = 'No properties';
+      box.append(empty);
+    }
+    box.addEventListener('mousedown', (event) => {
+      if (!(event.target as HTMLElement).closest('.op-tag')) edit(event);
+    });
+    return box;
+  }
+  ignoreEvent(event: Event) {
+    return event.type === 'mousedown' || event.type === 'click';
+  }
+}
+
+function tagPill(tag: string, onTag: NonNullable<PreviewOptions['onTag']>) {
+  const pill = document.createElement('span');
+  pill.className = 'op-tag';
+  pill.textContent = `#${tag}`;
+  pill.setAttribute('role', 'link');
+  pill.addEventListener('mousedown', (event) => event.preventDefault());
+  pill.addEventListener('click', () => onTag(tag));
+  return pill;
+}
+
+/** Tags in the text are marks, so a click is caught here rather than moving the cursor. */
+function tagClicks(options: PreviewOptions) {
+  return EditorView.domEventHandlers({
+    mousedown(event) {
+      const target = (event.target as HTMLElement).closest?.('.op-tag[data-tag]');
+      if (!target || !options.onTag || event.button !== 0) return false;
+      event.preventDefault();
+      options.onTag(target.getAttribute('data-tag')!);
+      return true;
+    },
+  });
+}
+
 export function isCodeAt(view: EditorView, pos: number) {
   let node = syntaxTree(view.state).resolveInner(pos, 1);
   for (;;) {
@@ -190,7 +285,68 @@ export function isCodeAt(view: EditorView, pos: number) {
 }
 
 export function livePreview(options: PreviewOptions) {
-  return [tablePreview(options), inlinePreview(options)];
+  return [
+    tablePreview(options),
+    propertiesPreview(options),
+    inlinePreview(options),
+    tagClicks(options),
+  ];
+}
+
+/** Where the note's frontmatter is: from the start to the end of the closing line. */
+function frontmatterRange(state: EditorState): { to: number; frontmatter: Frontmatter } | null {
+  const head = state.sliceDoc(0, Math.min(state.doc.length, 20000));
+  const frontmatter = parseFrontmatter(head);
+  if (!frontmatter) return null;
+  return { to: state.doc.lineAt(Math.max(0, frontmatter.end - 1)).to, frontmatter };
+}
+
+/** Whether the editor has focus, kept in the state so decorations computed from it can know. */
+const setFocus = StateEffect.define<boolean>();
+const focused = StateField.define<boolean>({
+  create: () => false,
+  update(value, transaction) {
+    for (const effect of transaction.effects) if (effect.is(setFocus)) return effect.value;
+    return value;
+  },
+});
+
+/**
+ * Frontmatter is drawn as properties, or as muted Markdown while the cursor is in it. It is a
+ * block widget, which the editor only accepts from the state, not from a view plugin.
+ */
+function propertiesPreview(options: PreviewOptions) {
+  return [
+    focused,
+    EditorView.domEventHandlers({
+      focus: (_event, view) => void view.dispatch({ effects: setFocus.of(true) }),
+      blur: (_event, view) => void view.dispatch({ effects: setFocus.of(false) }),
+    }),
+    EditorView.decorations.compute(['doc', 'selection', focused], (state) => {
+      const found = frontmatterRange(state);
+      if (!found) return Decoration.none;
+      const { to, frontmatter } = found;
+      const builder = new RangeSetBuilder<Decoration>();
+      const active =
+        state.field(focused) && state.selection.ranges.some((r) => r.from <= to && r.to >= 0);
+      if (active) {
+        for (let at = 0; at <= to;) {
+          const line = state.doc.lineAt(at);
+          builder.add(line.from, line.from, Decoration.line({ class: 'op-frontmatter' }));
+          at = line.to + 1;
+        }
+      } else
+        builder.add(
+          0,
+          to,
+          Decoration.replace({
+            widget: new PropertiesWidget(state.sliceDoc(0, to), frontmatter, options.onTag),
+            block: true,
+          }),
+        );
+      return builder.finish();
+    }),
+  ];
 }
 
 function inlinePreview(options: PreviewOptions) {
@@ -222,12 +378,16 @@ function inlinePreview(options: PreviewOptions) {
         // Drawn tables are left to the table preview.
         const tables = drawnTables(state, view.hasFocus);
         const inTable = (at: number) => tables.some((t) => t.from <= at && at <= t.to);
+        // Frontmatter is left to the properties extension, which draws it or shows it as is.
+        const frontmatterEnd = frontmatterRange(state)?.to ?? 0;
+        const inFrontmatter = (at: number) => at < frontmatterEnd;
         for (const visible of view.visibleRanges) {
           syntaxTree(state).iterate({
             from: visible.from,
             to: visible.to,
             enter: (node) => {
               const { name, from, to } = node;
+              if (name !== 'Document' && inFrontmatter(from)) return false;
               if (name === 'Table' && inTable(from)) return false;
               if (['FencedCode', 'CodeBlock', 'InlineCode'].includes(name)) {
                 add(from, to, Decoration.mark({ class: 'op-code' }));
@@ -303,12 +463,27 @@ function inlinePreview(options: PreviewOptions) {
             },
           });
           const text = state.sliceDoc(visible.from, visible.to);
+          for (const found of inlineTags(text)) {
+            const from = visible.from + found.from,
+              to = visible.from + found.to;
+            if (inFrontmatter(from) || isCodeAt(view, from) || inTable(from)) continue;
+            if (active(from, to)) add(from, to, Decoration.mark({ class: 'op-tag-source' }));
+            else
+              add(
+                from,
+                to,
+                Decoration.mark({
+                  class: 'op-tag',
+                  attributes: { 'data-tag': found.tag, role: 'link' },
+                }),
+              );
+          }
           for (const match of text.matchAll(/!?\[\[([^\]\n]+)\]\]/g)) {
             const from = visible.from + match.index,
               to = from + match[0].length;
             const inner = match[1]!;
             const { target } = splitLink(inner);
-            if (isCodeAt(view, from) || inTable(from)) continue;
+            if (inFrontmatter(from) || isCodeAt(view, from) || inTable(from)) continue;
             if (active(from, to)) add(from, to, Decoration.mark({ class: 'op-link-source' }));
             else if (match[0].startsWith('!') && IMAGE_NAME.test(target)) {
               // Image sources are link destinations, so a name is passed in that form.

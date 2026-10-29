@@ -190,6 +190,9 @@ function show(opening: Opening) {
       void (saves?.flush() ?? Promise.resolve())
         .catch(() => {})
         .then(() => tell('link', { target: name, heading })),
+    // A tag opens search, so the note is left behind in the same way.
+    onTag: (tag) =>
+      void (saves?.flush() ?? Promise.resolve()).catch(() => {}).then(() => tell('tag', { tag })),
     loadEmbed: (name, heading) => call<string | undefined>('embed', target, name, heading),
     onChange: (content) => {
       saves?.update(content);

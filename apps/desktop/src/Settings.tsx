@@ -39,6 +39,11 @@ const GROUPS: [string, [SettingsSection, string][]][] = [
     ],
   ],
 ];
+/** Every section a command can open, in the order shown; the connection check is under Sync. */
+export const SETTINGS_SECTIONS: [SettingsSection, string][] = [
+  ...GROUPS.flatMap(([, sections]) => sections),
+  ['check', 'Connection check'],
+];
 
 const size = (bytes: number) =>
   bytes < 1024 * 1024

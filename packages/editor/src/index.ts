@@ -20,8 +20,8 @@ import {
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
-import { headingOffset } from '@opsidian/core';
-import { createSearchPanel } from './search-panel';
+import { headingOffset, parseFrontmatter } from '@opsidian/core';
+import { createSearchPanel, openFind } from './search-panel';
 import { livePreview, isCodeAt, type PreviewOptions } from './live-preview';
 
 /** Live Preview and Source edit the note; Reading shows it as it reads, with no editing. */
@@ -33,6 +33,8 @@ export interface EditorOptions extends PreviewOptions {
   content: string;
   /** Note names offered after `[[`. A function is read each time, so the list can change. */
   suggestions: readonly string[] | (() => readonly string[]);
+  /** Tags offered after `#`, without the `#`. */
+  tags?: () => readonly string[];
   /** Called for edits made in the editor, not for `setContent`. */
   onChange(content: string): void;
   onSave(): void;
@@ -104,10 +106,25 @@ export function createEditor(options: EditorOptions) {
       validFor: /^[^\]\n]*$/,
     };
   };
+  const tagSource = (context: CompletionContext) => {
+    if (!options.tags) return null;
+    const match = context.matchBefore(/(?:^|(?<=[\s(\[{,;]))#[\p{L}\p{N}_\-/]*/u);
+    if (!match || isCodeAt(view, match.from)) return null;
+    const known = options.tags();
+    if (!known.length) return null;
+    return {
+      from: match.from + 1,
+      options: known.map((label) => ({ label, type: 'keyword', detail: 'tag' })),
+      validFor: /^[\p{L}\p{N}_\-/]*$/u,
+    };
+  };
+  // A note that opens on its properties starts in the text below them, as Obsidian does.
+  const start = Math.min(parseFrontmatter(options.content)?.end ?? 0, options.content.length);
   const view = new EditorView({
     parent: options.parent,
     state: EditorState.create({
       doc: options.content,
+      selection: { anchor: start },
       extensions: [
         history(),
         markdown({ extensions: [GFM] }),
@@ -115,8 +132,12 @@ export function createEditor(options: EditorOptions) {
         highlighting,
         search({ top: true, createPanel: createSearchPanel }),
         highlightSelectionMatches(),
-        autocompletion({ override: [source], activateOnTyping: true }),
+        autocompletion({ override: [source, tagSource], activateOnTyping: true }),
         keymap.of([
+          {
+            key: 'Mod-Alt-f',
+            run: (editor) => openFind(editor, true),
+          },
           {
             key: 'Mod-s',
             run: () => {
@@ -251,6 +272,10 @@ export function createEditor(options: EditorOptions) {
     replaceAll(content: string) {
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content } });
       view.focus();
+    },
+    /** Opens find in the note, or find and replace. */
+    find(replace = false) {
+      openFind(view, replace);
     },
     /** Puts a heading at the top of the view. False when the note has no such heading. */
     scrollToHeading(heading: string): boolean {

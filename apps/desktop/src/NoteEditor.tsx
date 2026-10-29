@@ -70,10 +70,14 @@ export interface NoteEditorHandle {
   /** What the editor holds now, saved or not. */
   text(): string;
   focusTitle(): void;
+  /** Opens find in the note, or find and replace. */
+  find(replace?: boolean): void;
 }
 interface Props {
   path: string;
   notes: string[];
+  /** Every tag in the notebook, offered after `#`. */
+  tags: string[];
   /** Heading to start at, from a `[[Note#Heading]]` link. */
   heading?: string | undefined;
   resolve(target: string): string | undefined;
@@ -84,6 +88,8 @@ interface Props {
   version: number;
   onOpenLink(target: string, heading?: string): void;
   onOpen(path: string): void;
+  /** A `#tag` was clicked. */
+  onTag(tag: string): void;
   /** Resolves false when the name was refused. */
   onRename(name: string): Promise<boolean>;
   /** Called after this editor added a file to the notebook. */
@@ -141,6 +147,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
     settled: () => saves.current?.settled ?? true,
     text: () => editor.current?.view.state.doc.toString() ?? '',
     focusTitle: () => titleField.current?.select(),
+    find: (replace) => editor.current?.find(replace),
   }));
 
   useEffect(() => {
@@ -223,6 +230,8 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
           content: document.content,
           mode: latest.current.mode,
           suggestions: () => latest.current.notes.map(noteTitle),
+          tags: () => latest.current.tags,
+          onTag: (tag) => latest.current.onTag(tag),
           linkExists: (target) => Boolean(latest.current.resolve(target)),
           resolveImage: (source) => {
             let image: string;

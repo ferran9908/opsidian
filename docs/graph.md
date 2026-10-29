@@ -8,6 +8,8 @@ A whole-vault graph is a later curiosity. Everyday use is "what is around the no
 
 The dots come from the same link index the editor already uses. One pass over the notes produces nodes and unique directed edges. Calling `backlinks()` for every note would have been quadratic and would have disagreed with the editor the moment the two resolvers drifted. Unresolved targets stay in the graph as their own dots, so "Existing files only" can hide them and clicking one can create the note, the same way a dashed `[[link]]` does.
 
+**Tags** can be dots too, turned on with the **Tags** toggle in the graph's settings and off by default. Each tag is one dot, drawn as a green ring, with a string from every note that carries it, in its text or its frontmatter. Clicking a tag searches the notebook for it. Tags come from the same index as links, so they cost nothing extra to build.
+
 Identity is the vault-relative path. That matches how the rest of the app talks about notes. It also means a rename is a new id: the layout tries to keep the old position when exactly one path left and one arrived, and otherwise the renamed note is a new dot. That is a known limit, not a hidden id scheme.
 
 ## How it stays out of the way
@@ -20,7 +22,7 @@ On a vault change the graph updates the dots and strings that actually changed, 
 
 ## What we did not build
 
-Tag nodes and attachment nodes need an index that does not exist yet. A time-lapse, hover page previews, a 3D view, and a React Native renderer are out. The shared `NoteIndex.graph()` is what a phone view would call later.
+Attachment nodes need an index that does not exist yet. A time-lapse, hover page previews, a 3D view, and a React Native renderer are out. The shared `NoteIndex.graph()` is what a phone view would call later.
 
 Canvas is the right first renderer. Somewhere past a few thousand visible dots it will lose to WebGL; the 5,000-note fixture is the current ceiling we measure against, and local graphs stay well under it. The seam is there for when that changes.
 

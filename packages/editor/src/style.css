@@ -344,3 +344,65 @@
     font-size: 16px;
   }
 }
+
+/* Properties: the note's frontmatter, drawn above the text. */
+.cm-editor .op-properties {
+  display: block;
+  margin: 0 0 1.2em;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  font-size: 0.875em;
+  line-height: 1.7;
+  cursor: text;
+}
+.op-property {
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+}
+.op-property + .op-property {
+  border-top: 1px solid var(--border);
+}
+.op-property-key {
+  flex: 0 0 9em;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.op-property-value {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
+  min-width: 0;
+}
+.op-property-item {
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--muted);
+  line-height: 1.6;
+}
+.cm-editor .cm-line.op-frontmatter {
+  font-family: ui-monospace, monospace;
+  font-size: 0.875em;
+  color: var(--muted-foreground);
+  background: var(--muted);
+}
+/* Tags, in the text or in the properties. */
+.cm-editor .op-tag,
+.cm-editor .op-tag-source {
+  color: var(--link);
+}
+.cm-editor .op-tag {
+  background: var(--selection);
+  border-radius: 999px;
+  padding: 0 7px;
+  font-size: 0.875em;
+  cursor: pointer;
+}
+.cm-editor .op-tag:hover {
+  text-decoration: underline;
+}

@@ -17,6 +17,7 @@ const emptyColors: GraphColors = {
   unresolved: '#aaa',
   active: '#8a5cf5',
   highlight: '#8a5cf5',
+  tag: '#08b94e',
   link: '#ccc',
   linkHighlight: '#8a5cf5',
   label: '#555',
@@ -118,7 +119,14 @@ export function createCanvasRenderer(canvas: HTMLCanvasElement): GraphRenderer {
       const radius = nodeRadius(node.degree, display.nodeSize);
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-      if (node.exists) {
+      if (node.tag) {
+        // A tag is a hollow ring in its own colour, so it reads apart from notes.
+        ctx.fillStyle = colors.background;
+        ctx.fill();
+        ctx.lineWidth = 2 / scale;
+        ctx.strokeStyle = highlighted ? colors.highlight : colors.tag;
+        ctx.stroke();
+      } else if (node.exists) {
         ctx.fillStyle =
           node.id === active ? colors.active : highlighted ? colors.highlight : colors.node;
         ctx.fill();
