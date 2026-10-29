@@ -1,9 +1,14 @@
 {
   "name": "opsidian",
-  "version": "0.1.1",
+  "version": "0.1.0",
   "description": "Host your own Opsidian notebooks: every device syncs through it.",
   "license": "MIT OR Apache-2.0",
   "homepage": "https://ferran.sh/opsidian",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ferran9908/opsidian.git",
+    "directory": "apps/host"
+  },
   "type": "module",
   "bin": {
     "opsidian": "bin/opsidian.mjs"

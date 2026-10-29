@@ -53,6 +53,16 @@ export interface Config {
   backup?: { folder: string; keep: number; hour: number };
   /** The last scheduled backup that did not work, until one does. */
   failed?: { at: number; message: string };
+  /** New versions from npm, installed by the host itself unless `auto` is false. */
+  update?: {
+    auto?: boolean;
+    /** The hour it looks each night, 0 to 23. Default 4, after the nightly backup. */
+    hour?: number;
+    /** When it last looked, milliseconds. */
+    checked?: number;
+    /** The last version that could not be installed or did not start; it is not tried again. */
+    failed?: { version: string; at: number; message: string };
+  };
 }
 
 export const DEFAULT_PORT = 4810;

@@ -180,6 +180,15 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Only a copy the host has in full is deleted.** This narrows "every file stays" from the 2026-10-25 decisions. Before leaving, the device sends what is left and checks that nothing is waiting, held back by the deletion guard, or refused, within 20 seconds; otherwise the copy stays and the device says why. Deleting whenever asked was rejected: an offline device would lose every edit the host never received. A notebook a Mac hosts itself is never deleted this way, nor one whose host had already removed the device.
 - **Still to check on a real iPhone:** the switch in the Disconnect sheet, and the app starting afresh once its notebook is deleted. It has been typechecked, not run.
 
+## Updating the host — 2026-10-29
+
+- **The host for servers is published to npm on every change,** by the release workflow, with the same version as that run's Mac app. Raised by the user, who found the server on this machine still on the version installed by hand: npm had only 0.1.1, published once by hand, and nothing updated an installed host, which runs its own copy of the program in `bin`.
+- **Installed hosts update themselves each night, and `host update` does it on demand.** The user asked for both. The time is 04:00, after the default backup hour, so a backup made that night precedes the change; another is made just before when backups are set up.
+- **Published by npm's trusted publishing,** with no token in GitHub's secrets. A token was the alternative; it would have to be renewed, and could publish from anywhere if it leaked. A maintainer links the package to the workflow once (`docs/release.md`).
+- **npm, not the GitHub release.** Attaching the program to the Mac app's release would have needed no npm setup, but a release is made only when the Mac app changes, and `npx opsidian host start` installs from npm anyway, so one place serves new and existing hosts.
+- **Checked before it replaces anything.** The download must match the checksum npm publishes for it, say the version it claims, and start as an empty host of its own. Then it replaces the program, keeping the old one, and the host exits for its service to start the new one; launchd and systemd both start it again whenever it stops. A version that fails to start on the host's data, except for its address not being there yet, puts the old program back and is not tried again. A version that starts and then fails later is not caught; going back is `host update` once a fixed version is out, or a backup.
+- **Only a host `host start` installed is updated:** not one run in Docker, whose image is the version, nor `host run` by hand, nor a development build.
+
 ## Future AI direction
 
 Potential features: organize a messy thought, answer questions over notes with citations, and suggest related notes. A machine-hosted agent and supported Codex/ChatGPT sign-in were explored. No AI integration is committed for the initial milestones; re-check product access and integration documentation when that work begins.

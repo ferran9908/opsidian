@@ -43,6 +43,7 @@ jobs:
     outputs:
       mac: ${{ steps.filter.outputs.mac }}
       iphone: ${{ steps.filter.outputs.iphone }}
+      host: ${{ steps.filter.outputs.host }}
     steps:
       - uses: actions/checkout@v5
       - id: filter
@@ -54,6 +55,11 @@ jobs:
               - 'apps/host/src/**'
               - 'packages/**'
               - 'design/logo/**'
+              - 'pnpm-lock.yaml'
+              - '.github/workflows/release.yml'
+            host:
+              - 'apps/host/**'
+              - 'packages/**'
               - 'pnpm-lock.yaml'
               - '.github/workflows/release.yml'
             iphone:
@@ -135,6 +141,47 @@ jobs:
       - name: Clean up the key
         if: always()
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+  # The host for servers, on npm as `opsidian`. Installed hosts look for it there each night.
+  # Published by npm's trusted publishing, so no token is kept: the package names this workflow
+  # as its publisher (see docs/release.md).
+  host:
+    name: Host on npm
+    needs: [check, changes]
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.host == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      # Trusted publishing needs npm 11.5.1 or later, whichever Node 24 is installed.
+      - run: npm install -g npm@11
+      - name: Stamp the version
+        working-directory: apps/host
+        # The same run number as the Mac app's, so both say the same version.
+        run: |
+          base=$(node -p "require('./package.json').version.split('.').slice(0, 2).join('.')")
+          version="$base.${{ github.run_number }}"
+          npm pkg set version="$version"
+          # Everything is bundled into one file; nothing is installed with it.
+          npm pkg delete devDependencies
+          echo "Publishing opsidian $version"
+      - name: Publish
+        working-directory: apps/host
+        run: |
+          npm publish --access public || {
+            echo "::error::npm refused. If it says the package has no trusted publisher, run once: npm trust github opsidian --file release.yml --repo ferran9908/opsidian --allow-publish"
+            exit 1
+          }
 
   iphone:
     name: iPhone app

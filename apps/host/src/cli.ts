@@ -25,6 +25,16 @@ import { github, readAccount, statusLine } from './github-cli';
 import { repositoryLabel } from './github';
 import { Mirrors, scheduleOf } from './mirror';
 import { takeOver, type TakeOverProgress } from './move';
+import {
+  fetchRelease,
+  installedVersion,
+  latestRelease,
+  newer,
+  pending,
+  rollBack,
+  settled,
+  swapIn,
+} from './update';
 
 const VERSION = process.env.OPSIDIAN_VERSION ?? 'development';
 // Said back in messages the way it was typed: from this repository, through npx, or installed.
@@ -82,6 +92,8 @@ const HELP = `Opsidian ${VERSION}: a host for your notebooks, so every device sy
                                          (the default), 6h or 24h
   ${me} host github                       How each notebook on GitHub is doing; also login,
                                          sync, disconnect, logout
+  ${me} host update           Install the newest version now, if there is one. The host also
+                              does it by itself each night; host update auto off stops that
   ${me} host logs [-f]        What the host has been doing
   ${me} host stop             Stop it, and stop it starting by itself
   ${me} host reset            Start over as on a fresh install: every notebook, device, setting and
@@ -293,6 +305,7 @@ async function status(): Promise<void> {
   const state = 'missing' in manager ? { running: false } : await manager.state();
   const reach = reachableAt(config);
   const answering = state.running && (await answers(reach));
+  const version = (await installedVersion(where)) ?? VERSION;
   const { notebooks, devices, mirrors, schedule, moved } = await withHost((host) => ({
     notebooks: host.notebooks(),
     devices: host.devices().filter((device) => !device.revoked),
@@ -325,6 +338,8 @@ async function status(): Promise<void> {
           ? `… Starting, or failing to start. See ${me} host logs`
           : `✗ Stopped. Start it with ${me} host start`,
       `  Address    http://${reach}`,
+      `  Version    ${version}`,
+      `  Updates    ${existsSync(where.program) ? updatesLine(config) : 'Not here: this host is not run from an installed copy'}`,
       `  Notebooks  ${notebooks.map((each) => `${each.name} (${each.files} files)`).join(', ') || 'none yet'}`,
       `  Devices    ${devices.length}`,
       `  Backups    ${backups}`,
@@ -472,6 +487,99 @@ async function deleteNotebook(): Promise<void> {
   );
   console.log(
     `Deleted “${notebook.name}” from the host. Devices that synced it keep their notes, and are told it was deleted.`,
+  );
+}
+
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+/** The hour new versions are looked for each night. */
+const updateHour = (config: Config | undefined) => config?.update?.hour ?? 4;
+const clock = (hour: number) => `${String(hour).padStart(2, '0')}:00`;
+/** Remembers a version that would not install or start, so it is not tried again. */
+async function updateFailed(version: string, message: string): Promise<void> {
+  const now = await readConfig(where);
+  if (now)
+    await writeConfig(where, {
+      ...now,
+      update: { ...now.update, failed: { version, at: Date.now(), message } },
+    });
+}
+function updatesLine(config: Config): string {
+  const update = config.update;
+  let line =
+    update?.auto === false
+      ? `Off. Update with: ${me} host update`
+      : `By itself, each night at ${clock(updateHour(config))}${update?.checked ? `; last looked ${when(update.checked)}` : ''}`;
+  if (update?.failed)
+    line += `\n             ${update.failed.version} did not install on ${when(update.failed.at)}: ${update.failed.message}`;
+  return line;
+}
+
+/** Installs the newest version from npm, or turns installing by itself on or off. */
+async function update(): Promise<void> {
+  const config = await needConfig();
+  const [what, value] = words;
+  if (what === 'auto') {
+    if (value !== 'on' && value !== 'off')
+      return fail(`Say which: ${me} host update auto on, or ${me} host update auto off`);
+    await writeConfig(where, { ...config, update: { ...config.update, auto: value === 'on' } });
+    return console.log(
+      value === 'on'
+        ? `The host installs new versions by itself, each night at ${clock(updateHour(config))}.`
+        : `The host no longer updates by itself. Update it with: ${me} host update`,
+    );
+  }
+  if (what)
+    return fail(
+      `${me} host update installs the newest version; auto on|off sets whether it does so by itself.`,
+    );
+  if (!existsSync(where.program))
+    return fail(
+      `This host does not run from ${where.program}, so it cannot be updated here.\n` +
+        `In Docker, pull the new image. Otherwise set it up with: ${me} host start`,
+    );
+  const current = (await installedVersion(where)) ?? 'unknown';
+  const release = await latestRelease();
+  if (!newer(release.version, current))
+    return console.log(`Up to date: ${current} is the newest version.`);
+  console.log(`Updating from ${current} to ${release.version}…`);
+  const next = await fetchRelease(where, release).catch(async (reason: Error) => {
+    await updateFailed(release.version, reason.message);
+    return fail(`Nothing was changed. ${reason.message}`);
+  });
+  if (config.backup) {
+    const { folder, keep } = config.backup;
+    const made = await withHost((host) => host.backup(folder, keep)).catch(
+      async (reason: unknown) => {
+        await rm(next, { force: true });
+        return fail(
+          `Nothing was changed: the backup made first failed. ${(reason as Error).message}`,
+        );
+      },
+    );
+    console.log(`Backed up the host first, as ${made.name}.`);
+  }
+  const found = service(where);
+  const manager = 'missing' in found ? undefined : found;
+  const running = (await manager?.state())?.running === true;
+  await swapIn(where, next, { from: current, to: release.version, at: Date.now() });
+  if (!manager || !running)
+    return console.log(`Installed ${release.version}. It runs from the next ${me} host start.`);
+  await manager.install();
+  // The new version says it started by clearing the note of the update; one that failed to
+  // start has put the old one back by itself, which then answers instead.
+  const reach = reachableAt(config);
+  for (const by = Date.now() + 30_000; Date.now() < by; await sleep(500))
+    if (!(await pending(where)) && (await answers(reach))) {
+      if ((await installedVersion(where)) !== release.version) break;
+      return console.log(`✓ Updated to ${release.version}.`);
+    }
+  if (await pending(where)) {
+    await rollBack(where);
+    await manager.install();
+    await updateFailed(release.version, 'It did not start within 30 seconds.');
+  }
+  return fail(
+    `${release.version} did not start, so ${current} was put back. The end of the log:\n\n${await lastLines(15)}`,
   );
 }
 
@@ -667,20 +775,45 @@ async function runHere(): Promise<void> {
   const port = whole('port', config?.port ?? defaultPort(), 1, 65535);
   const address = flags.get('address') ?? config?.address ?? '0.0.0.0';
   const data = flags.get('data') ?? where.data;
-  const host = new Host({ dataDir: data });
   const log = (text: string) => console.log(`${new Date().toISOString()}  ${text}`);
+  // The copy `host start` installed, as the service runs it, rather than `host run` by hand or
+  // in Docker: only it is updated here.
+  const installed = resolve(fileURLToPath(import.meta.url)) === resolve(where.program);
+  const trying = installed ? await pending(where) : undefined;
+  let host: Host;
   try {
-    await host.listen(port, address);
+    host = new Host({ dataDir: data });
+    try {
+      await host.listen(port, address);
+    } catch (reason) {
+      await host.close();
+      // When it is Tailscale's address that is missing, it is usually still starting up; the
+      // service manager tries again shortly.
+      throw Object.assign(
+        new Error(
+          `Could not listen on ${address}:${port}: ${(reason as Error).message}` +
+            ((reason as NodeJS.ErrnoException).code === 'EADDRNOTAVAIL'
+              ? '. That address is not on this machine right now; is Tailscale running?'
+              : ''),
+        ),
+        { code: (reason as NodeJS.ErrnoException).code },
+      );
+    }
   } catch (reason) {
-    await host.close();
-    // When it is Tailscale's address that is missing, it is usually still starting up; the
-    // service manager tries again shortly.
-    throw new Error(
-      `Could not listen on ${address}:${port}: ${(reason as Error).message}` +
-        ((reason as NodeJS.ErrnoException).code === 'EADDRNOTAVAIL'
-          ? '. That address is not on this machine right now; is Tailscale running?'
-          : ''),
-    );
+    // A version just installed that cannot start on this host's data goes, and the one before
+    // it comes back when the service starts the host again. An address that is not there yet
+    // is no fault of the version.
+    const code = (reason as NodeJS.ErrnoException).code;
+    if (trying?.to === VERSION && code !== 'EADDRNOTAVAIL' && code !== 'EADDRINUSE') {
+      await rollBack(where);
+      await updateFailed(VERSION, (reason as Error).message);
+      log(`${VERSION} did not start, so ${trying.from} was put back: ${(reason as Error).message}`);
+    }
+    throw reason;
+  }
+  if (trying) {
+    await settled(where);
+    if (trying.to === VERSION) log(`Updated from ${trying.from} to ${VERSION}.`);
   }
   log(`Opsidian host ${VERSION} is listening on ${address}:${port}. Data: ${data}`);
 
@@ -737,12 +870,59 @@ async function runHere(): Promise<void> {
   const timer = setInterval(() => void backUpIfDue().catch(() => {}), 10 * 60 * 1000);
   void backUpIfDue().catch(() => {});
 
+  // New versions are installed each night, after the backup. The service starts the new one
+  // as soon as this one has stopped.
+  let updating = false;
   let stopping = false;
+  const updateIfDue = async () => {
+    if (!installed || updating || busy || stopping || host.movedTo()) return;
+    const latest = await readConfig(where);
+    if (!latest || latest.update?.auto === false) return;
+    const due = new Date();
+    due.setHours(updateHour(latest), 0, 0, 0);
+    if (Date.now() < due.getTime() || (latest.update?.checked ?? 0) >= due.getTime()) return;
+    updating = true;
+    try {
+      // One look a day, whether it works or not.
+      await writeConfig(where, { ...latest, update: { ...latest.update, checked: Date.now() } });
+      const release = await latestRelease();
+      if (!newer(release.version, VERSION) || latest.update?.failed?.version === release.version)
+        return;
+      log(`Version ${release.version} is out. Installing it…`);
+      const next = await fetchRelease(where, release).catch(async (reason: Error) => {
+        await updateFailed(release.version, reason.message);
+        throw reason;
+      });
+      if (latest.backup) {
+        busy = true;
+        try {
+          const made = await host.backup(latest.backup.folder, latest.backup.keep);
+          log(`Backed up ${made.notebooks.length} notebook(s) as ${made.name} before updating.`);
+        } catch (reason) {
+          await rm(next, { force: true });
+          throw reason;
+        } finally {
+          busy = false;
+        }
+      }
+      await swapIn(where, next, { from: VERSION, to: release.version, at: Date.now() });
+      log(`Restarting as ${release.version}.`);
+      stop();
+    } catch (reason) {
+      log(`Update failed: ${(reason as Error).message}`);
+    } finally {
+      updating = false;
+    }
+  };
+  const updates = setInterval(() => void updateIfDue().catch(() => {}), 10 * 60 * 1000);
+  void updateIfDue().catch(() => {});
+
   const stop = () => {
     // Asked twice, as with a second Ctrl+C: stop without waiting for GitHub.
     if (stopping) process.exit(0);
     stopping = true;
     clearInterval(timer);
+    clearInterval(updates);
     log('Stopping.');
     // What has not reached GitHub yet is sent first, for 20 seconds at most.
     void mirrors
@@ -833,6 +1013,8 @@ async function main(): Promise<void> {
       return deleteNotebook();
     case 'reset':
       return reset();
+    case 'update':
+      return update();
     case 'backup':
       return backup();
     case 'backups': {

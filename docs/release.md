@@ -55,6 +55,21 @@ A later check never interrupts a download or a waiting restart, a check that fai
 
 Updating requires the new version to be signed by the same team as the installed one.
 
+## The host on npm
+
+The host for servers is the npm package `opsidian` (`apps/host`), one bundled file. The **Host on npm** job in the same workflow publishes it whenever the host or the shared packages change, as `<major>.<minor>.<run number>` from `apps/host/package.json`, the same number as that run's Mac app. Installed hosts look for it there each night and update themselves (see [hosting](hosting.md#updating)).
+
+It is published with npm's trusted publishing: npm accepts this workflow, by its file name and repository, as the package's publisher, and no token is stored anywhere. That link is made once, by a maintainer of the package, with npm 11.10 or later and two-factor authentication on:
+
+```sh
+npm login
+npm trust github opsidian --file release.yml --repo ferran9908/opsidian --allow-publish
+```
+
+Until then the job fails and says to run it; the Mac and iPhone releases are separate jobs and go ahead. `npm trust list opsidian` shows the link.
+
+npm does not check the link when it is made, only at the first publish, and **a link not used within two days expires**. So once it is made, run the workflow (**Run workflow** on the Actions page) rather than waiting for the next change to the host. Publishing never asks for a one-time code: the job signs in with GitHub's identity token for that run, not an npm account, which also works with the package set to "Require two-factor authentication and disallow tokens". Provenance, which shows on npm which commit and workflow built each version, is added by itself. It works only on GitHub's own runners, and only because the repository and the package are public.
+
 ## Quitting
 
 The window waits, before closing, only for what has said it has work to save: the editor, while it is open. Every other screen closes at once. A page that has stopped answering gets ten seconds. `pnpm test:desktop` quits from the welcome screen, the editor with unsaved typing, Settings, and a stopped page, and requires the app to end each time.

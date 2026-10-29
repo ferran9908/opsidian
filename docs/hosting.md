@@ -39,6 +39,15 @@ On Linux, a user that is not root may be asked to run `sudo loginctl enable-ling
 
 The Mac app and a headless host cannot both use port 4810 on one Mac. `start` says so if the app is already hosting; turn hosting off in the app, or use `--port`.
 
+#### Updating
+
+A host set up with `host start` updates itself. Each night at 04:00, after the 03:00 backup, it looks on npm for a newer version. One it finds is downloaded and checked against the checksum npm published, then tried out: started as an empty host of its own on this machine, to see that it runs on this Node. Only then is the host backed up (when backups are set up), the new version put in place of the old, and the host restarted by its service, which takes a few seconds; devices carry on by themselves. If the new version cannot start on the host's data, the old one is put back and the service starts it again, and that version is not tried again. The log says each step, and `host status` shows the version, when it last looked and any version that failed.
+
+- `host update` does it now, saying each step, and waits to see the new version answer.
+- `host update auto off` stops it updating by itself; `auto on` starts again. `"update": { "hour": 5 }` in `~/.opsidian/host.json` moves the time.
+
+A host run any other way is not updated here: in Docker, pull the new image; one run with `host run` in a terminal runs whatever program started it. `npx opsidian@latest host start` also installs the newest version.
+
 ### With Docker
 
 ```sh
