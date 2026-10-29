@@ -206,6 +206,28 @@
   border-radius: 8px;
   object-fit: contain;
 }
+/* A wide table scrolls sideways on its own, so the note around it keeps its width. */
+.op-table-wrap {
+  overflow-x: auto;
+  margin: 4px 0;
+}
+.op-table {
+  border-collapse: collapse;
+  font-size: 0.9375em;
+}
+.op-table th,
+.op-table td {
+  min-width: 3em;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.op-table th {
+  font-weight: 600;
+  background: var(--muted);
+}
 .cm-placeholder {
   color: var(--muted-foreground);
 }

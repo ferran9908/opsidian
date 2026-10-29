@@ -189,6 +189,14 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Checked before it replaces anything.** The download must match the checksum npm publishes for it, say the version it claims, and start as an empty host of its own. Then it replaces the program, keeping the old one, and the host exits for its service to start the new one; launchd and systemd both start it again whenever it stops. A version that fails to start on the host's data, except for its address not being there yet, puts the old program back and is not tried again. A version that starts and then fails later is not caught; going back is `host update` once a fixed version is out, or a backup.
 - **Only a host `host start` installed is updated:** not one run in Docker, whose image is the version, nor `host run` by hand, nor a development build.
 
+## Tables — 2026-10-29
+
+- **Live Preview and Reading view draw tables,** on the Mac and on the iPhone, which share the editor. Raised by the user, whose tables showed as raw bars on both.
+- **Clicking a table shows its Markdown, with the cursor in the cell clicked.** This is how Obsidian behaved before its in-place table editor (Obsidian 1.5), and how the editor already treats headings and links. Obsidian's current behaviour, where the table stays drawn and only the cell clicked is edited, with menus for rows and columns, was considered and left for later at the user's choice: it needs an editor inside each cell, and touch and keyboard behaviour on the iPhone that has to be checked on a device. The table parser and the drawn table are the parts it would build on.
+- **Cells are drawn as text, never as HTML.** Bold, italic, strikethrough, code and wiki links are drawn; anything else, including HTML, shows as written.
+- **Only tables at the top level of a note are drawn.** A table in a quote or list stays as text, since drawing it would hide the quote marks or the list around it.
+- **Still to check on a real iPhone:** tapping a cell to edit it, and scrolling a wide table sideways inside the note.
+
 ## Future AI direction
 
 Potential features: organize a messy thought, answer questions over notes with citations, and suggest related notes. A machine-hosted agent and supported Codex/ChatGPT sign-in were explored. No AI integration is committed for the initial milestones; re-check product access and integration documentation when that work begins.

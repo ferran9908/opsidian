@@ -9,6 +9,7 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 import { encodeDestination, linkLabel, splitLink } from '@opsidian/core';
+import { drawnTables, tablePreview } from './table';
 
 export interface PreviewOptions {
   resolveImage(path: string): string | undefined;
@@ -80,6 +81,20 @@ class ImageWidget extends WidgetType {
   }
 }
 
+export function wikiLink(inner: string, exists: boolean, onLink: PreviewOptions['onLink']) {
+  // A span, not a button, so a long link wraps with the sentence around it.
+  const link = document.createElement('span');
+  link.className = exists ? 'op-wikilink' : 'op-wikilink op-wikilink-unresolved';
+  link.textContent = linkLabel(inner);
+  link.setAttribute('role', 'link');
+  const { target, heading } = splitLink(inner);
+  link.addEventListener('mousedown', (event) => event.preventDefault());
+  link.addEventListener('click', () => {
+    if (target || heading) onLink(target, heading);
+  });
+  return link;
+}
+
 class LinkWidget extends WidgetType {
   constructor(
     readonly inner: string,
@@ -92,17 +107,7 @@ class LinkWidget extends WidgetType {
     return this.inner === other.inner && this.exists === other.exists;
   }
   toDOM() {
-    // A span, not a button, so a long link wraps with the sentence around it.
-    const link = document.createElement('span');
-    link.className = this.exists ? 'op-wikilink' : 'op-wikilink op-wikilink-unresolved';
-    link.textContent = linkLabel(this.inner);
-    link.setAttribute('role', 'link');
-    const { target, heading } = splitLink(this.inner);
-    link.addEventListener('mousedown', (event) => event.preventDefault());
-    link.addEventListener('click', () => {
-      if (target || heading) this.onLink(target, heading);
-    });
-    return link;
+    return wikiLink(this.inner, this.exists, this.onLink);
   }
   ignoreEvent() {
     return true;
@@ -185,6 +190,10 @@ export function isCodeAt(view: EditorView, pos: number) {
 }
 
 export function livePreview(options: PreviewOptions) {
+  return [tablePreview(options), inlinePreview(options)];
+}
+
+function inlinePreview(options: PreviewOptions) {
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
@@ -210,12 +219,16 @@ export function livePreview(options: PreviewOptions) {
           ranges.push({ from, to, decoration });
         const markedLines = new Set<number>();
         const quoteLines = new Set<number>();
+        // Drawn tables are left to the table preview.
+        const tables = drawnTables(state, view.hasFocus);
+        const inTable = (at: number) => tables.some((t) => t.from <= at && at <= t.to);
         for (const visible of view.visibleRanges) {
           syntaxTree(state).iterate({
             from: visible.from,
             to: visible.to,
             enter: (node) => {
               const { name, from, to } = node;
+              if (name === 'Table' && inTable(from)) return false;
               if (['FencedCode', 'CodeBlock', 'InlineCode'].includes(name)) {
                 add(from, to, Decoration.mark({ class: 'op-code' }));
                 return false;
@@ -295,7 +308,7 @@ export function livePreview(options: PreviewOptions) {
               to = from + match[0].length;
             const inner = match[1]!;
             const { target } = splitLink(inner);
-            if (isCodeAt(view, from)) continue;
+            if (isCodeAt(view, from) || inTable(from)) continue;
             if (active(from, to)) add(from, to, Decoration.mark({ class: 'op-link-source' }));
             else if (match[0].startsWith('!') && IMAGE_NAME.test(target)) {
               // Image sources are link destinations, so a name is passed in that form.

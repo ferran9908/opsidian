@@ -17,7 +17,7 @@ Milestone 2, last updated 2026-10-13. The desktop app works on a real folder of 
 - **Trash.** Notes and folders go to the notebook's `.trash` folder, which Obsidian also uses. **Trash**, in the menu under the notebook's name, lists what is there and restores an item to where it was, recreating its folder if needed and choosing a free name if the old one is taken. **Empty trash** moves the contents to the Mac's Trash after a confirmation.
 - **A notebook folder that goes missing.** If the open notebook's folder is deleted, moved or on a disk that is detached, the app says so instead of carrying on in a folder that is not there. The note on screen keeps any unsaved text, which can be copied out. Putting the folder back where it was, from the Trash for example, carries on by itself. A notebook that synced can be downloaded again into its old place as the same device, with no invitation, or given up, which removes this Mac from its host. A folder that is missing at launch is never made again, empty; the welcome screen offers the same choices.
 - **Edits from other programs.** The notebook folder is watched. If the open note changes on disk and has no unsaved edits, the editor follows the file. If it has unsaved edits, the newer file is kept and the edit is saved beside it as `<name> (conflicted copy <time>).md`.
-- **Writing.** Live Preview draws headings, bold, italic, strikethrough, code, round bullets, checkboxes, numbered lists, and quotes behind an accent rule, in Obsidian's default typography. Source mode, from the ⋯ menu above the note, shows plain Markdown. Reading view (the book button, or `⌘E`) shows the note drawn and cannot be edited. Settings → Editor chooses which of the three a note opens in. Right-click the text for cut, copy, paste, formatting, a note link or an image.
+- **Writing.** Live Preview draws headings, bold, italic, strikethrough, code, round bullets, checkboxes, numbered lists, quotes behind an accent rule, and tables, in Obsidian's default typography. Clicking a table shows its Markdown with the cursor in the cell clicked; it is drawn again once the cursor leaves. Source mode, from the ⋯ menu above the note, shows plain Markdown. Reading view (the book button, or `⌘E`) shows the note drawn and cannot be edited. Settings → Editor chooses which of the three a note opens in. Right-click the text for cut, copy, paste, formatting, a note link or an image.
 
 ## Storage rules
 
@@ -57,7 +57,8 @@ On these numbers the in-memory index is enough, so the planned SQLite index is n
 - **Other attachment types.** PDFs and other files are not imported or previewed.
 - **Heading and block completion.** `[[Note#` does not suggest headings, and `[[Note^block]]` references are not supported.
 - **Embeds inside embeds** are shown as links, and embeds are read-only.
-- **Tables, footnotes and callouts** are shown as plain Markdown in Live Preview.
+- **Footnotes and callouts** are shown as plain Markdown in Live Preview.
+- **Tables are edited as Markdown.** Cells cannot be edited in place, and rows and columns are added by typing bars. Tables inside quotes and lists, and Markdown links and images inside cells, are shown as written.
 - **Code blocks made by indentation alone.** Links inside one are treated as real links; fenced blocks and code spans are not.
 
 ## Checks

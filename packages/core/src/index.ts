@@ -1,6 +1,7 @@
 export { SaveQueue, type SaveStatus } from './save-queue';
 export { initialMarkdown, noteSuggestions } from './sample';
 export * from './links';
+export * from './table';
 import { encodeDestination } from './links';
 export { NoteIndex, type Backlink, type SearchResult } from './note-index';
 export * from './graph';
