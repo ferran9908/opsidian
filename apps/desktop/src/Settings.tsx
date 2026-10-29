@@ -229,6 +229,8 @@ function InviteDialog(props: { notebook: string; onClose(): void }) {
 function Confirm(props: {
   title: string;
   action: string;
+  /** For what cannot be taken back at all. */
+  destructive?: boolean;
   children: ReactNode;
   onCancel(): void;
   onConfirm(): void;
@@ -251,7 +253,9 @@ function Confirm(props: {
           <Button variant="secondary" onClick={props.onCancel}>
             Cancel
           </Button>
-          <Button onClick={props.onConfirm}>{props.action}</Button>
+          <Button variant={props.destructive ? 'destructive' : 'default'} onClick={props.onConfirm}>
+            {props.action}
+          </Button>
         </div>
       </div>
     </div>
@@ -282,6 +286,7 @@ export function Settings(props: Props) {
     | { kind: 'stop' }
     | { kind: 'leave' }
     | { kind: 'remove'; id: string; name: string }
+    | { kind: 'delete'; name: string }
     | { kind: 'restore'; name: string; at: number }
   >();
   const [busy, setBusy] = useState(false);
@@ -426,8 +431,23 @@ export function Settings(props: Props) {
           {hosting.notebooks.map((each) => (
             <Line key={each.name}>
               <span className="font-semibold">{each.name}</span>
-              <span className="text-muted-foreground">
-                {count(each.files, 'file')} · {count(each.versions, 'version')} · {size(each.bytes)}
+              <span className="flex items-center gap-4">
+                <span className="text-muted-foreground">
+                  {count(each.files, 'file')} · {count(each.versions, 'version')} ·{' '}
+                  {size(each.bytes)}
+                </span>
+                <button
+                  className="text-destructive disabled:opacity-50"
+                  disabled={busy}
+                  aria-label={`Delete “${each.name}” from this host`}
+                  onClick={() => {
+                    // What is shown before deleting depends on whether backups are set up.
+                    void bridge.backups().then(setBackups);
+                    setConfirm({ kind: 'delete', name: each.name });
+                  }}
+                >
+                  Delete…
+                </button>
               </span>
             </Line>
           ))}
@@ -1063,6 +1083,10 @@ export function Settings(props: Props) {
             This Mac is removed from the host’s devices, so its access cannot be used again. To sync
             here later, use a new invitation.
           </p>
+          <p>
+            To delete the notebook itself, do it where it is hosted: in Settings → Sync on a Mac
+            that hosts it, or with <code>opsidian host delete "{sync.notebook}"</code> on a server.
+          </p>
         </Confirm>
       )}
       {confirm?.kind === 'remove' && (
@@ -1082,6 +1106,55 @@ export function Settings(props: Props) {
           </p>
         </Confirm>
       )}
+      {confirm?.kind === 'delete' &&
+        (() => {
+          const { name } = confirm;
+          const notebook = hosting?.notebooks.find((each) => each.name === name);
+          const theirs = hosting?.devices.filter((each) => each.notebook === name) ?? [];
+          const devices = theirs.filter((each) => !each.self && !each.github);
+          const github = theirs.find((each) => each.github)?.github;
+          const here = own && sync.notebook === name;
+          return (
+            <Confirm
+              title={`Delete “${name}” from this host?`}
+              action="Delete notebook"
+              destructive
+              onCancel={() => setConfirm(undefined)}
+              onConfirm={() => {
+                setConfirm(undefined);
+                run(() => bridge.deleteHostedNotebook(name).then(setHosting));
+              }}
+            >
+              <p>
+                {notebook
+                  ? `Its ${count(notebook.files, 'file')} and their whole history (${count(notebook.versions, 'version')}, ${size(notebook.bytes)}) are deleted from the host.`
+                  : 'Its files and their whole history are deleted from the host.'}{' '}
+                {devices.length
+                  ? `${devices.map((each) => each.name).join(', ')} ${devices.length === 1 ? 'stops' : 'stop'} syncing it, and ${devices.length === 1 ? 'keeps' : 'keep'} the notes already there.`
+                  : 'No other device syncs it now.'}
+              </p>
+              {(here || github) && (
+                <p>
+                  {here && 'The notebook open here keeps its folder as it is, and stops syncing. '}
+                  {github && `Its copy on GitHub stops; ${github} stays as it is.`}
+                </p>
+              )}
+              <p className="bg-secondary text-foreground rounded-lg px-4 py-3">
+                {backups?.folder ? (
+                  <>
+                    <b>The host is backed up first.</b> Restoring that backup in Settings → Backups
+                    brings the notebook back.
+                  </>
+                ) : (
+                  <>
+                    <b>This cannot be undone.</b> Backups are off, so nothing keeps a copy of its
+                    history.
+                  </>
+                )}
+              </p>
+            </Confirm>
+          );
+        })()}
       {confirm?.kind === 'restore' && (
         <Confirm
           title={`Restore the backup from ${day(confirm.at)}?`}

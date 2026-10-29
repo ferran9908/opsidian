@@ -13,7 +13,7 @@ import {
   type SyncState,
 } from '@opsidian/sync';
 import { isGitHub, repositoryLabel, type GitHubAccount } from './github';
-import type { Host, MirrorRecord, MirrorStatus } from './host';
+import type { Host, HostNotebook, MirrorRecord, MirrorStatus } from './host';
 import './storage';
 
 /**
@@ -1099,7 +1099,11 @@ export class Mirrors {
     this.schedule = schedule;
     const wanted = new Map(records.map((record) => [record.notebook, record]));
     for (const [notebook, mirror] of this.running)
-      if (wanted.get(notebook)?.remote !== mirror.remote) {
+      if (!wanted.has(notebook))
+        // Disconnected, or its notebook deleted, perhaps from the command line: what the copy
+        // wrote while it was finishing its round goes too.
+        void this.drop(notebook);
+      else if (wanted.get(notebook)?.remote !== mirror.remote) {
         this.running.delete(notebook);
         void mirror.stop();
       }
@@ -1146,7 +1150,24 @@ export class Mirrors {
     this.running.delete(record.notebook);
     await mirror?.stop();
     this.options.host.removeMirror(record.notebook);
-    const folder = join(this.options.dataDir, 'mirrors', record.notebook);
+    await this.drop(record.notebook);
+  }
+  /**
+   * Deletes a notebook from the host (see `Host.deleteNotebook`). Its copy, if it has one,
+   * stops, and its checkout goes; the repository stays as it is.
+   */
+  async deleteNotebook(name: string): Promise<HostNotebook> {
+    const id = this.options.host.findNotebook(name)?.id;
+    const deleted = await this.options.host.deleteNotebook(name);
+    if (id) await this.drop(id);
+    return deleted;
+  }
+  /** Stops a notebook's copy, if one runs here, and removes its checkout. */
+  private async drop(notebook: string): Promise<void> {
+    const mirror = this.running.get(notebook);
+    this.running.delete(notebook);
+    await mirror?.stop();
+    const folder = join(this.options.dataDir, 'mirrors', notebook);
     await rm(folder, { recursive: true, force: true });
     await rm(`${folder}.lock`, { force: true });
   }

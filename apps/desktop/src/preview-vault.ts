@@ -156,6 +156,7 @@ export const previewVault: VaultBridge = {
   },
   cancelInvitation: async () => notHosting,
   removeDevice: async () => notHosting,
+  deleteHostedNotebook: async () => notHosting,
   backups: async () => ({ keep: 14, backups: [] }),
   chooseBackupFolder: async () => null,
   setBackupSchedule: async () => ({ keep: 14, backups: [] }),

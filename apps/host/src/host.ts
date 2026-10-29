@@ -389,6 +389,51 @@ export class Host {
     return this.db.prepare('select id from notebooks where name = ?').get(name.trim())?.id as
       string | undefined;
   }
+  /** The notebook `name` names, as typed or in any letter case. */
+  findNotebook(name: string): (HostNotebook & { id: string }) | undefined {
+    const all = this.notebooks();
+    const found =
+      all.find((each) => each.name === name.trim()) ??
+      all.find((each) => each.name.toLowerCase() === name.trim().toLowerCase());
+    return found && { ...found, id: this.notebookId(found.name)! };
+  }
+
+  /**
+   * Deletes a notebook from the host: its files, their whole history and their content. Its
+   * devices are removed and keep the notes they have; its copy on GitHub stops, and the
+   * repository stays as it is. Backups made before keep it, so restoring one brings it back.
+   */
+  async deleteNotebook(name: string): Promise<HostNotebook> {
+    const moved = this.movedTo();
+    if (moved)
+      throw new Error(
+        `This host moved to ${moved.to.replace(/^https?:\/\//, '')}. Delete notebooks there.`,
+      );
+    if (this.moving)
+      throw new Error('Another machine is taking this host over. Try again once it is done.');
+    const found = this.findNotebook(name);
+    if (!found) throw new Error(`There is no notebook called “${name.trim()}” on this host.`);
+    const { id, ...notebook } = found;
+    this.db.exec('begin immediate');
+    try {
+      // Devices are kept, removed, so a restore from an older backup does not let them back in.
+      this.db.prepare('update devices set revoked = 1 where notebook = ?').run(id);
+      for (const table of ['files', 'log', 'ops', 'blobs', 'invites', 'mirrors'])
+        this.db.prepare(`delete from ${table} where notebook = ?`).run(id);
+      this.db.prepare('delete from meta where name = ?').run(`floor:${id}`);
+      this.db.prepare('delete from notebooks where id = ?').run(id);
+      this.db.exec('commit');
+    } catch (error) {
+      this.db.exec('rollback');
+      throw error;
+    }
+    // Devices waiting for news hear at once that they are no longer let in.
+    for (const wake of [...(this.waiters.get(id) ?? [])]) wake();
+    const mirror = join(this.options.dataDir, 'mirrors', id);
+    for (const path of [join(this.options.dataDir, 'blobs', id), mirror, `${mirror}.lock`])
+      await rm(path, { recursive: true, force: true });
+    return notebook;
+  }
 
   // Moving the host to another machine. See move.ts for the machine taking over.
 
@@ -610,14 +655,22 @@ export class Host {
     );
   }
 
-  /** Whether the request carries the credential of a device that was removed. */
-  private removed(request: FastifyRequest): boolean {
+  /**
+   * Whether the request carries the credential of a device that was removed, alone or with
+   * its whole notebook.
+   */
+  private removed(request: FastifyRequest): 'device' | 'notebook' | undefined {
     const header = request.headers.authorization;
     const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
-    return Boolean(
+    const row =
       token &&
-      this.db.prepare('select 1 from devices where token = ? and revoked = 1').get(sha(token)),
-    );
+      this.db
+        .prepare(
+          `select n.id as notebook from devices d left join notebooks n on n.id = d.notebook
+           where d.token = ? and d.revoked = 1`,
+        )
+        .get(sha(token));
+    return row ? (row.notebook ? 'device' : 'notebook') : undefined;
   }
 
   private device(request: FastifyRequest): Device | undefined {
@@ -893,15 +946,19 @@ export class Host {
     );
     const signedIn = (request: FastifyRequest): Device => {
       const device = this.device(request);
-      if (!device)
+      if (!device) {
+        const removed = this.removed(request);
         throw Object.assign(
           new Error(
-            this.removed(request)
-              ? 'This device was removed from the host. Its notes stay on it.'
-              : 'This device is no longer connected to the notebook.',
+            removed === 'notebook'
+              ? 'This notebook was deleted from the host. Its notes stay on this device.'
+              : removed
+                ? 'This device was removed from the host. Its notes stay on it.'
+                : 'This device is no longer connected to the notebook.',
           ),
           { statusCode: 401 },
         );
+      }
       return device;
     };
     const refuse = (statusCode: number, message: string) =>

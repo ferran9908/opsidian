@@ -162,6 +162,15 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Each folder's host is remembered outside the folder,** in the Mac app's `notebooks.json`, without credentials. A deleted folder takes its own record with it, so this is what lets it be downloaded again as the same device, without an invitation, or given up so the host forgets the device. Asking for a new invitation instead was considered; it would leave the old device behind on the host and needs the host machine at hand.
 - **While the folder is missing, the open note stays on screen** with any unsaved text, which can be copied out; putting the folder back where it was carries on by itself. The iPhone keeps its notebook inside the app, out of the Files app's reach, so it has no such screen.
 
+## Deleting a notebook from the host — 2026-10-29
+
+- **A notebook can be deleted from its host,** from Settings → Sync on a hosting Mac or with `host delete "Name"`. Requested by the user, who had disconnected a host's devices and found no way to remove the notebook itself; until now only `host uninstall --delete-data`, which takes every notebook, could. This is deletion asked for by name, not pruning: "history is never pruned" still holds for notebooks that are kept.
+- **Only the host's own machine can delete.** A device's credential was considered, so a Mac connected to a server could delete from its Settings. It was rejected for the reason a device cannot move the host: any device, including a lost phone, could then delete what every other device holds. The device's "Stop syncing" dialog says where to delete instead.
+- **The command line asks by saying what goes.** Without `--yes`, `host delete` lists the files, history, devices and GitHub copy that would go, deletes nothing, and exits non-zero. An interactive prompt was not used, since nothing else in the command line asks one and a server is often driven by scripts.
+- **A backup comes first, when backups are set up,** and nothing is deleted if it fails. Without backups, deleting cannot be undone, and both the dialog and the command say so.
+- **Its devices stay in the database, removed.** Deleting their rows was simpler, but a restore from an older backup would then have let them back in. Kept, they are refused, told that the notebook was deleted rather than that they were removed, and stay refused after a restore.
+- **Everything else of the notebook goes at once:** its files, log, stored content, invitations, settled-change records and its GitHub checkout. The repository on GitHub is left as it is. A copy running in another process, as when `host delete` runs beside the service, is stopped and its checkout removed when that process next looks at its copies.
+
 ## Future AI direction
 
 Potential features: organize a messy thought, answer questions over notes with citations, and suggest related notes. A machine-hosted agent and supported Codex/ChatGPT sign-in were explored. No AI integration is committed for the initial milestones; re-check product access and integration documentation when that work begins.

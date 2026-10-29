@@ -66,6 +66,8 @@ const HELP = `Opsidian ${VERSION}: a host for your notebooks, so every device sy
   ${me} host devices          Every device, and when it was added
   ${me} host remove DEVICE    Stop a device syncing, by its name or id
   ${me} host notebooks        Every notebook on the host
+  ${me} host delete "Name"    Delete a notebook and its history from the host; devices keep
+                              their notes. Says what goes first; --yes deletes it
   ${me} host backup FOLDER    Back up every night at 3 to FOLDER, and once now
   ${me} host backup now|off   Back up now, or stop backing up
   ${me} host backups          The backups there are
@@ -408,6 +410,69 @@ async function restore(): Promise<void> {
   }
 }
 
+/** Says what deleting a notebook takes away; with --yes, backs the host up and deletes it. */
+async function deleteNotebook(): Promise<void> {
+  const name = words.join(' ').trim();
+  if (!name) return fail(`Say which: ${me} host delete "Name". ${me} host notebooks lists them.`);
+  const found = await withHost((host) => {
+    const notebook = host.findNotebook(name);
+    if (!notebook) return undefined;
+    const mirror = host.mirrors().find((each) => each.notebook === notebook.id);
+    const devices = host
+      .devices()
+      .filter((each) => !each.revoked && each.notebook === notebook.name)
+      .filter((each) => each.id !== mirror?.device);
+    return { notebook, devices, mirror };
+  });
+  if (!found)
+    return fail(`There is no notebook called “${name}” here. ${me} host notebooks lists them.`);
+  const { notebook, devices, mirror } = found;
+  const config = await readConfig(where);
+  if (!flags.has('yes') && !flags.has('y')) {
+    const megabytes = (notebook.bytes / 1024 / 1024).toFixed(1);
+    const many = (count: number, one: string) => `${count} ${one}${count === 1 ? '' : 's'}`;
+    console.log(
+      [
+        `Deleting “${notebook.name}” takes from this host:`,
+        `  ${many(notebook.files, 'file')}, and their whole history: ${many(notebook.versions, 'version')}, ${megabytes} MB`,
+        devices.length
+          ? `  ${devices.map((each) => each.name).join(', ')}, which stop syncing it and keep the notes they have`
+          : '  No device syncs it now.',
+        ...(mirror
+          ? [`  Its copy on GitHub, which stops. ${repositoryLabel(mirror.remote)} stays as it is.`]
+          : []),
+        config?.backup
+          ? `The host is backed up first, to ${config.backup.folder}; restoring that backup brings it back.`
+          : 'Backups are off, so it cannot be brought back.',
+        '',
+        `To delete it: ${me} host delete "${notebook.name}" --yes`,
+      ].join('\n'),
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (config?.backup) {
+    const { folder, keep } = config.backup;
+    const made = await withHost((host) => host.backup(folder, keep)).catch((reason: unknown) =>
+      fail(
+        `Nothing was deleted: the backup made first failed. ${(reason as Error).message}\n` +
+          `Fix that and try again, or turn backups off with: ${me} host backup off`,
+      ),
+    );
+    console.log(`Backed up the host first, as ${made.name}.`);
+  }
+  await withHost((host) =>
+    new Mirrors({
+      host,
+      dataDir: flags.get('data') ?? where.data,
+      account: () => readAccount(where),
+    }).deleteNotebook(notebook.name),
+  );
+  console.log(
+    `Deleted “${notebook.name}” from the host. Devices that synced it keep their notes, and are told it was deleted.`,
+  );
+}
+
 /** Prints what to run on the machine that will host from now on. */
 async function move(): Promise<void> {
   const moved = await withHost((host) => host.moved());
@@ -693,6 +758,8 @@ async function main(): Promise<void> {
         for (const notebook of all)
           console.log(`${notebook.name}: ${notebook.files} files, ${notebook.head} changes`);
       });
+    case 'delete':
+      return deleteNotebook();
     case 'backup':
       return backup();
     case 'backups': {

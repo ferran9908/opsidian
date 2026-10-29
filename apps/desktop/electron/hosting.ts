@@ -62,6 +62,12 @@ const fresh = (): Saved => ({
   backup: { hour: 3, keep: 14 },
 });
 const message = (reason: unknown) => (reason instanceof Error ? reason.message : String(reason));
+/** Why a backup failed, in words that point at the usual cause. */
+const backupProblem = (reason: unknown) =>
+  (reason as NodeJS.ErrnoException).code === 'ENOENT' ||
+  /unable to open database/i.test(message(reason))
+    ? 'The backup folder could not be reached. Is its disk connected?'
+    : message(reason);
 
 /** Where other devices can reach this Mac: Tailscale first, then the local network. */
 function addresses(port: number): HostingInfo['addresses'] {
@@ -463,6 +469,39 @@ export class Hosting {
     return this.tell();
   }
 
+  /**
+   * Deletes a notebook hosted here, with its whole history. The host is backed up first when
+   * backups are set up, so restoring brings it back; nothing is deleted if that fails. The
+   * open notebook, if it is this one, stops syncing and keeps its folder as it is.
+   */
+  deleteNotebook(name: string): Promise<HostingInfo> {
+    return this.serial(async () => {
+      const host = this.running();
+      const { notebooks, devices } = await host.call<Snapshot>({ op: 'snapshot' });
+      const notebook = notebooks.find((each) => each.name === name);
+      if (!notebook) throw new Error(`“${name}” is not hosted here.`);
+      const { folder, keep } = this.saved.backup;
+      if (folder)
+        // One more than usual is kept, so this copy never pushes out an older one.
+        await host.call({ op: 'backup', folder, keep: keep + 1 }).catch((reason: unknown) => {
+          throw new Error(
+            `Nothing was deleted: the backup made first failed. ${backupProblem(reason)}`,
+          );
+        });
+      const now = this.sync.info();
+      if (now.notebook === name && now.host === `http://127.0.0.1:${this.saved.port}`)
+        await this.sync.disconnect();
+      await host.call({ op: 'deleteNotebook', notebook: name });
+      const gone = new Set(devices.filter((each) => each.notebook === name).map((each) => each.id));
+      this.saved.own = (this.saved.own ?? []).filter((id) => !gone.has(id));
+      this.saved.folders = Object.fromEntries(
+        Object.entries(this.saved.folders ?? {}).filter(([, each]) => each !== name),
+      );
+      await this.save();
+      return this.tell();
+    });
+  }
+
   async backups(): Promise<BackupInfo> {
     const { folder } = this.saved.backup;
     return {
@@ -494,14 +533,7 @@ export class Hosting {
         await this.host.call({ op: 'backup', folder, keep });
         delete this.saved.failed;
       } catch (reason) {
-        this.saved.failed = {
-          at: Date.now(),
-          message:
-            (reason as NodeJS.ErrnoException).code === 'ENOENT' ||
-            /unable to open database/i.test(message(reason))
-              ? 'The backup folder could not be reached. Is its disk connected?'
-              : message(reason),
-        };
+        this.saved.failed = { at: Date.now(), message: backupProblem(reason) };
       }
       await this.save();
       return this.backups();

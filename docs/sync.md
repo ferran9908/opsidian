@@ -22,7 +22,7 @@ pnpm host invite "Personal"     # prints an address and a single-use code
 
 On the first Mac, open the notebook, click the sync line at the bottom of the sidebar, and enter the address and code. On the second Mac, run `invite` again for a fresh code, then choose **Connect to a notebook** on the welcome screen. Each invitation works once and expires after 15 minutes.
 
-Other commands: `host devices` lists paired devices, `host remove DEVICE` stops one syncing (by its name, or its id when two share a name), `host notebooks` lists what the host holds.
+Other commands: `host devices` lists paired devices, `host remove DEVICE` stops one syncing (by its name, or its id when two share a name), `host notebooks` lists what the host holds, and `host delete "Name"` deletes a notebook from it (see [deleting a notebook](hosting.md#deleting-a-notebook)).
 
 **The connection is not encrypted by the host.** Use it over Tailscale, on a network you trust, or behind an HTTPS reverse proxy such as Caddy. Certificates and a guided setup are milestone 5.
 

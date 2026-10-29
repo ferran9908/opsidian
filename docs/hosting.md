@@ -165,6 +165,22 @@ Backups and the copy on GitHub protect the real host's data whatever happens on 
 
 On a hosting Mac, **Settings → Devices** lists every device, when it was last seen, and invitations not yet used. Removing a device stops it syncing at once; the notes on it stay there. Without the app, use `host devices` and `host remove`, which takes a device's name, or its id when two share a name. A device that stops syncing by itself removes itself, so it does not linger in the list.
 
+## Deleting a notebook
+
+Stopping sync on a device, or removing it, never deletes the notebook: the host keeps it, with its whole history, for every other device. To delete it from the host:
+
+- **On a hosting Mac:** in **Settings → Sync**, choose **Delete…** beside the notebook under _Notebooks hosted here_. The dialog says how much goes, which devices stop syncing it, and whether a backup is made first.
+- **Without the app:** `host delete "Name"` says the same, and deletes nothing; `host delete "Name" --yes` deletes it. The name may be typed in any letter case. It works while the host is running.
+
+What happens:
+
+- **The host keeps nothing of it:** its files, every version, and their content go. Other notebooks are untouched, and the name can be used again for a new, empty notebook.
+- **Devices keep their notes.** Each one that synced it is removed, and is told the notebook was deleted from the host. Its folder stays as it is; its sync status offers to stop syncing there. If the notebook is the one open on the hosting Mac, that Mac stops syncing it first, keeping its folder.
+- **Its copy on GitHub stops,** and the host's checkout of it goes. The repository stays as it is.
+- **It can be undone only from a backup.** When backups are set up, the host is backed up first, and nothing is deleted if that backup fails. Restoring the backup brings the notebook back with its history; the devices it had stay removed, so each joins again with a new invitation. Older backups keep the notebook too, until they are replaced.
+
+A device cannot delete a notebook from the host, only the host's own machine can: a lost phone must not be able to delete what every other device holds. On a host that moved to another machine, delete notebooks on the new one.
+
 ## Backups
 
 A backup is a snapshot of the host: every notebook with its full history.

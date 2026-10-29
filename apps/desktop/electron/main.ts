@@ -401,6 +401,7 @@ async function start() {
   handle('hosting:invite', (notebook) => hosting.invite(text(notebook, 200)));
   handle('hosting:cancel-invitation', (id) => hosting.cancelInvitation(text(id, 100)));
   handle('hosting:remove-device', (id) => hosting.removeDevice(text(id, 100)));
+  handle('hosting:delete-notebook', (name) => hosting.deleteNotebook(text(name, 200)));
   handle('hosting:move', () => hosting.moveHosting());
   handle('hosting:take-over', (address, code) =>
     hosting.takeOver(text(address, 500), text(code, 100), (progress) =>

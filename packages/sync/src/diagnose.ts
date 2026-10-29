@@ -112,7 +112,7 @@ export async function diagnose(
       accepted.title = `The host no longer accepts ${options.device}`;
       accepted.detail =
         response.status === 401
-          ? 'It was removed from the notebook’s devices, or the host was set up again. Connect again with a new invitation.'
+          ? 'It was removed from the notebook’s devices, the notebook was deleted from the host, or the host was set up again. Connect again with a new invitation.'
           : `The host answered ${response.status}. It may be an older version.`;
     }
   } catch {

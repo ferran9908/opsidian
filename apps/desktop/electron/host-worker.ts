@@ -18,6 +18,7 @@ export type HostRequest =
   | { op: 'invite'; notebook: string }
   | { op: 'cancelInvitation'; id: string }
   | { op: 'revoke'; id: string }
+  | { op: 'deleteNotebook'; notebook: string }
   | { op: 'backup'; folder: string; keep: number }
   | { op: 'account'; account: GitHubAccount | undefined }
   | { op: 'mirrors' }
@@ -115,6 +116,8 @@ async function handle(request: HostRequest, id: number): Promise<unknown> {
       return host.cancelInvitation(request.id);
     case 'revoke':
       return host.revoke(request.id);
+    case 'deleteNotebook':
+      return mirrors!.deleteNotebook(request.notebook);
     case 'backup':
       return host.backup(request.folder, request.keep);
     // What the app needs to show, without the copies' device credentials.

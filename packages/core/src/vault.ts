@@ -273,6 +273,11 @@ export interface VaultBridge {
   invite(notebook: string): Promise<Invitation>;
   cancelInvitation(id: string): Promise<HostingInfo>;
   removeDevice(id: string): Promise<HostingInfo>;
+  /**
+   * Deletes a notebook this Mac hosts, with its whole history, after backing the host up if
+   * backups are set up. Devices keep their notes; the open notebook stops syncing with it.
+   */
+  deleteHostedNotebook(name: string): Promise<HostingInfo>;
   backups(): Promise<BackupInfo>;
   /** Asks for a folder. Null if cancelled. */
   chooseBackupFolder(): Promise<BackupInfo | null>;
