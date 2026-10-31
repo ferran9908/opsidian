@@ -189,6 +189,55 @@ class EmbedWidget extends WidgetType {
   }
 }
 
+/** Whether properties are folded away, shared by every note like Obsidian's. */
+let propertiesCollapsed = false;
+
+type PropertyKind = 'text' | 'list' | 'number' | 'date' | 'tags';
+
+const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function propertyKind(key: string, value: string | string[]): PropertyKind {
+  if (key === 'tags' || key === 'tag') return 'tags';
+  if (Array.isArray(value)) return 'list';
+  if (DATE.test(value)) return 'date';
+  if (/^-?\d+(\.\d+)?$/.test(value)) return 'number';
+  return 'text';
+}
+
+/** A `2026-11-01` date written out, without touching the file. */
+function formatDate(value: string) {
+  const match = DATE.exec(value);
+  if (!match) return value;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (Number.isNaN(date.getTime()) || date.getDate() !== Number(match[3])) return value;
+  return date.toLocaleDateString(undefined, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+const svg = (body: string) =>
+  `<svg class="op-property-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+
+const ICONS: Record<PropertyKind, string> = {
+  text: svg('<path d="M2.5 3.5h9M2.5 7h9M2.5 10.5h5.5"/>'),
+  list: svg(
+    '<path d="M5 3.5h6.5M5 7h6.5M5 10.5h6.5"/><path d="M2.5 3.5h.01M2.5 7h.01M2.5 10.5h.01" stroke-width="1.6"/>',
+  ),
+  number: svg('<path d="M5.5 2.5 4.5 11.5M9.5 2.5l-1 9M2.5 5H12M2 9h9.5"/>'),
+  date: svg(
+    '<rect x="2" y="3" width="10" height="9" rx="1.5"/><path d="M2 6h10M5 1.75v2.5M9 1.75v2.5"/>',
+  ),
+  tags: svg(
+    '<path d="M2 2.75v3.6c0 .3.12.58.33.8l5.5 5.5a1.1 1.1 0 0 0 1.56 0l3.04-3.04a1.1 1.1 0 0 0 0-1.56L6.93 2.55A1.1 1.1 0 0 0 6.15 2.2H2.55a.55.55 0 0 0-.55.55z"/><circle cx="4.75" cy="4.95" r=".9" fill="currentColor" stroke="none"/>',
+  ),
+};
+
+const CHEVRON =
+  '<svg class="op-properties-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5"/></svg>';
+
 /** The note's frontmatter drawn as properties, the way Obsidian shows them above the text. */
 class PropertiesWidget extends WidgetType {
   constructor(
@@ -204,6 +253,7 @@ class PropertiesWidget extends WidgetType {
   toDOM(view: EditorView) {
     const box = document.createElement('div');
     box.className = 'op-properties';
+    box.classList.toggle('op-properties-collapsed', propertiesCollapsed);
     box.setAttribute('role', 'group');
     box.setAttribute('aria-label', 'Properties');
     const edit = (event: Event) => {
@@ -214,37 +264,59 @@ class PropertiesWidget extends WidgetType {
       view.dispatch({ selection: { anchor: line.to } });
       view.focus();
     };
+    const heading = document.createElement('button');
+    heading.type = 'button';
+    heading.className = 'op-properties-heading';
+    heading.setAttribute('aria-expanded', String(!propertiesCollapsed));
+    heading.innerHTML = CHEVRON;
+    heading.append('Properties');
+    heading.addEventListener('mousedown', (event) => event.preventDefault());
+    heading.addEventListener('click', () => {
+      propertiesCollapsed = !propertiesCollapsed;
+      box.classList.toggle('op-properties-collapsed', propertiesCollapsed);
+      heading.setAttribute('aria-expanded', String(!propertiesCollapsed));
+      view.requestMeasure();
+    });
+    box.append(heading);
+    const rows = document.createElement('div');
+    rows.className = 'op-properties-rows';
     for (const { key, value } of this.frontmatter.properties) {
       const row = document.createElement('div');
       row.className = 'op-property';
+      const kind = propertyKind(key, value);
       const name = document.createElement('span');
       name.className = 'op-property-key';
-      name.textContent = key;
+      name.innerHTML = ICONS[kind];
+      const label = document.createElement('span');
+      label.textContent = key;
+      label.title = key;
+      name.append(label);
       const values = document.createElement('span');
       values.className = 'op-property-value';
-      const isTags = key === 'tags' || key === 'tag';
       for (const item of Array.isArray(value) ? value : [value]) {
-        if (isTags && this.onTag) {
+        if (kind === 'tags' && this.onTag) {
           values.append(tagPill(item.replace(/^#/, ''), this.onTag));
           continue;
         }
         const chip = document.createElement('span');
         chip.className = Array.isArray(value) ? 'op-property-item' : 'op-property-text';
-        chip.textContent = item;
+        chip.textContent = kind === 'date' ? formatDate(item) : item;
+        if (kind === 'date') chip.title = item;
         values.append(chip);
       }
       row.append(name, values);
-      box.append(row);
+      rows.append(row);
     }
     if (!this.frontmatter.properties.length) {
       const empty = document.createElement('span');
-      empty.className = 'op-property-text';
+      empty.className = 'op-property-empty';
       empty.textContent = 'No properties';
-      box.append(empty);
+      rows.append(empty);
     }
-    box.addEventListener('mousedown', (event) => {
+    rows.addEventListener('mousedown', (event) => {
       if (!(event.target as HTMLElement).closest('.op-tag')) edit(event);
     });
+    box.append(rows);
     return box;
   }
   ignoreEvent(event: Event) {
@@ -254,9 +326,10 @@ class PropertiesWidget extends WidgetType {
 
 function tagPill(tag: string, onTag: NonNullable<PreviewOptions['onTag']>) {
   const pill = document.createElement('span');
-  pill.className = 'op-tag';
-  pill.textContent = `#${tag}`;
+  pill.className = 'op-tag op-property-tag';
+  pill.textContent = tag;
   pill.setAttribute('role', 'link');
+  pill.setAttribute('aria-label', `#${tag}`);
   pill.addEventListener('mousedown', (event) => event.preventDefault());
   pill.addEventListener('click', () => onTag(tag));
   return pill;

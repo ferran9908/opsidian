@@ -345,45 +345,98 @@
   }
 }
 
-/* Properties: the note's frontmatter, drawn above the text. */
+/* Properties: the note's frontmatter, drawn above the text, straight on the page. */
 .cm-editor .op-properties {
   display: block;
-  margin: 0 0 1.2em;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
+  margin: 0 0 1.4em;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
   font-size: 0.875em;
-  line-height: 1.7;
+  line-height: 1.5;
+}
+.op-properties-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted-foreground);
+  opacity: 0.75;
+  font: inherit;
+  font-size: 0.785em;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.op-properties-heading:hover {
+  opacity: 1;
+}
+.op-properties-chevron {
+  transition: transform 0.15s ease;
+}
+.op-properties-collapsed .op-properties-chevron {
+  transform: rotate(-90deg);
+}
+.op-properties-collapsed .op-properties-rows {
+  display: none;
+}
+.op-properties-collapsed.op-properties {
+  padding-bottom: 8px;
+}
+.op-properties-rows {
   cursor: text;
 }
 .op-property {
   display: flex;
-  gap: 16px;
-  align-items: baseline;
-}
-.op-property + .op-property {
-  border-top: 1px solid var(--border);
+  gap: 12px;
+  align-items: flex-start;
+  padding: 3px 0;
 }
 .op-property-key {
-  flex: 0 0 9em;
+  display: flex;
+  flex: 0 0 11em;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 1.5em;
   color: var(--muted-foreground);
+  opacity: 0.8;
+  font-size: 0.93em;
+}
+.op-property-key > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.op-property-icon {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
 .op-property-value {
   display: flex;
+  flex: 1;
   flex-wrap: wrap;
-  gap: 6px 8px;
+  gap: 6px;
   align-items: center;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .op-property-item {
   padding: 0 8px;
   border-radius: 999px;
-  background: var(--muted);
-  line-height: 1.6;
+  background: var(--accent);
+  font-size: 0.9em;
+}
+.op-property-empty {
+  color: var(--muted-foreground);
+}
+@media (max-width: 600px) {
+  .op-property-key {
+    flex-basis: 7.5em;
+  }
 }
 .cm-editor .cm-line.op-frontmatter {
   font-family: ui-monospace, monospace;
@@ -402,6 +455,12 @@
   padding: 0 7px;
   font-size: 0.875em;
   cursor: pointer;
+}
+.cm-editor .op-property-tag {
+  padding: 1px 8px;
+  background: rgb(138 92 245 / 0.14);
+  font-size: 0.9em;
+  line-height: 1.4;
 }
 .cm-editor .op-tag:hover {
   text-decoration: underline;
