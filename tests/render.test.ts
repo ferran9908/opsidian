@@ -100,6 +100,32 @@ describe('rendering a note as HTML', () => {
     expect(html).toContain('<input type="checkbox" disabled checked> done');
     expect(html).toContain('<input type="checkbox" disabled> not yet');
   });
+  it('keeps markup inside an image label out of the alt attribute, and reads the right address', () => {
+    const paths = ['a.png', 'Secret.md'];
+    const html = renderMarkdown(
+      '![see https://x.com/onerror=alert(1)// z](https://img.example/a.png)\n\n![a #tag and [[Secret]] "q"](a.png)\n',
+      { paths, file: (path) => `/f/${path}` },
+    );
+    expect(html).toContain(
+      '<img src="https://img.example/a.png" alt="see https://x.com/onerror=alert(1)// z">',
+    );
+    expect(html).toContain('<img src="/f/a.png" alt="a #tag and [[Secret]] &quot;q&quot;">');
+    expect(html).not.toMatch(/<img[^>]*"\s+onerror/);
+    expect(html).not.toMatch(/alt="[^"]*</);
+  });
+  it('never publishes another note, however the embed is written', () => {
+    const paths = ['Secret.md', 'Notes/Other.md'];
+    const files: string[] = [];
+    const html = renderMarkdown('![](Secret.md) ![x](Notes/Other.md) ![](Other) [[Secret]]', {
+      paths,
+      file: (path) => (files.push(path), `/f/${path}`),
+    });
+    expect(files).toEqual([]);
+    expect(html).toContain('<span class="wiki">Secret</span>');
+    expect(html).toContain('<span class="wiki">x</span>');
+    expect(html).toContain('<span class="wiki">Other</span>');
+    expect(renderedFiles('![](Secret.md)', paths)).toEqual([]);
+  });
   it('keeps a shortcut reference as written and escapes what needs escaping', () => {
     expect(renderMarkdown('See [this] & that \\*not em\\*.')).toBe(
       '<p>See [this] &amp; that *not em*.</p>\n',

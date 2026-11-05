@@ -250,11 +250,24 @@ class Renderer {
     return html + this.plain(position, Math.min(until, node.to));
   }
 
-  /** The text between a link's brackets. */
-  private label(node: SyntaxNode): string {
+  /** The `]` that closes a link's text, after which its destination follows. */
+  private closing(node: SyntaxNode): SyntaxNode | undefined {
     const marks = this.children(node).filter((child) => child.name === 'LinkMark');
-    const closing = marks.find((mark, index) => index > 0 && this.slice(mark) === ']');
-    return this.inline(node, closing?.from ?? node.to);
+    return marks.find((mark, index) => index > 0 && this.slice(mark) === ']');
+  }
+  /** The text between a link's brackets, drawn. */
+  private label(node: SyntaxNode): string {
+    return this.inline(node, this.closing(node)?.from ?? node.to);
+  }
+  /**
+   * The text between a link's brackets as written, escaped, for an attribute: drawn text
+   * carries markup of its own, whose quotes would end the attribute.
+   */
+  private labelText(node: SyntaxNode): string {
+    const open = this.children(node).find((child) => child.name === 'LinkMark');
+    const from = open?.to ?? node.from;
+    const to = this.closing(node)?.from ?? node.to;
+    return escapeHtml(this.text.slice(from, to));
   }
 
   /** Text with no markup of its own: wiki links and #tags are found here. */
@@ -289,7 +302,7 @@ class Renderer {
     const label = escapeHtml(linkLabel(link.inner));
     const path = target ? this.resolve(target) : undefined;
     if (link.embed) {
-      if (path && !/\.md$/i.test(path)) return this.media(path, label, '');
+      if (path && !/\.md$/i.test(path)) return this.media(path, label, label, '');
       // A file that is not in the notebook, by the look of its name.
       if (!path && /\.[a-z0-9]{1,5}$/i.test(target) && !/\.md$/i.test(target))
         return `<span class="missing">${label}</span>`;
@@ -305,13 +318,24 @@ class Renderer {
       : `<span class="wiki">${label}</span>`;
   }
 
-  /** An image, or a link to any other file, by its path in the notebook. */
-  private media(path: string, label: string, title: string): string {
+  /**
+   * An image, or a link to any other file, by its path in the notebook. `alt` is plain
+   * escaped text, safe inside an attribute; `label` is drawn text, for between tags.
+   */
+  private media(path: string, label: string, alt: string, title: string): string {
+    // Another note is never published with this one, whichever way it is written.
+    if (/\.md$/i.test(path)) {
+      const where = this.options.note?.(path);
+      const shown = label || escapeHtml(noteTitle(path));
+      return where
+        ? `<a class="wiki" href="${escapeHtml(where)}">${shown}</a>`
+        : `<span class="wiki">${shown}</span>`;
+    }
     this.files.add(path);
     const where = this.options.file?.(path);
     if (!where) return `<span class="missing">${label || escapeHtml(noteTitle(path))}</span>`;
     const href = escapeHtml(where);
-    if (IMAGE.test(path)) return `<img src="${href}" alt="${label}"${title}>`;
+    if (IMAGE.test(path)) return `<img src="${href}" alt="${alt}"${title}>`;
     return `<a href="${href}"${title}>${label || escapeHtml(path.slice(path.lastIndexOf('/') + 1))}</a>`;
   }
 
@@ -373,16 +397,20 @@ class Renderer {
 
   /** `[text](destination "title")` and `![alt](destination)`. A shortcut `[text]` stays as written. */
   private link(node: SyntaxNode, image: boolean): string {
-    const url = node.getChild('URL');
+    // The destination follows the closing bracket; an address inside the text is not it.
+    const closing = this.closing(node);
+    const after = this.children(node).filter((child) => child.from >= (closing?.to ?? node.to));
+    const url = after.find((child) => child.name === 'URL');
     const label = this.label(node);
     if (!url) return `[${label}]`;
-    const titleNode = node.getChild('LinkTitle');
+    const alt = this.labelText(node);
+    const titleNode = after.find((child) => child.name === 'LinkTitle');
     const title = titleNode ? ` title="${escapeHtml(this.slice(titleNode).slice(1, -1))}"` : '';
     const written = this.slice(url).replace(/^<|>$/g, '');
     if (/^[a-z][a-z0-9+.-]*:/i.test(written) || written.startsWith('//')) {
       if (image)
         return SAFE_URL.test(written)
-          ? `<img src="${escapeHtml(written)}" alt="${label}"${title}>`
+          ? `<img src="${escapeHtml(written)}" alt="${alt}"${title}>`
           : label;
       return this.anchor(written, label, title);
     }
@@ -398,7 +426,7 @@ class Renderer {
       const where = this.options.note?.(found);
       return where ? `<a class="wiki" href="${escapeHtml(where)}">${label}</a>` : label;
     }
-    return this.media(found, label, title);
+    return this.media(found, label, alt, title);
   }
 }
 
