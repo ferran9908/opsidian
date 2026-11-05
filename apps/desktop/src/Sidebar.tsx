@@ -6,12 +6,15 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   CircleHelp,
+  Columns2,
+  Copy,
   FilePlus2,
   FolderInput,
   FolderPlus,
   FolderSearch,
   PanelLeft,
   Pencil,
+  Rows2,
   Settings,
   SquarePen,
   Trash2,
@@ -44,6 +47,9 @@ interface Props {
   expanded: ReadonlySet<string>;
   onToggle(folder: string): void;
   onOpen(path: string): void;
+  /** Opens a note in a new pane beside (`row`) or below (`column`) the one in use. */
+  onOpenSplit(path: string, direction: 'row' | 'column'): void;
+  onDuplicate(path: string): void;
   onNewNote(folder: string): void;
   onNewFolder(parent: string, name: string): void;
   onRename(path: string, name: string): void;
@@ -152,6 +158,11 @@ export function Sidebar(props: Props) {
       <ContextMenuItem onSelect={() => setRenaming(path)}>
         <Pencil /> Rename
       </ContextMenuItem>
+      {isNote(path) && (
+        <ContextMenuItem onSelect={() => props.onDuplicate(path)}>
+          <Copy /> Duplicate
+        </ContextMenuItem>
+      )}
       <ContextMenuItem onSelect={() => props.onChooseFolder(path)}>
         <FolderInput /> Move to…
       </ContextMenuItem>
@@ -281,13 +292,25 @@ export function Sidebar(props: Props) {
                   style={{ paddingLeft: 26 + depth * STEP }}
                   aria-current={path === active ? 'page' : undefined}
                   data-note={path}
-                  onClick={() => props.onOpen(path)}
+                  // ⌘-click opens the note beside the one in use, as in Obsidian.
+                  onClick={(event) =>
+                    event.metaKey ? props.onOpenSplit(path, 'row') : props.onOpen(path)
+                  }
                   {...drag(path)}
                 >
                   <span className="truncate">{noteTitle(path)}</span>
                 </button>
               </ContextMenuTrigger>
-              <ContextMenuContent>{shared(path)}</ContextMenuContent>
+              <ContextMenuContent>
+                <ContextMenuItem onSelect={() => props.onOpenSplit(path, 'row')}>
+                  <Columns2 /> Open to the right
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => props.onOpenSplit(path, 'column')}>
+                  <Rows2 /> Open below
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                {shared(path)}
+              </ContextMenuContent>
             </ContextMenu>
           )}
         </li>

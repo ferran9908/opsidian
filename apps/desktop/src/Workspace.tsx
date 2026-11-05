@@ -3,10 +3,10 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
-  Check,
   CircleHelp,
   Code,
-  Ellipsis,
+  Columns2,
+  Copy,
   FilePlus2,
   FolderInput,
   FolderOpen,
@@ -17,14 +17,14 @@ import {
   Pencil,
   RefreshCw,
   Replace,
+  Rows2,
   Search,
   Settings as SettingsIcon,
-  Share2,
   TextSearch,
   Trash2,
+  Waypoints,
   X,
 } from 'lucide-react';
-import type { EditorMode } from '@opsidian/editor';
 import {
   linkResolver,
   noteFolder,
@@ -54,14 +54,33 @@ import { StatusBar, type NoteStatus } from './StatusBar';
 import { MissingNotice } from './MissingNotice';
 import { GraphView } from './graph/GraphView';
 import { defaultMode } from './preferences';
+import { Crumbs, HeaderBar, iconButton, Pane, ShowSidebar } from './Pane';
+import { SplitView } from './SplitView';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  closePane,
+  emptyPane,
+  findPane,
+  mapPanes,
+  neighbour,
+  panes,
+  resize,
+  restoreLayout,
+  saveLayout,
+  splitPane,
+  updatePane,
+  type Direction,
+  type Layout,
+  type PaneState,
+} from './panes';
 import { cn } from '@/lib/utils';
+
+/** Every folder a note sits in, outermost first. */
+const folders = (path: string) => {
+  const parts = noteFolder(path).split('/').filter(Boolean);
+  return parts.map((_part, depth) => parts.slice(0, depth + 1).join('/'));
+};
+const SHARE_NEEDS_HOST =
+  'Sharing a note as a link needs a sync host. Set one up in Settings → Sync.';
 
 interface Props {
   vault: VaultInfo;
@@ -81,9 +100,11 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
   const storageKey = `opsidian-session:${vault.location}`;
   const [tree, setTree] = useState<VaultTree>();
   const [tags, setTags] = useState<TagCount[]>([]);
-  // `visit` counts openings, so the editor remounts on a new note but not on a rename.
-  const [open, setOpen] = useState<{ path: string; visit: number; heading?: string } | null>(null);
-  const [trail, setTrail] = useState<{ paths: string[]; at: number }>({ paths: [], at: -1 });
+  const [first] = useState(() => emptyPane(defaultMode()));
+  // The notes on screen, side by side or one above the other, and the pane in use.
+  const [layout, setLayout] = useState<Layout>(first);
+  const [focused, setFocused] = useState(first.id);
+  const [statuses, setStatuses] = useState<Record<string, NoteStatus>>({});
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [sidebar, setSidebar] = useState(true);
   // The find dialog's starting text, or null while it is closed.
@@ -94,26 +115,52 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
   const [sync, setSync] = useState<SyncInfo>({ connected: false });
   const [syncOpen, setSyncOpen] = useState(false);
   const [settings, setSettings] = useState<SettingsSection>();
-  const [historyOpen, setHistoryOpen] = useState(false);
+  /** The pane and note whose history is open. */
+  const [history, setHistory] = useState<{ pane: string; path: string } | null>(null);
   /** The note being shared as a link, while the dialog is open. */
   const [sharing, setSharing] = useState<string | null>(null);
-  const [mode, setMode] = useState<EditorMode>(defaultMode);
-  // What editing mode to go back to when leaving reading view.
-  const editing = useRef<EditorMode>(defaultMode() === 'reading' ? 'live' : defaultMode());
   const [sort, setSort] = useState<TreeSort>(() =>
     localStorage.getItem('opsidian.tree.sort') === 'name-desc' ? 'name-desc' : 'name',
   );
   const [graphOpen, setGraphOpen] = useState(false);
   const [graphMounted, setGraphMounted] = useState(false);
-  const [noteStatus, setNoteStatus] = useState<NoteStatus>();
-  const renaming = useRef(false);
   const [notice, setNotice] = useState('');
   const [version, setVersion] = useState(0);
   // Set while the notebook's folder is not where it was.
   const [gone, setGone] = useState<MissingNotebook | null>(null);
-  const editor = useRef<NoteEditorHandle>(null);
-  const state = useRef({ open, trail, tree });
-  state.current = { open, trail, tree };
+  // Each pane's editor, by pane id, while it has a note open.
+  const editors = useRef(new Map<string, NoteEditorHandle>());
+  const editorRefs = useRef(new Map<string, (handle: NoteEditorHandle | null) => void>());
+  // The session is only written once it has been read, so a blank start cannot replace it.
+  const restored = useRef(false);
+  const state = useRef({ layout, focused, tree });
+  state.current = { layout, focused, tree };
+
+  const all = panes(layout);
+  const focusedPane = findPane(layout, focused) ?? all[0]!;
+  const open = focusedPane.open;
+  const mode = focusedPane.mode;
+
+  /** A stable ref callback per pane, so React does not detach and attach it every render. */
+  const editorRef = (id: string) => {
+    let callback = editorRefs.current.get(id);
+    if (!callback) {
+      callback = (handle) => {
+        if (handle) editors.current.set(id, handle);
+        else editors.current.delete(id);
+      };
+      editorRefs.current.set(id, callback);
+    }
+    return callback;
+  };
+  const focusedEditor = () => editors.current.get(state.current.focused);
+  const allEditors = () => [...editors.current.values()];
+  /** Saves every pane. Waits for all of them, then fails with the first failure, if any. */
+  const flushAll = useCallback(async () => {
+    const results = await Promise.allSettled(allEditors().map((editor) => editor.flush()));
+    const failed = results.find((result) => result.status === 'rejected');
+    if (failed) throw failed.reason;
+  }, []);
 
   const refresh = useCallback(async () => {
     const [next, tagged] = await Promise.all([bridge.tree(), bridge.tags()]);
@@ -123,45 +170,68 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
     return next;
   }, []);
   const fail = (reason: unknown) => setNotice(message(reason));
-
-  /** Shows a note once the current one is safely saved. `record` adds it to back/forward. */
-  const show = useCallback(async (path: string, record = true, heading?: string) => {
-    const current = state.current;
-    if (current.open?.path === path) return;
-    await editor.current?.flush();
-    setOpen({ path, visit: (current.open?.visit ?? 0) + 1, ...(heading ? { heading } : {}) });
-    if (record) {
-      const paths = [...current.trail.paths.slice(0, current.trail.at + 1), path];
-      setTrail({ paths, at: paths.length - 1 });
-    }
-    const folder = noteFolder(path);
-    if (folder)
-      setExpanded((before) => {
-        const next = new Set(before);
-        const parts = folder.split('/');
-        parts.forEach((_part, depth) => next.add(parts.slice(0, depth + 1).join('/')));
-        return next;
-      });
+  const expandTo = useCallback((path: string) => {
+    if (!noteFolder(path)) return;
+    setExpanded((before) => new Set([...before, ...folders(path)]));
   }, []);
-  const step = (by: number) => {
-    const at = trail.at + by;
-    const path = trail.paths[at];
+
+  /**
+   * Shows a note in pane `id` once that pane's note is safely saved. `at` moves along the
+   * pane's back/forward trail instead of adding to it. A note already open in another pane is
+   * not opened twice, since each editor saves on its own: that pane is focused instead.
+   */
+  const showIn = useCallback(
+    async (id: string, path: string, options: { heading?: string; at?: number } = {}) => {
+      const { layout } = state.current;
+      const elsewhere = panes(layout).find((pane) => pane.open?.path === path);
+      if (elsewhere) {
+        setFocused(elsewhere.id);
+        if (options.heading) editors.current.get(elsewhere.id)?.scrollToHeading(options.heading);
+        return;
+      }
+      if (!findPane(layout, id)) return;
+      await editors.current.get(id)?.flush();
+      const { heading, at } = options;
+      setLayout((before) =>
+        updatePane(before, id, (pane) => {
+          const paths = [...pane.trail.paths.slice(0, pane.trail.at + 1), path];
+          return {
+            ...pane,
+            open: { path, visit: (pane.open?.visit ?? 0) + 1, ...(heading ? { heading } : {}) },
+            trail: at === undefined ? { paths, at: paths.length - 1 } : { ...pane.trail, at },
+          };
+        }),
+      );
+      setFocused(id);
+      expandTo(path);
+    },
+    [expandTo],
+  );
+  /** Shows a note in the pane in use. */
+  const show = useCallback(
+    (path: string, heading?: string) =>
+      showIn(state.current.focused, path, heading ? { heading } : {}),
+    [showIn],
+  );
+  const step = (id: string, by: number) => {
+    const pane = findPane(layout, id);
+    if (!pane) return;
+    const at = pane.trail.at + by;
+    const path = pane.trail.paths[at];
     if (!path) return;
-    void show(path, false)
-      .then(() => setTrail({ paths: trail.paths, at }))
-      .catch(fail);
+    void showIn(id, path, { at }).catch(fail);
   };
   const create = useCallback(
-    async (folder: string, name?: string) => {
+    async (folder: string, name?: string, into?: string) => {
       try {
         const path = await bridge.createNote(folder, name);
         await refresh();
-        await show(path);
+        await showIn(into ?? state.current.focused, path);
       } catch (reason) {
         fail(reason);
       }
     },
-    [refresh, show],
+    [refresh, showIn],
   );
   const resolve = useMemo(() => linkResolver(tree?.notes ?? []), [tree]);
   const locateImage = useMemo(() => {
@@ -178,43 +248,102 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
         ? path
         : (named.get(path.slice(path.lastIndexOf('/') + 1).toLowerCase()) ?? path);
   }, [tree]);
-  const follow = (target: string, heading?: string) => {
-    const path = target ? resolve(target) : open?.path;
+  /** A link was followed in pane `id`: the note opens in that pane. */
+  const follow = (id: string, target: string, heading?: string) => {
+    const here = findPane(layout, id)?.open?.path;
+    const path = target ? resolve(target) : here;
     // Like Obsidian, following a link to a note that does not exist creates it.
-    if (!path) void create('', target.slice(target.lastIndexOf('/') + 1));
-    else if (path !== open?.path) void show(path, true, heading).catch(fail);
-    else if (heading) editor.current?.scrollToHeading(heading);
+    if (!path) void create('', target.slice(target.lastIndexOf('/') + 1), id);
+    else if (path !== here) void showIn(id, path, heading ? { heading } : {}).catch(fail);
+    else if (heading) editors.current.get(id)?.scrollToHeading(heading);
   };
+
+  /** Opens a new pane beside `from`, empty or showing `path`, and moves to it. */
+  function split(direction: Direction, path?: string, from = state.current.focused) {
+    const current = state.current;
+    if (path) {
+      const elsewhere = panes(current.layout).find((pane) => pane.open?.path === path);
+      if (elsewhere) return setFocused(elsewhere.id);
+    }
+    const blank = emptyPane(defaultMode());
+    const added: PaneState = path
+      ? { ...blank, open: { path, visit: 1 }, trail: { paths: [path], at: 0 } }
+      : blank;
+    setLayout(splitPane(current.layout, from, direction, added));
+    setFocused(added.id);
+    if (path) expandTo(path);
+  }
+  /** Closes a pane once its note is saved; the pane before it, or after, is used next. */
+  async function closeOne(id: string) {
+    try {
+      await editors.current.get(id)?.flush();
+    } catch (reason) {
+      return fail(reason);
+    }
+    const before = panes(state.current.layout);
+    if (before.length < 2) return;
+    const at = before.findIndex((pane) => pane.id === id);
+    setLayout((layout) => closePane(layout, id));
+    if (state.current.focused === id) setFocused((before[at - 1] ?? before[at + 1])!.id);
+    setStatuses(({ [id]: _closed, ...rest }) => rest);
+    editorRefs.current.delete(id);
+  }
+  const focusNext = (by: 1 | -1) => setFocused(neighbour(layout, focusedPane.id, by));
 
   useEffect(() => {
     void refresh()
       .then((loaded) => {
-        const saved = JSON.parse(localStorage.getItem(storageKey) ?? '{}') as {
-          last?: string;
-          expanded?: string[];
-        };
-        setExpanded(new Set(saved.expanded ?? []));
-        const first =
-          saved.last && loaded.notes.includes(saved.last) ? saved.last : loaded.notes[0];
-        if (first) return show(first);
+        let saved: { expanded?: unknown } = {};
+        try {
+          saved = JSON.parse(localStorage.getItem(storageKey) ?? '{}') as typeof saved;
+        } catch {
+          // A session that cannot be read starts over.
+        }
+        const session = restoreLayout(saved, loaded.notes, defaultMode());
+        const kept = Array.isArray(saved.expanded)
+          ? saved.expanded.filter((folder): folder is string => typeof folder === 'string')
+          : [];
+        const shown = panes(session.layout).flatMap((pane) =>
+          pane.open ? folders(pane.open.path) : [],
+        );
+        restored.current = true;
+        setExpanded(new Set([...kept, ...shown]));
+        setLayout(session.layout);
+        setFocused(session.focused);
       })
       .catch(fail);
     return bridge.onChange((paths) => {
       void refresh()
         .then((next) => {
-          const current = state.current.open?.path;
-          if (!current) return;
-          if (paths.includes(current)) return editor.current?.reloadIfClean();
-          // Removed or renamed elsewhere. Unsaved edits keep the note open and put it back.
-          if (!next.notes.includes(current) && editor.current?.settled()) setOpen(null);
+          const notes = new Set(next.notes);
+          const cleared = new Set<string>();
+          const reloads: Promise<void>[] = [];
+          for (const pane of panes(state.current.layout)) {
+            if (!pane.open) continue;
+            const editor = editors.current.get(pane.id);
+            if (paths.includes(pane.open.path)) {
+              if (editor) reloads.push(editor.reloadIfClean());
+            }
+            // Removed or renamed elsewhere. Unsaved edits keep the note open and put it back.
+            else if (!notes.has(pane.open.path) && (editor?.settled() ?? true))
+              cleared.add(pane.id);
+          }
+          if (cleared.size)
+            setLayout((layout) =>
+              mapPanes(layout, (pane) => (cleared.has(pane.id) ? { ...pane, open: null } : pane)),
+            );
+          return Promise.all(reloads);
         })
         .catch(fail);
     });
-  }, [refresh, show, storageKey]);
+  }, [refresh, storageKey]);
   useEffect(() => {
-    if (!tree) return;
-    localStorage.setItem(storageKey, JSON.stringify({ last: open?.path, expanded: [...expanded] }));
-  }, [open?.path, expanded, storageKey, tree]);
+    if (!tree || !restored.current) return;
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ layout: saveLayout(layout), focused, expanded: [...expanded] }),
+    );
+  }, [layout, focused, expanded, storageKey, tree]);
   useEffect(() => {
     void bridge.syncInfo().then(setSync).catch(fail);
     return bridge.onSync(setSync);
@@ -224,25 +353,31 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
     return bridge.onPresence((next) => {
       setGone(next);
       // Back where it was: what could not be saved meanwhile is saved now.
-      if (!next) void editor.current?.flush().catch(() => {});
+      if (!next) void flushAll().catch(() => {});
     });
-  }, []);
+  }, [flushAll]);
   useEffect(
     () =>
       window.opsidian?.onCloseRequest(() => {
-        void (editor.current?.flush() ?? Promise.resolve())
+        void flushAll()
           .then(() => window.opsidian?.closeReady())
           .catch((reason) => window.opsidian?.closeFailed(message(reason)));
       }),
-    [],
+    [flushAll],
   );
   useEffect(() => {
     const keys = (event: KeyboardEvent) => {
       if (!event.metaKey && !event.ctrlKey) return;
       const key = event.key.toLowerCase();
-      if (event.altKey && (key === 'arrowleft' || key === 'arrowright')) {
+      if (event.metaKey && event.ctrlKey && /^Bracket(Left|Right)$/.test(event.code)) {
         event.preventDefault();
-        step(key === 'arrowleft' ? -1 : 1);
+        focusNext(event.code === 'BracketRight' ? 1 : -1);
+      } else if (!event.altKey && (event.code === 'Backslash' || key === '\\' || key === '|')) {
+        event.preventDefault();
+        split(event.shiftKey ? 'column' : 'row');
+      } else if (event.altKey && (key === 'arrowleft' || key === 'arrowright')) {
+        event.preventDefault();
+        step(focusedPane.id, key === 'arrowleft' ? -1 : 1);
       } else if (event.altKey || event.shiftKey) return;
       else if (key === 'n') {
         event.preventDefault();
@@ -263,7 +398,7 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
         toggleGraph();
       } else if (key === 'e' && open) {
         event.preventDefault();
-        toggleReading();
+        toggleReading(focusedPane.id);
       }
     };
     window.addEventListener('keydown', keys);
@@ -271,8 +406,8 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
   });
 
   /**
-   * Has the host copy this notebook to GitHub now, whatever its schedule. The note being
-   * written is saved first, so the copy has it.
+   * Has the host copy this notebook to GitHub now, whatever its schedule. The notes being
+   * written are saved first, so the copy has them.
    */
   async function syncWithGitHub() {
     if (!sync.connected)
@@ -281,7 +416,7 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
       );
     setNotice('Syncing with GitHub…');
     try {
-      await editor.current?.flush();
+      await flushAll();
       setNotice(copyOutcome(await bridge.syncWithGitHub()));
     } catch (reason) {
       fail(reason);
@@ -290,14 +425,51 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
   /** Searches the notebook for a tag, as clicking one does. A tag just typed is saved first. */
   const findTag = (tag: string) => {
     setCommanding(false);
-    void (editor.current?.flush() ?? Promise.resolve())
+    void (focusedEditor()?.flush() ?? Promise.resolve())
       .catch(() => {})
       .then(() => setFinding(`#${tag}`));
   };
-  const setEditing = (next: EditorMode) => {
-    editing.current = next;
-    setMode(next);
-  };
+  const toggleReading = (id: string) =>
+    setLayout((layout) =>
+      updatePane(layout, id, (pane) =>
+        pane.mode === 'reading'
+          ? { ...pane, mode: pane.editing }
+          : { ...pane, editing: pane.mode, mode: 'reading' },
+      ),
+    );
+  const sourceMode = (id: string) =>
+    setLayout((layout) =>
+      updatePane(layout, id, (pane) => {
+        const next = pane.mode === 'source' ? 'live' : 'source';
+        return { ...pane, mode: next, editing: next };
+      }),
+    );
+  const leaveReading = (id: string) =>
+    setLayout((layout) =>
+      updatePane(layout, id, (pane) =>
+        pane.mode === 'reading' ? { ...pane, mode: pane.editing } : pane,
+      ),
+    );
+  const share = (path: string) => (sync.connected ? setSharing(path) : setNotice(SHARE_NEEDS_HOST));
+  /** Copies a note beside itself as “Name 1”, Obsidian's naming, and opens the copy. */
+  async function duplicate(path: string) {
+    try {
+      // The copy takes what was just typed.
+      await Promise.all(
+        panes(state.current.layout)
+          .filter((pane) => pane.open?.path === path)
+          .map((pane) => editors.current.get(pane.id)?.flush()),
+      );
+      const { content } = await bridge.read(path);
+      const copy = await bridge.createNote(noteFolder(path), noteTitle(path));
+      const fresh = await bridge.read(copy);
+      await bridge.save(copy, content, fresh.revision);
+      await refresh();
+      await show(copy);
+    } catch (reason) {
+      fail(reason);
+    }
+  }
   const commands: PaletteCommand[] = [
     { id: 'new-note', title: 'New note', icon: FilePlus2, keys: '⌘N', run: () => void create('') },
     { id: 'find-note', title: 'Find a note', icon: Search, keys: '⌘K', run: () => setFinding('') },
@@ -308,7 +480,7 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
             title: 'Find in note',
             icon: TextSearch,
             keys: '⌘F',
-            run: () => editor.current?.find(false),
+            run: () => focusedEditor()?.find(false),
           },
           ...(mode !== 'reading'
             ? [
@@ -317,7 +489,7 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
                   title: 'Find and replace in note',
                   icon: Replace,
                   keys: '⌥⌘F',
-                  run: () => editor.current?.find(true),
+                  run: () => focusedEditor()?.find(true),
                 },
               ]
             : []),
@@ -326,22 +498,28 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
             title: mode === 'reading' ? 'Edit note' : 'Reading view',
             icon: mode === 'reading' ? Pencil : BookOpen,
             keys: '⌘E',
-            run: toggleReading,
+            run: () => toggleReading(focusedPane.id),
           },
           {
             id: 'source',
             title: mode === 'source' ? 'Live Preview' : 'Source mode',
             icon: Code,
-            run: () => setEditing(mode === 'source' ? 'live' : 'source'),
+            run: () => sourceMode(focusedPane.id),
           },
           {
             id: 'rename',
             title: 'Rename note',
             icon: Pencil,
             run: () => {
-              if (mode === 'reading') setMode(editing.current);
-              setTimeout(() => editor.current?.focusTitle(), 0);
+              leaveReading(focusedPane.id);
+              setTimeout(() => focusedEditor()?.focusTitle(), 0);
             },
+          },
+          {
+            id: 'duplicate',
+            title: 'Duplicate note',
+            icon: Copy,
+            run: () => void duplicate(open.path),
           },
           {
             id: 'move',
@@ -355,19 +533,19 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
             icon: FolderSearch,
             run: () => void bridge.reveal(open.path).catch(fail),
           },
+          {
+            id: 'share',
+            title: 'Share note as a link…',
+            icon: Link,
+            run: () => share(open.path),
+          },
           ...(sync.connected
             ? [
-                {
-                  id: 'share',
-                  title: 'Share note as a link…',
-                  icon: Link,
-                  run: () => setSharing(open.path),
-                },
                 {
                   id: 'history',
                   title: 'Version history',
                   icon: History,
-                  run: () => setHistoryOpen(true),
+                  run: () => setHistory({ pane: focusedPane.id, path: open.path }),
                 },
               ]
             : []),
@@ -380,14 +558,64 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
         ]
       : []),
     {
+      id: 'split-right',
+      title: 'Split right',
+      icon: Columns2,
+      keys: '⌘\\',
+      run: () => split('row'),
+    },
+    {
+      id: 'split-down',
+      title: 'Split down',
+      icon: Rows2,
+      keys: '⇧⌘\\',
+      run: () => split('column'),
+    },
+    ...(all.length > 1
+      ? [
+          {
+            id: 'close-pane',
+            title: 'Close pane',
+            icon: X,
+            run: () => void closeOne(focusedPane.id),
+          },
+          {
+            id: 'focus-next-pane',
+            title: 'Focus next pane',
+            icon: ArrowRight,
+            keys: '⌃⌘]',
+            run: () => focusNext(1),
+          },
+          {
+            id: 'focus-previous-pane',
+            title: 'Focus previous pane',
+            icon: ArrowLeft,
+            keys: '⌃⌘[',
+            run: () => focusNext(-1),
+          },
+        ]
+      : []),
+    {
       id: 'graph',
       title: graphOpen ? 'Close graph' : 'Open local graph',
-      icon: Share2,
+      icon: Waypoints,
       keys: '⌘G',
       run: toggleGraph,
     },
-    { id: 'back', title: 'Back', icon: ArrowLeft, keys: '⌥⌘←', run: () => step(-1) },
-    { id: 'forward', title: 'Forward', icon: ArrowRight, keys: '⌥⌘→', run: () => step(1) },
+    {
+      id: 'back',
+      title: 'Back',
+      icon: ArrowLeft,
+      keys: '⌥⌘←',
+      run: () => step(focusedPane.id, -1),
+    },
+    {
+      id: 'forward',
+      title: 'Forward',
+      icon: ArrowRight,
+      keys: '⌥⌘→',
+      run: () => step(focusedPane.id, 1),
+    },
     {
       id: 'sidebar',
       title: sidebar ? 'Hide sidebar' : 'Show sidebar',
@@ -418,32 +646,39 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
       id: 'switch',
       title: 'Switch notebook',
       icon: FolderOpen,
-      run: () => void (editor.current?.flush() ?? Promise.resolve()).then(() => onSwitch(), fail),
+      run: () => void flushAll().then(() => onSwitch(), fail),
     },
     { id: 'help', title: 'Help', icon: CircleHelp, run: () => void bridge.openHelp().catch(fail) },
   ];
 
   async function trash(path: string) {
     const gone = (other: string) => other === path || other.startsWith(`${path}/`);
-    const affected = Boolean(open && gone(open.path));
+    const affected = panes(state.current.layout).filter(
+      (pane) => pane.open && gone(pane.open.path),
+    );
     try {
-      await editor.current?.flush();
+      await flushAll();
       // An edit made while the note is on its way to the trash must not bring it back.
-      const resume = affected ? editor.current?.suspend() : undefined;
+      const held = affected.map((pane) => ({
+        path: pane.open!.path,
+        resume: editors.current.get(pane.id)?.suspend(),
+      }));
       try {
         await bridge.trash(path);
-        resume?.(null);
+        held.forEach(({ resume }) => resume?.(null));
       } catch (reason) {
-        resume?.(open!.path);
+        held.forEach(({ path, resume }) => resume?.(path));
         throw reason;
       }
-      setTrail((before) => {
-        const paths = before.paths.filter((other) => !gone(other));
-        const current = before.paths[before.at];
-        const at = current && !gone(current) ? paths.indexOf(current) : paths.length - 1;
-        return { paths, at };
-      });
-      if (affected) setOpen(null);
+      setLayout((layout) =>
+        mapPanes(layout, (pane) => {
+          const paths = pane.trail.paths.filter((other) => !gone(other));
+          const current = pane.trail.paths[pane.trail.at];
+          const at = current && !gone(current) ? paths.indexOf(current) : paths.length - 1;
+          const open = pane.open && gone(pane.open.path) ? null : pane.open;
+          return { ...pane, open, trail: { paths, at } };
+        }),
+      );
       const name = /\.md$/i.test(path) ? noteTitle(path) : path.slice(path.lastIndexOf('/') + 1);
       setNotice(`“${name}” was moved to the trash. Restore it from Trash in the sidebar.`);
       await refresh();
@@ -453,16 +688,21 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
   }
   /** Renames or moves a note or folder, then follows it wherever it is open or remembered. */
   async function relocate(path: string, action: () => Promise<MoveResult>): Promise<boolean> {
-    const before = state.current.open?.path;
     try {
-      await editor.current?.flush();
+      await flushAll();
       // Typing goes on during the move; saving waits, then goes to wherever the note now is.
-      const resume = editor.current?.suspend();
+      // Every pane waits: any of them may show the note, or a note in the folder.
+      const held = panes(state.current.layout).flatMap((pane) => {
+        const editor = editors.current.get(pane.id);
+        return pane.open && editor
+          ? [{ path: pane.open.path, editor, resume: editor.suspend() }]
+          : [];
+      });
       let result: MoveResult;
       try {
         result = await action();
       } catch (reason) {
-        resume?.(before!);
+        held.forEach(({ path, resume }) => resume(path));
         throw reason;
       }
       const shift = (other: string) =>
@@ -471,14 +711,20 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
           : other.startsWith(`${path}/`)
             ? result.path + other.slice(path.length)
             : other;
-      const current = before && shift(before);
-      // Links inside the open note may have been rewritten on disk. Take that text before
-      // saving resumes, so the next save starts from it.
-      if (current && result.rewritten.includes(current))
-        await editor.current?.reloadIfClean(current).catch(fail);
-      resume?.(current!);
-      setOpen((open) => (open ? { ...open, path: shift(open.path) } : open));
-      setTrail((trail) => ({ ...trail, paths: trail.paths.map(shift) }));
+      for (const { path: before, editor, resume } of held) {
+        const current = shift(before);
+        // Links inside an open note may have been rewritten on disk. Take that text before
+        // saving resumes, so the next save starts from it.
+        if (result.rewritten.includes(current)) await editor.reloadIfClean(current).catch(fail);
+        resume(current);
+      }
+      setLayout((layout) =>
+        mapPanes(layout, (pane) => ({
+          ...pane,
+          open: pane.open ? { ...pane.open, path: shift(pane.open.path) } : null,
+          trail: { ...pane.trail, paths: pane.trail.paths.map(shift) },
+        })),
+      );
       setExpanded((folders) => new Set([...folders].map(shift)));
       await refresh();
       if (result.missed.length)
@@ -494,22 +740,92 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
     }
   }
 
-  function toggleReading() {
-    if (mode === 'reading') return setMode(editing.current);
-    editing.current = mode;
-    setMode('reading');
-  }
   function toggleGraph() {
     if (graphOpen) return setGraphOpen(false);
-    void (editor.current?.flush() ?? Promise.resolve()).finally(() => {
+    void flushAll().finally(() => {
       setGraphMounted(true);
       setGraphOpen(true);
     });
   }
-  const icon =
-    'no-drag text-muted-foreground hover:bg-accent hover:text-accent-foreground flex size-7 items-center justify-center rounded-md disabled:opacity-40 disabled:hover:bg-transparent';
 
-  if (!tree) return null;
+  // Nothing until the session is back, so a restored pane does not first flash empty.
+  if (!tree || !restored.current) return null;
+  const noticeBar = notice ? (
+    <div role="alert" className="bg-secondary flex items-center gap-4 px-8 py-3 text-[13px]">
+      <span className="flex-1 leading-5">{notice}</span>
+      <button aria-label="Dismiss" className={iconButton} onClick={() => setNotice('')}>
+        <X size={16} />
+      </button>
+    </div>
+  ) : null;
+  const unsaved = [focusedPane, ...all].find((pane) => {
+    const editor = editors.current.get(pane.id);
+    return pane.open && editor && !editor.settled();
+  });
+  // A save that failed in any pane is shown, over the pane in use: nothing else would say so.
+  const reported =
+    all.find((pane) => pane.open && statuses[pane.id]?.save.state === 'error') ?? focusedPane;
+  const renderPane = (pane: PaneState, index: number) => {
+    const id = pane.id;
+    const note = pane.open;
+    return (
+      <Pane
+        pane={pane}
+        focused={id === focusedPane.id}
+        first={index === 0}
+        sidebar={sidebar}
+        closable={all.length > 1}
+        history={sync.connected}
+        notice={id === focusedPane.id ? noticeBar : null}
+        onFocus={() => setFocused(id)}
+        onFocusEditor={() => {
+          const editor = editors.current.get(id);
+          editor?.focus();
+          return Boolean(editor);
+        }}
+        onFocusTitle={() => editors.current.get(id)?.focusTitle()}
+        onShowSidebar={() => setSidebar(true)}
+        onStep={(by) => step(id, by)}
+        onToggleGraph={toggleGraph}
+        onToggleReading={() => toggleReading(id)}
+        onSourceMode={() => sourceMode(id)}
+        onShare={() => note && share(note.path)}
+        onHistory={() => note && setHistory({ pane: id, path: note.path })}
+        onRename={() => leaveReading(id)}
+        onDuplicate={() => note && void duplicate(note.path)}
+        onMove={() => note && setMoving(note.path)}
+        onReveal={() => note && void bridge.reveal(note.path).catch(fail)}
+        onTrash={() => note && void trash(note.path)}
+        onSplit={(direction) => split(direction, undefined, id)}
+        onClose={() => void closeOne(id)}
+        onNewNote={() => void create('', undefined, id)}
+        onFind={() => setFinding('')}
+      >
+        {note && (
+          <NoteEditor
+            key={note.visit}
+            ref={editorRef(id)}
+            path={note.path}
+            notes={tree.notes}
+            tags={tags.map((entry) => entry.tag)}
+            heading={note.heading}
+            resolve={resolve}
+            locateImage={locateImage}
+            mode={pane.mode}
+            autoFocus={id === focusedPane.id}
+            version={version}
+            onOpenLink={(target, heading) => follow(id, target, heading)}
+            onOpen={(path) => void showIn(id, path).catch(fail)}
+            onTag={findTag}
+            onRename={(name) => relocate(note.path, () => bridge.rename(note.path, name))}
+            onChanged={() => void refresh().catch(fail)}
+            onNotice={setNotice}
+            onStatus={(status) => setStatuses((before) => ({ ...before, [id]: status }))}
+          />
+        )}
+      </Pane>
+    );
+  };
   return (
     <div className="flex h-full">
       {sidebar && (
@@ -526,6 +842,8 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
             })
           }
           onOpen={(path) => void show(path).catch(fail)}
+          onOpenSplit={(path, direction) => split(direction, path)}
+          onDuplicate={(path) => void duplicate(path)}
           onNewNote={(folder) => void create(folder)}
           onNewFolder={(parent, name) =>
             void bridge
@@ -552,145 +870,22 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
         />
       )}
       <main className="relative flex min-w-0 flex-1 flex-col">
-        <header
-          className={cn(
-            'drag flex h-11 shrink-0 items-center gap-0.5 pr-2.5',
-            sidebar ? 'pl-2.5' : 'pl-[84px]',
-          )}
-        >
-          {!sidebar && (
-            <button
-              aria-label="Show sidebar"
-              title="Show sidebar"
-              className={icon}
-              onClick={() => setSidebar(true)}
-            >
-              <PanelLeft size={17} />
-            </button>
-          )}
-          <button
-            aria-label="Back"
-            title="Back (⌥⌘←)"
-            className={icon}
-            disabled={trail.at <= 0}
-            onClick={() => step(-1)}
-          >
-            <ArrowLeft size={17} />
-          </button>
-          <button
-            aria-label="Forward"
-            title="Forward (⌥⌘→)"
-            className={icon}
-            disabled={trail.at >= trail.paths.length - 1}
-            onClick={() => step(1)}
-          >
-            <ArrowRight size={17} />
-          </button>
-          <div
-            aria-label="Where this note is"
-            className="text-muted-foreground flex min-w-0 flex-1 justify-center truncate px-3 text-[13.5px]"
-          >
-            {open && (
-              <span className="truncate">
-                {noteFolder(open.path) &&
-                  noteFolder(open.path)
-                    .split('/')
-                    .map((part, position) => (
-                      <span key={position}>
-                        {part}
-                        <span className="text-faint px-1.5">/</span>
-                      </span>
-                    ))}
-                <span className="text-foreground">{noteTitle(open.path)}</span>
-              </span>
-            )}
-          </div>
-          <button
-            aria-label={graphOpen ? 'Close graph' : 'Open graph'}
-            title={graphOpen ? 'Close graph (⌘G)' : 'Open local graph (⌘G)'}
-            className={cn(icon, graphOpen && 'text-foreground')}
-            onClick={toggleGraph}
-          >
-            <Share2 size={17} />
-          </button>
-          {open && !graphOpen && (
-            <>
+        {graphOpen && (
+          <>
+            <HeaderBar label="Graph header" traffic={!sidebar}>
+              {!sidebar && <ShowSidebar onShow={() => setSidebar(true)} />}
+              <Crumbs path={open?.path ?? null} active />
               <button
-                aria-label={mode === 'reading' ? 'Edit' : 'Reading view'}
-                title={mode === 'reading' ? 'Edit (⌘E)' : 'Reading view (⌘E)'}
-                className={icon}
-                onClick={toggleReading}
+                aria-label="Close graph"
+                title="Close graph (⌘G)"
+                className={cn(iconButton, 'text-foreground')}
+                onClick={toggleGraph}
               >
-                {mode === 'reading' ? <Pencil size={17} /> : <BookOpen size={17} />}
+                <Waypoints size={17} />
               </button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button aria-label="More options" title="More options" className={icon}>
-                    <Ellipsis size={17} />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  className="w-56"
-                  onCloseAutoFocus={(event) => {
-                    // Rename hands focus to the title instead of back to the button.
-                    if (!renaming.current) return;
-                    renaming.current = false;
-                    event.preventDefault();
-                    editor.current?.focusTitle();
-                  }}
-                >
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      const next = mode === 'source' ? 'live' : 'source';
-                      editing.current = next;
-                      setMode(next);
-                    }}
-                  >
-                    <Code /> <span className="flex-1">Source mode</span>
-                    {mode === 'source' && <Check className="text-primary" />}
-                  </DropdownMenuItem>
-                  {sync.connected && (
-                    <>
-                      <DropdownMenuItem onSelect={() => setSharing(open.path)}>
-                        <Link /> Share as a link…
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
-                        <History /> Version history
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      if (mode === 'reading') setMode(editing.current);
-                      renaming.current = true;
-                    }}
-                  >
-                    <Pencil /> Rename
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => setMoving(open.path)}>
-                    <FolderInput /> Move to…
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => void bridge.reveal(open.path).catch(fail)}>
-                    <FolderSearch /> Show in Finder
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem variant="destructive" onSelect={() => void trash(open.path)}>
-                    <Trash2 /> Move to trash
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </>
-          )}
-        </header>
-        {notice && (
-          <div role="alert" className="bg-secondary flex items-center gap-4 px-8 py-3 text-[13px]">
-            <span className="flex-1 leading-5">{notice}</span>
-            <button aria-label="Dismiss" className={icon} onClick={() => setNotice('')}>
-              <X size={16} />
-            </button>
-          </div>
+            </HeaderBar>
+            {noticeBar}
+          </>
         )}
         {graphMounted && (
           <div className={graphOpen ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
@@ -704,43 +899,25 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
             />
           </div>
         )}
-        {graphOpen ? null : open ? (
-          <NoteEditor
-            key={open.visit}
-            ref={editor}
-            path={open.path}
-            notes={tree.notes}
-            tags={tags.map((entry) => entry.tag)}
-            heading={open.heading}
-            resolve={resolve}
-            locateImage={locateImage}
-            mode={mode}
-            version={version}
-            onOpenLink={follow}
-            onOpen={(path) => void show(path).catch(fail)}
-            onTag={findTag}
-            onRename={(name) => relocate(open.path, () => bridge.rename(open.path, name))}
-            onChanged={() => void refresh().catch(fail)}
-            onNotice={setNotice}
-            onStatus={setNoteStatus}
+        {/* Hidden, not unmounted, under the graph: each editor keeps its place and history. */}
+        <div className={graphOpen ? 'hidden' : 'flex min-h-0 min-w-0 flex-1 flex-col'}>
+          <SplitView
+            layout={layout}
+            renderPane={renderPane}
+            onResize={(split, index, fraction, min) =>
+              setLayout((layout) => resize(layout, split, index, fraction, min))
+            }
           />
-        ) : (
-          <div className="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-5">
-            <p className="text-foreground text-lg">No note is open</p>
-            <div className="flex gap-6 text-sm">
-              <button className="text-link" onClick={() => void create('')}>
-                New note <kbd className="text-muted-foreground pl-1 font-sans text-xs">⌘ N</kbd>
-              </button>
-              <button className="text-link" onClick={() => setFinding('')}>
-                Find a note <kbd className="text-muted-foreground pl-1 font-sans text-xs">⌘ K</kbd>
-              </button>
-            </div>
-          </div>
-        )}
+        </div>
         <StatusBar
-          note={open ? noteStatus : undefined}
+          note={reported.open ? statuses[reported.id] : undefined}
           sync={sync}
-          onRetrySave={() => void editor.current?.flush().catch(() => {})}
+          onRetrySave={() =>
+            void editors.current
+              .get(reported.id)
+              ?.flush()
+              .catch(() => {})
+          }
           onSyncSettings={() => setSettings('sync')}
         />
       </main>
@@ -750,10 +927,10 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
             <MissingNotice
               missing={gone}
               unsaved={
-                open && editor.current && !editor.current.settled()
+                unsaved?.open
                   ? {
-                      note: noteTitle(open.path),
-                      copy: () => copyText(editor.current?.text() ?? ''),
+                      note: noteTitle(unsaved.open.path),
+                      copy: () => copyText(editors.current.get(unsaved.id)?.text() ?? ''),
                     }
                   : undefined
               }
@@ -762,7 +939,7 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
                 // Downloaded again into the same place: carry on, and save what waited.
                 setGone(null);
                 void refresh().catch(fail);
-                void editor.current?.flush().catch(() => {});
+                void flushAll().catch(() => {});
               }}
               onDone={(warning) => onClose(null, warning)}
               onClose={() => void bridge.closeVault().then(() => onClose(gone), fail)}
@@ -774,7 +951,7 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
       {finding !== null && (
         <QuickSwitcher
           notes={tree.notes}
-          recent={[...trail.paths].reverse()}
+          recent={[...focusedPane.trail.paths].reverse()}
           initial={finding}
           onOpen={(path) => {
             setFinding(null);
@@ -814,8 +991,8 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
             onSwitch('github');
           }}
           onStopSyncing={async (trash) => {
-            // The note being written goes up with the rest before anything is let go of.
-            await editor.current?.flush();
+            // The notes being written go up with the rest before anything is let go of.
+            await flushAll();
             const host = sync.host?.replace(/^https?:\/\//, '') ?? 'The host';
             const { hostTold, trashed } = await bridge.disconnect({ trash });
             const unheard = hostTold
@@ -833,28 +1010,22 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
             return [unheard && `Stopped. ${unheard}`, kept].filter(Boolean).join(' ') || undefined;
           }}
           onReset={async () => {
-            await editor.current?.flush();
+            await flushAll();
             await bridge.resetApp();
           }}
           onClose={() => setSettings(undefined)}
         />
       )}
       {syncOpen && <SyncDialog info={sync} onClose={() => setSyncOpen(false)} />}
-      {sharing && (
-        <ShareDialog
-          path={sharing}
-          flush={() => editor.current?.flush() ?? Promise.resolve()}
-          onClose={() => setSharing(null)}
-        />
-      )}
-      {historyOpen && open && (
+      {sharing && <ShareDialog path={sharing} flush={flushAll} onClose={() => setSharing(null)} />}
+      {history && (
         <HistoryDialog
-          path={open.path}
+          path={history.path}
           onRestore={(content) => {
-            setHistoryOpen(false);
-            editor.current?.restore(content);
+            setHistory(null);
+            editors.current.get(history.pane)?.restore(content);
           }}
-          onClose={() => setHistoryOpen(false)}
+          onClose={() => setHistory(null)}
         />
       )}
       {trashOpen && (

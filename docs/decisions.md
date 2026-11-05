@@ -218,6 +218,15 @@ These are implementation design tasks, not reasons to block the editor prototype
 - **Not built:** links that follow edits, sharing a folder or a whole notebook, a password on a link, counting visits, and shared pages without Tailscale on a home-network host, which nothing outside the home could reach anyway.
 - **Still to check on a real iPhone:** the share row and the shared notes list.
 
+## Split panes — 2026-11-06
+
+- **The layout is a tree kept in the desktop app and saved per notebook on this Mac, not synced.** Raised by the user, who wanted two notes side by side or one above the other. Where panes sit is a matter of the screen in front of you, and another Mac or the iPhone has a different one. The tree lives in `apps/desktop/src/panes.ts` as pure functions, tested on their own.
+- **Each pane has its own back and forward and its own view mode.** Reading one note while editing another beside it is the reason to split; a mode shared by every pane would undo that.
+- **A note opens in one pane at a time.** Each editor owns its note's save queue and revision, so a second editor on the same note would save over the first and turn every edit into a conflict copy. Opening a note that is already on screen moves to its pane instead. One document session shared by several views is the later step that would allow it.
+- **Panes are placed in one box rather than nested a box per split,** so splitting or closing a pane never remounts the others, and an editor keeps its text, undo history and unsaved edits.
+- **The graph button's icon changed from Share2 to Waypoints,** because Share2 read as share. Sharing became a visible button in every pane's header, which says a host is needed when the notebook has none, instead of hiding in the ⋯ menu.
+- **Duplicate copies the note through the existing read, create and save,** with no new native method; creating a note already picks Obsidian's `Name 1` naming.
+
 ## Future AI direction
 
 Potential features: organize a messy thought, answer questions over notes with citations, and suggest related notes. A machine-hosted agent and supported Codex/ChatGPT sign-in were explored. No AI integration is committed for the initial milestones; re-check product access and integration documentation when that work begins.

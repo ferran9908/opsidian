@@ -70,6 +70,8 @@ export interface NoteEditorHandle {
   /** What the editor holds now, saved or not. */
   text(): string;
   focusTitle(): void;
+  /** Puts the cursor back in the text. */
+  focus(): void;
   /** Opens find in the note, or find and replace. */
   find(replace?: boolean): void;
 }
@@ -84,6 +86,8 @@ interface Props {
   /** Finds an image by vault path or, failing that, by file name. */
   locateImage(path: string): string;
   mode: EditorMode;
+  /** Whether to take the keyboard once loaded: only the pane in use does. */
+  autoFocus?: boolean | undefined;
   /** Changes whenever the notebook does, so links and backlinks can be refreshed. */
   version: number;
   onOpenLink(target: string, heading?: string): void;
@@ -147,6 +151,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
     settled: () => saves.current?.settled ?? true,
     text: () => editor.current?.view.state.doc.toString() ?? '',
     focusTitle: () => titleField.current?.select(),
+    focus: () => editor.current?.view.focus(),
     find: (replace) => editor.current?.find(replace),
   }));
 
@@ -263,7 +268,9 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
         });
         setLoaded(true);
         // A brand-new note starts at its name; anything else starts in the text.
-        if (!document.content && /^Untitled( \d+)?$/.test(noteTitle(path)))
+        if (latest.current.autoFocus === false) {
+          // Another pane has the keyboard.
+        } else if (!document.content && /^Untitled( \d+)?$/.test(noteTitle(path)))
           titleField.current?.select();
         else editor.current.view.focus();
         if (latest.current.heading) editor.current.scrollToHeading(latest.current.heading);
