@@ -123,10 +123,13 @@ export function ShareDialog({ path, flush, onClose }: Props) {
         {made ? (
           <div className="bg-secondary space-y-2 rounded-lg p-4">
             <p className="text-[13px] font-medium">
-              Link copied. It works for {until(made).toLowerCase()}.
+              Link copied.{' '}
+              {made.expires
+                ? `It stops working in ${until(made).replace(/ left$/, '')}.`
+                : 'It works until you stop it.'}
             </p>
             <div className="flex items-center gap-3">
-              <code className="min-w-0 flex-1 truncate text-[13px] select-all">{made.url}</code>
+              <code className="min-w-0 flex-1 text-[13px] break-all select-all">{made.url}</code>
               <CopyButton url={made.url} primary />
             </div>
           </div>
@@ -162,7 +165,7 @@ export function ShareDialog({ path, flush, onClose }: Props) {
                   key={each.id}
                   className={cn('border-border flex items-center gap-3 border-t py-2 text-[13px]')}
                 >
-                  <code className="min-w-0 flex-1 truncate select-all">{each.url}</code>
+                  <code className="min-w-0 flex-1 break-all select-all">{each.url}</code>
                   <span className="text-muted-foreground shrink-0">{until(each)}</span>
                   <CopyButton url={each.url} />
                   <button
@@ -216,7 +219,7 @@ export function SharedNotes() {
         >
           <div className="min-w-0 flex-1">
             <p className="truncate font-semibold">{noteTitle(each.path)}</p>
-            <code className="text-muted-foreground block truncate text-[12px] select-all">
+            <code className="text-muted-foreground block text-[12px] break-all select-all">
               {each.url}
             </code>
           </div>
