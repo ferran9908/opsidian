@@ -27,6 +27,7 @@ export type HostRequest =
   | { op: 'mirror'; notebook: string; confirm?: boolean }
   | { op: 'unmirror'; notebook: string }
   | { op: 'handoff' }
+  | { op: 'shareBase'; base?: string | undefined }
   | { op: 'takeOver'; dataDir: string; port: number; from: string; code: string; to: string };
 
 export type HostReply =
@@ -110,6 +111,10 @@ async function handle(request: HostRequest, id: number): Promise<unknown> {
       };
     case 'handoff':
       return host.handoff();
+    // Reads it with no `base` key; sets it, or clears it with undefined, when one is given.
+    case 'shareBase':
+      if ('base' in request) host.setShareBase(request.base);
+      return host.shareBase();
     case 'invite':
       return host.invite(request.notebook);
     case 'cancelInvitation':

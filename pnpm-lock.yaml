@@ -265,6 +265,9 @@ importers:
 
   apps/host:
     devDependencies:
+      '@opsidian/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@opsidian/notebook':
         specifier: workspace:*
         version: link:../../packages/notebook
@@ -356,6 +359,12 @@ importers:
 
   packages/core:
     dependencies:
+      '@lezer/common':
+        specifier: ^1.2.0
+        version: 1.5.3
+      '@lezer/markdown':
+        specifier: 1.7.2
+        version: 1.7.2
       node-diff3:
         specifier: ^3.2.1
         version: 3.2.1

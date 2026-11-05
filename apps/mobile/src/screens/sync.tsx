@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Linking, Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Share, Switch, Text, View } from 'react-native';
 import * as Network from 'expo-network';
 import type { Check as Step } from '@opsidian/sync';
-import { noteTitle, type GitHubCopy, type NoteVersion } from '@opsidian/core';
+import { noteTitle, type GitHubCopy, type NoteShare, type NoteVersion } from '@opsidian/core';
 import { disconnect, refresh, store } from '../notebook';
 import { rejected, syncLine, useNavigation } from '../nav';
 import {
@@ -71,6 +71,23 @@ export function Sync() {
       live = false;
     };
   }, [sync.connected, out]);
+  const [shared, setShared] = useState<NoteShare[]>([]);
+  useEffect(() => {
+    if (!sync.connected || out) return setShared([]);
+    let live = true;
+    void store.notebook?.sync.shares().then(
+      (next) => live && setShared(next),
+      () => live && setShared([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [sync.connected, out]);
+  const stopSharing = (share: NoteShare) =>
+    void store.notebook?.sync
+      .unshare(share.id)
+      .then(() => setShared((all) => all.filter((each) => each.id !== share.id)))
+      .catch(() => {});
   const syncWithGitHub = () => {
     setCopying(true);
     setCopied('');
@@ -213,6 +230,24 @@ export function Sync() {
               label={`Move ${sync.held} to trash here`}
               onPress={() => store.notebook?.sync.confirmDeletions()}
             />
+          ) : null}
+          {shared.length ? (
+            <View style={{ paddingTop: 8 }}>
+              <Label>Shared notes</Label>
+              {shared.map((each, index) => (
+                <Row
+                  key={each.id}
+                  title={noteTitle(each.path)}
+                  detail={each.expires ? `until ${when(each.expires)}` : 'until stopped'}
+                  last={index === shared.length - 1}
+                  onPress={() => void Share.share({ url: each.url }).catch(() => {})}
+                  onLongPress={() => stopSharing(each)}
+                />
+              ))}
+              <Muted style={{ fontSize: 13, paddingTop: 6 }}>
+                Tap to send a link again; press and hold to stop sharing.
+              </Muted>
+            </View>
           ) : null}
           {sync.connected ? (
             <>

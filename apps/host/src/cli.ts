@@ -25,6 +25,7 @@ import { github, readAccount, statusLine } from './github-cli';
 import { repositoryLabel } from './github';
 import { Mirrors, scheduleOf } from './mirror';
 import { takeOver, type TakeOverProgress } from './move';
+import { funnelOff, funnelOn, funnelState, funnelTarget, tailscaleBinary } from './funnel';
 import {
   fetchRelease,
   installedVersion,
@@ -92,6 +93,9 @@ const HELP = `Opsidian ${VERSION}: a host for your notebooks, so every device sy
                                          (the default), 6h or 24h
   ${me} host github                       How each notebook on GitHub is doing; also login,
                                          sync, disconnect, logout
+  ${me} host share on|off     Let devices share notes as links anyone can open, through
+                              Tailscale Funnel; --url https://… uses your own address instead
+  ${me} host share            Whether sharing is on, and every note shared right now
   ${me} host update           Install the newest version now, if there is one. The host also
                               does it by itself each night; host update auto off stops that
   ${me} host logs [-f]        What the host has been doing
@@ -306,12 +310,13 @@ async function status(): Promise<void> {
   const reach = reachableAt(config);
   const answering = state.running && (await answers(reach));
   const version = (await installedVersion(where)) ?? VERSION;
-  const { notebooks, devices, mirrors, schedule, moved } = await withHost((host) => ({
+  const { notebooks, devices, mirrors, schedule, moved, sharing } = await withHost((host) => ({
     notebooks: host.notebooks(),
     devices: host.devices().filter((device) => !device.revoked),
     mirrors: host.mirrors(),
     schedule: scheduleOf(host),
     moved: host.moved(),
+    sharing: host.shareBase(),
   }));
   if (moved) {
     console.log(
@@ -343,6 +348,7 @@ async function status(): Promise<void> {
       `  Notebooks  ${notebooks.map((each) => `${each.name} (${each.files} files)`).join(', ') || 'none yet'}`,
       `  Devices    ${devices.length}`,
       `  Backups    ${backups}`,
+      `  Sharing    ${sharing ? `On, at ${sharing}/s/…` : `Off (${me} host share on)`}`,
       ...mirrors.map(
         (record, at) =>
           `  ${at ? '          ' : 'GitHub   '}  ${record.name} → ${repositoryLabel(record.remote)}  ${statusLine(record.status, schedule, { running: answering })}`,
@@ -769,6 +775,89 @@ async function takeOverHere(): Promise<void> {
   );
 }
 
+/**
+ * Turns sharing on or off, or says how it stands. On: shared pages are published on the
+ * internet through Tailscale Funnel, under `/s` of this machine's tailnet address, and the
+ * host is told that address so devices get links that work. `--url` gives an address of your
+ * own instead, for a reverse proxy you run yourself.
+ */
+async function share(): Promise<void> {
+  const [what] = words;
+  const config = await needConfig();
+  const target = funnelTarget(config.address, config.port);
+  if (what === 'on') {
+    const own = flags.get('url');
+    let base: string;
+    if (own) {
+      if (!/^https?:\/\//.test(own)) fail('--url should start with https://');
+      base = own.replace(/\/+$/, '');
+    } else {
+      const binary =
+        tailscaleBinary() ??
+        fail(
+          'Tailscale is not installed on this machine, so there is no way to the internet for shared pages. Install it, or give an address of your own with --url.',
+        );
+      base = (await funnelOn(binary, target)).base;
+    }
+    await withHost((host) => host.setShareBase(base));
+    console.log(
+      [
+        `Sharing is on. Notes shared from any device are at ${base}/s/… for whoever has the link.`,
+        own
+          ? `Point ${base}/s at ${target} yourself.`
+          : `Tailscale Funnel hands ${base}/s on to ${target}; nothing else of the host is published.`,
+      ].join('\n'),
+    );
+    return;
+  }
+  if (what === 'off') {
+    const base = await withHost((host) => {
+      const was = host.shareBase();
+      host.setShareBase(undefined);
+      return was;
+    });
+    const binary = tailscaleBinary();
+    if (binary && base && /\.ts\.net$/.test(new URL(base).hostname)) await funnelOff(binary);
+    console.log('Sharing is off. Every shared link has stopped working.');
+    return;
+  }
+  if (what) fail(`${me} host share on, ${me} host share off, or ${me} host share`);
+  const { base, shared } = await withHost((host) => ({
+    base: host.shareBase(),
+    shared: host
+      .notebooks()
+      .flatMap((notebook) =>
+        host
+          .shares(host.notebookId(notebook.name)!)
+          .map((each) => ({ ...each, notebook: notebook.name })),
+      ),
+  }));
+  if (!base) {
+    console.log(`Sharing is off. Turn it on with: ${me} host share on`);
+    return;
+  }
+  let funnel = '';
+  const binary = tailscaleBinary();
+  if (binary && /\.ts\.net$/.test(new URL(base).hostname))
+    funnel = await funnelState(binary).then(
+      (state) =>
+        state.on
+          ? ''
+          : `\n  Tailscale Funnel is not handing ${base}/s on right now. Run: ${me} host share on`,
+      (reason) => `\n  ${(reason as Error).message}`,
+    );
+  console.log(
+    [
+      `Sharing is on at ${base}/s/…${funnel}`,
+      shared.length ? '  Shared now:' : '  Nothing is shared right now.',
+      ...shared.map(
+        (each) =>
+          `    ${each.notebook} / ${each.path}  ${each.url}  ${each.expires ? `until ${when(each.expires)}` : 'until stopped'}`,
+      ),
+    ].join('\n'),
+  );
+}
+
 /** Runs the host in this process until it is told to stop. This is what the service runs. */
 async function runHere(): Promise<void> {
   const config = await readConfig(where);
@@ -1013,6 +1102,8 @@ async function main(): Promise<void> {
       return deleteNotebook();
     case 'reset':
       return reset();
+    case 'share':
+      return share();
     case 'update':
       return update();
     case 'backup':

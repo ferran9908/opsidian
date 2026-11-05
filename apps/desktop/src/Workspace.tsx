@@ -12,6 +12,7 @@ import {
   FolderOpen,
   FolderSearch,
   History,
+  Link,
   PanelLeft,
   Pencil,
   RefreshCw,
@@ -46,6 +47,7 @@ import { TrashDialog } from './TrashDialog';
 import { SyncDialog } from './SyncDialog';
 import { Settings, SETTINGS_SECTIONS, type SettingsSection } from './Settings';
 import { HistoryDialog } from './HistoryDialog';
+import { ShareDialog } from './ShareDialog';
 import { Sidebar, type TreeSort } from './Sidebar';
 import { StatusBar, type NoteStatus } from './StatusBar';
 import { MissingNotice } from './MissingNotice';
@@ -105,6 +107,8 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
   const [syncOpen, setSyncOpen] = useState(false);
   const [settings, setSettings] = useState<SettingsSection>();
   const [historyOpen, setHistoryOpen] = useState(false);
+  /** The note being shared as a link, while the dialog is open. */
+  const [sharing, setSharing] = useState<string | null>(null);
   const [mode, setMode] = useState<EditorMode>(defaultMode);
   // What editing mode to go back to when leaving reading view.
   const editing = useRef<EditorMode>(defaultMode() === 'reading' ? 'live' : defaultMode());
@@ -365,6 +369,12 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
           },
           ...(sync.connected
             ? [
+                {
+                  id: 'share',
+                  title: 'Share note as a link…',
+                  icon: Link,
+                  run: () => setSharing(open.path),
+                },
                 {
                   id: 'history',
                   title: 'Version history',
@@ -653,9 +663,14 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
                     {mode === 'source' && <Check className="text-primary" />}
                   </DropdownMenuItem>
                   {sync.connected && (
-                    <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
-                      <History /> Version history
-                    </DropdownMenuItem>
+                    <>
+                      <DropdownMenuItem onSelect={() => setSharing(open.path)}>
+                        <Link /> Share as a link…
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+                        <History /> Version history
+                      </DropdownMenuItem>
+                    </>
                   )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -837,6 +852,13 @@ export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) 
         />
       )}
       {syncOpen && <SyncDialog info={sync} onClose={() => setSyncOpen(false)} />}
+      {sharing && (
+        <ShareDialog
+          path={sharing}
+          flush={() => editor.current?.flush() ?? Promise.resolve()}
+          onClose={() => setSharing(null)}
+        />
+      )}
       {historyOpen && open && (
         <HistoryDialog
           path={open.path}

@@ -170,6 +170,26 @@ The Mac app works the same way: a development run (`pnpm dev:desktop`) keeps its
 
 Backups and the copy on GitHub protect the real host's data whatever happens on the machine. Keep backups in a folder outside `~/.opsidian`.
 
+## Sharing a note with someone
+
+Any device can share one note as a link that anyone can open in a browser, for an hour, a day, a week, or until it is stopped. The page is the note as it was at that moment, with its images, drawn as plain HTML: later edits stay private until the note is shared again. Wiki links show as text, since the notes they point at are not shared. HTML written in a note is shown as text, never run, and `<!-- -->` and `%% %%` comments are left out, as Reading view hides them.
+
+The host serves the pages, so sharing has to be turned on there once:
+
+- **On a hosting Mac:** in **Settings → Sync**, turn on **Share notes over the internet**.
+- **On a server:** `opsidian host share on`. `opsidian host share` says whether it is on and lists every shared note; `opsidian host share off` turns it off, and every link stops working.
+
+Shared pages reach the internet through [Tailscale Funnel](https://tailscale.com/kb/1223/funnel): Tailscale gives the machine an address such as `https://mac.tail1234.ts.net`, with a certificate it manages, and hands only `/s/…` on to the host. Nothing else of the host is published; sync and pairing stay on your tailnet. Funnel is off for a tailnet until it is allowed once, in Tailscale's admin console: the first time it is turned on, Tailscale says so with a link to do it. It also needs MagicDNS and HTTPS certificates turned on for the tailnet. Funnel keeps its setting across restarts, so this is done once per host machine. If the host later [moves](#moving-the-host-to-another-machine), turn sharing on again on the new machine; links made before point at the old one.
+
+With a reverse proxy of your own instead of Funnel, `opsidian host share on --url https://notes.example.com` tells the host to make links there; point `/s` of that address at the host's `/s`.
+
+Then, on any device:
+
+- **Mac:** **Share as a link…** in the ⋯ menu above the note, or **Share note as a link…** in the command palette (`⌘P`). Choose how long; the link is copied. The dialog lists the note's existing links, each with Copy and Stop. **Settings → Sync** lists every shared note in the notebook.
+- **iPhone:** **Share as a link** in the note's menu, then how long; the link opens in the share sheet. The sync screen lists shared notes: tap to send a link again, press and hold to stop sharing.
+
+The note being written is saved and sent to the host first, so the page shows it. A link is a 32-character random token; guessing is slowed to 20 tries a minute per caller, and a link that has run out or been stopped answers with a page saying so. Pages carry a Content Security Policy that lets nothing run or load from elsewhere, and ask not to be indexed. The host keeps the version of the note and the files it showed for as long as the link lasts, whatever happens to the note meanwhile.
+
 ## Devices
 
 On a hosting Mac, **Settings → Devices** lists every device, when it was last seen, and invitations not yet used. Removing a device stops it syncing at once; the notes on it stay there. Without the app, use `host devices` and `host remove`, which takes a device's name, or its id when two share a name. A device that stops syncing by itself removes itself, so it does not linger in the list.

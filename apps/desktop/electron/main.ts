@@ -435,6 +435,12 @@ async function start() {
   handle('hosting:start', () => hosting.start(open()));
   handle('hosting:stop', () => hosting.stop());
   handle('hosting:keep-running', (value) => hosting.setKeepRunning(value === true));
+  handle('hosting:sharing', (on) => hosting.setSharing(on === true));
+  handle('sync:shares', () => sync.shares());
+  handle('sync:share', (path, hours) =>
+    sync.share(text(path, 4000), hours === undefined ? undefined : Number(hours)),
+  );
+  handle('sync:unshare', (id) => sync.unshare(text(id, 100)));
   handle('hosting:invite', (notebook) => hosting.invite(text(notebook, 200)));
   handle('hosting:cancel-invitation', (id) => hosting.cancelInvitation(text(id, 100)));
   handle('hosting:remove-device', (id) => hosting.removeDevice(text(id, 100)));

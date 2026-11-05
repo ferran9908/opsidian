@@ -49,7 +49,7 @@ The shared notebook code is covered by the existing tests, which all still pass 
 ## Not built, or not verified
 
 - **Not verified on a real iPhone:** typing feel, the keyboard toolbar under a finger, dictation, and behaviour when iOS suspends and resumes the app.
-- **Not verified at all:** picking a photo, taking a photo and choosing a file. These open iOS's own pickers, which the simulator tests could not drive.
+- **Not verified at all:** picking a photo, taking a photo and choosing a file. These open iOS's own pickers, which the simulator tests could not drive. **Share as a link** in a note's menu, and the shared notes list on the sync screen, have been typechecked but not run on a device.
 - **No swipe-back gesture.** Screens go back with the button at the top left.
 - **No dark-mode design pass.** The app follows the system setting using the dark theme tokens.
 - **One notebook per phone.** There is no switcher.

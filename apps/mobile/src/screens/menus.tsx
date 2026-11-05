@@ -140,7 +140,20 @@ export function ItemMenu(props: {
   const navigation = useNavigation();
   const { sync } = useStore();
   const [act, setAct] = useState<{ kind: 'rename' | 'move'; path: string } | undefined>();
+  /** A note being shared as a link: choosing how long, then making it. */
+  const [linking, setLinking] = useState<{ path: string; busy?: boolean; error?: string }>();
   const [error, setError] = useState('');
+  const link = (hours: number | undefined) => {
+    if (!linking) return;
+    setLinking({ ...linking, busy: true, error: '' });
+    void store
+      .notebook!.sync.share(linking.path, hours)
+      .then((made) => {
+        setLinking(undefined);
+        afterSheet(() => void Share.share({ url: made.url }).catch(() => {}));
+      })
+      .catch((reason) => setLinking({ path: linking.path, error: message(reason) }));
+  };
   const path = props.path;
   const note = path !== undefined && isNote(path);
   const vault = store.notebook?.vault;
@@ -191,6 +204,18 @@ export function ItemMenu(props: {
                 }
               />
             ) : null}
+            {note && sync.connected ? (
+              <Row
+                title="Share as a link"
+                onPress={() =>
+                  void ready().then((saved) => {
+                    if (!saved) return;
+                    props.onClose();
+                    afterSheet(() => setLinking({ path }));
+                  })
+                }
+              />
+            ) : null}
             {note ? (
               <Row
                 title="Share as Markdown"
@@ -232,6 +257,25 @@ export function ItemMenu(props: {
             />
           </View>
         ) : null}
+      </Sheet>
+      <Sheet open={linking !== undefined} onClose={() => setLinking(undefined)}>
+        <Text
+          style={{ fontSize: 20, fontWeight: '700', color: colors.foreground, paddingBottom: 6 }}
+        >
+          Share “{linking ? nameOf(linking.path) : ''}” as a link
+        </Text>
+        <Muted style={{ paddingBottom: 12 }}>
+          Anyone with the link can read the note as it is right now, with its images. What you write
+          afterwards stays private until you share it again. For how long?
+        </Muted>
+        {linking?.error ? (
+          <Text style={{ color: colors.destructive, paddingBottom: 8 }}>{linking.error}</Text>
+        ) : null}
+        <Row title="1 hour" onPress={() => link(1)} />
+        <Row title="1 day" onPress={() => link(24)} />
+        <Row title="1 week" onPress={() => link(24 * 7)} />
+        <Row title="Until I stop it" last onPress={() => link(undefined)} />
+        {linking?.busy ? <Muted style={{ paddingTop: 8 }}>Making the link…</Muted> : null}
       </Sheet>
       <NameDialog
         open={act?.kind === 'rename'}

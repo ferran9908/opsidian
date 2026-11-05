@@ -118,13 +118,19 @@ All paths begin `/v1`. Everything except `pair` needs `Authorization: Bearer <cr
 | `DELETE /device`                    | The device stops syncing: the host removes it, and refuses its credential from then on.          |
 | `GET /github`                       | `{copy}`: the notebook's copy in a repository and how it is doing; `{}` when it has none.        |
 | `POST /github/sync`                 | Runs a round of that copy now and answers `{copy}` once done. `409`, `429` or `503` say why not. |
+| `GET /shares`                       | `{shares}`: the notebook's notes shared as links right now.                                      |
+| `POST /shares` `{path, hours?}`     | Shares the note as the host has it, for `hours` or until stopped. `409` when sharing is off.     |
+| `DELETE /shares/:id`                | Stops a link working.                                                                            |
+
+Shared pages are outside `/v1` and need no credential: `GET /s/:token` is the page, and `GET /s/:token/:hash/:name` a file it shows, only for files that page shows. Both answer `404` with a page saying so for a link that is unknown, stopped or run out. See [sharing a note](hosting.md#sharing-a-note-with-someone).
 
 A host that has moved answers every request from a device it knows with `410` and `{ moved: "http://new-address" }`. The device checks that the new address is an Opsidian host that accepts its credential, then keeps the same state and carries on there. Moving itself uses `POST /v1/move` with a code from `host move`, then `/v1/move/files`, `/file`, `/freeze`, `/database` and `/finish` with the credential that returns. While frozen, changes are answered `503`. See [hosting](hosting.md#moving-the-host-to-another-machine).
 
 ## Not built
 
 - **Pruning history.** The host keeps every version forever. That is what lets a device return after any absence without bringing old data back, and it means the host's disk only grows.
-- **Encrypted transport and public-host setup.** See above.
+- **Encrypted transport and public-host setup.** See above. Shared pages are the one exception: they go through Tailscale Funnel, which terminates HTTPS and publishes only `/s`.
+- **Shared links that follow edits, or shared folders.** A link shows the note as it was shared; share it again for a newer version.
 - **A signed, installable host.** The Mac app can host from its settings and a server can run the Docker image ([hosting](hosting.md)), but neither is a signed download yet.
 - **A browsable copy on the host.** The host stores versions by content hash, not as a folder of Markdown files. To read a notebook on the host machine, connect a device to it, or keep it on GitHub ([hosting](hosting.md#keeping-notebooks-on-github)).
 - **Empty folders.** Folders exist on other devices only once they contain a file.

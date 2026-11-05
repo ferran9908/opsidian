@@ -1,4 +1,4 @@
-import type { GitHubCopy, NoteVersion, SyncInfo } from '@opsidian/core';
+import type { GitHubCopy, NoteShare, NoteVersion, SyncInfo } from '@opsidian/core';
 import {
   diagnose,
   github,
@@ -7,6 +7,9 @@ import {
   httpTransport,
   leave,
   pair,
+  share,
+  shares,
+  unshare,
   type Pairing,
   type SyncState,
   type Transport,
@@ -309,6 +312,25 @@ export class SyncService {
     });
     if (!copy) throw new Error('This notebook is not kept on GitHub.');
     return copy;
+  }
+  /** The notes of the open notebook its host shows to anyone with a link. */
+  async shares(): Promise<NoteShare[]> {
+    if (!this.state) return [];
+    const { host, token } = await this.credential();
+    return shares(host, token, this.request);
+  }
+  /**
+   * Has the host show a note to anyone with the link. What this device changed goes to the
+   * host first, so the page shows it; a host that does not answer is not waited on for long.
+   */
+  async share(path: string, hours?: number): Promise<NoteShare> {
+    const { host, token } = await this.credential();
+    await this.inStep();
+    return share(host, token, path, hours, this.request);
+  }
+  async unshare(id: string): Promise<void> {
+    const { host, token } = await this.credential();
+    await unshare(host, token, id, this.request);
   }
   private async credential(): Promise<{ host: string; token: string }> {
     const state = this.state;

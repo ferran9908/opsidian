@@ -80,6 +80,19 @@ export interface GitHubCopy {
   held?: number;
 }
 
+/** A note the host shows to anyone with its link, for a while. */
+export interface NoteShare {
+  id: string;
+  /** The note's path in the notebook when it was shared. */
+  path: string;
+  /** The page's address, as given to someone. */
+  url: string;
+  /** Milliseconds, host clock. */
+  created: number;
+  /** When the link stops working; absent when it works until it is stopped. */
+  expires?: number;
+}
+
 /** How a device talks to the host. Every call may fail; all of them are safe to repeat. */
 export interface Transport {
   /** `wait` seconds is how long the host may hold the request until something changes. */

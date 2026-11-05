@@ -118,6 +118,11 @@ export interface HostingInfo {
   invitations: { id: string; notebook: string; expires: number }[];
   /** Keep hosting from the menu bar after the window is closed. */
   keepRunning: boolean;
+  /**
+   * Where notes shared from any device are published, such as `https://mac.tail1234.ts.net`,
+   * when sharing is on. Absent while it is off.
+   */
+  sharing?: string;
   /** Another machine is copying this host to take it over. */
   moving?: boolean;
   /** This Mac's host moved to another machine; it now only points devices there. */
@@ -197,6 +202,16 @@ export interface GitHubCopy {
   next?: number;
   /** Deletions held back until confirmed on the host. */
   held?: number;
+}
+/** A note shown to anyone with its link, for a while. Mirrors the sync package's own type. */
+export interface NoteShare {
+  id: string;
+  /** The note's path when it was shared. */
+  path: string;
+  url: string;
+  created: number;
+  /** When the link stops working; absent when it works until it is stopped. */
+  expires?: number;
 }
 export interface GitHubRepository {
   fullName: string;
@@ -291,6 +306,14 @@ export interface VaultBridge {
    * machine hosts it. This device's edits reach the host first, so they are in the copy.
    */
   syncWithGitHub(): Promise<GitHubCopy>;
+  /** The notes of the open notebook that its host shows to anyone with a link. */
+  shares(): Promise<NoteShare[]>;
+  /**
+   * Has the host show a note to anyone with the link, for `hours`, or until stopped. The
+   * note is saved and sent to the host first, so the page shows what was just written.
+   */
+  share(path: string, hours?: number): Promise<NoteShare>;
+  unshare(id: string): Promise<void>;
   /** Why sync is not working, one step at a time. Empty when not connected. */
   checkConnection(): Promise<ConnectionCheck[]>;
   openTailscale(): Promise<void>;
@@ -299,6 +322,11 @@ export interface VaultBridge {
   startHosting(): Promise<HostingInfo>;
   stopHosting(): Promise<HostingInfo>;
   setKeepRunning(value: boolean): Promise<HostingInfo>;
+  /**
+   * Publishes shared notes on the internet through Tailscale Funnel, or takes them off it.
+   * Only this Mac's host: a notebook hosted elsewhere is set up there.
+   */
+  setSharing(on: boolean): Promise<HostingInfo>;
   invite(notebook: string): Promise<Invitation>;
   cancelInvitation(id: string): Promise<HostingInfo>;
   removeDevice(id: string): Promise<HostingInfo>;

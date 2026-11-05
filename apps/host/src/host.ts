@@ -12,15 +12,17 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
-import { createReadStream, existsSync, mkdirSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { lstat, readlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { escapeHtml, noteTitle, renderMarkdown, renderPage, renderedFiles } from '@opsidian/core';
 import {
   MAX_FILE_BYTES,
   pathKey,
   validPath,
   type Changes,
   type GitHubCopy,
+  type NoteShare,
   type Op,
   type OpResult,
   type Pairing,
@@ -284,6 +286,10 @@ export class Host {
         notebook text primary key, remote text not null, device text, token text, status text);
       create table if not exists handoffs (code text primary key, expires integer not null);
       create table if not exists told (device text primary key, at integer not null);
+      create table if not exists shares (
+        id text primary key, notebook text not null, file text not null, path text not null,
+        hash text not null, assets text not null, token text not null unique, device text not null,
+        created integer not null, expires integer);
     `);
     if (!this.db.prepare("select 1 from pragma_table_info('devices') where name = 'seen'").get())
       this.db.exec('alter table devices add column seen integer');
@@ -293,7 +299,12 @@ export class Host {
     this.generation = this.db.prepare("select value from meta where name = 'generation'").get()!
       .value as string;
     // Shutting down must not wait for devices to let go of connections they keep open.
-    this.app = Fastify({ bodyLimit: 16 * 1024 * 1024, forceCloseConnections: true });
+    this.app = Fastify({
+      bodyLimit: 16 * 1024 * 1024,
+      forceCloseConnections: true,
+      // Tailscale Funnel may hand on a shared page's path with its mount point still on it.
+      rewriteUrl: (request) => request.url!.replace(/^\/s\/s\//, '/s/'),
+    });
     this.routes();
   }
 
@@ -527,6 +538,165 @@ export class Host {
     };
     for (const top of MOVABLE) if (existsSync(join(this.options.dataDir, top))) await walk(top);
     return found;
+  }
+
+  // Notes shown to anyone with a link. See share routes below.
+
+  /** Where shared pages are reachable from the internet, such as `https://mac.tail1234.ts.net`. */
+  shareBase(): string | undefined {
+    return this.meta('share-base') || undefined;
+  }
+  /** Turns sharing on, with the address pages are served at, or off with nothing. */
+  setShareBase(base: string | undefined): void {
+    if (base === undefined) this.db.prepare("delete from meta where name = 'share-base'").run();
+    else
+      this.db
+        .prepare(
+          "insert into meta (name, value) values ('share-base', ?) on conflict (name) do update set value = excluded.value",
+        )
+        .run(base.replace(/\/+$/, ''));
+  }
+  private shareRecord(row: Row): NoteShare {
+    return {
+      id: row.id as string,
+      path: row.path as string,
+      url: `${this.shareBase() ?? ''}/s/${row.token as string}`,
+      created: row.created as number,
+      ...(row.expires ? { expires: row.expires as number } : {}),
+    };
+  }
+  /** The notes of a notebook shared right now. Links that have run out are forgotten. */
+  shares(notebook: string): NoteShare[] {
+    this.db
+      .prepare('delete from shares where expires is not null and expires < ?')
+      .run(Date.now() - 24 * 3600_000);
+    return (
+      this.db
+        .prepare(
+          `select * from shares where notebook = ? and (expires is null or expires > ?)
+           order by created desc`,
+        )
+        .all(notebook, Date.now()) as Row[]
+    ).map((row) => this.shareRecord(row));
+  }
+  /**
+   * Shares the note at `path` as the host has it now: this version, and the files it shows,
+   * are what the page serves until the link runs out, whatever happens to the note after.
+   */
+  share(notebook: string, path: string, hours: number | undefined, device: string): NoteShare {
+    const base = this.shareBase();
+    if (!base)
+      throw Object.assign(
+        new Error(
+          'Sharing is not turned on on the host. On the Mac that hosts, turn on “Share notes over the internet” in Settings → Sync; on a server, run: opsidian host share on',
+        ),
+        { statusCode: 409 },
+      );
+    if (!/\.md$/i.test(path))
+      throw Object.assign(new Error('Only notes can be shared.'), { statusCode: 400 });
+    const note = this.db
+      .prepare(
+        'select file, path, hash from files where notebook = ? and key = ? and hash is not null',
+      )
+      .get(notebook, pathKey(path)) as Row | undefined;
+    if (!note)
+      throw Object.assign(new Error('The host does not have this note yet. Let it sync first.'), {
+        statusCode: 404,
+      });
+    const live = this.db
+      .prepare('select path, hash from files where notebook = ? and hash is not null')
+      .all(notebook) as Row[];
+    const paths = live.map((row) => row.path as string);
+    const byKey = new Map(live.map((row) => [pathKey(row.path as string), row.hash as string]));
+    const assets: Record<string, string> = {};
+    try {
+      const content = readFileSync(this.blob(notebook, note.hash as string), 'utf8');
+      for (const file of renderedFiles(content, paths)) {
+        const hash = byKey.get(pathKey(file));
+        if (hash) assets[file] = hash;
+      }
+    } catch {
+      // A note whose content is missing is shared without its files; the page says so.
+    }
+    const id = randomUUID();
+    const token = randomBytes(24).toString('base64url');
+    const created = Date.now();
+    const expires = hours ? created + hours * 3600_000 : null;
+    this.db
+      .prepare(
+        `insert into shares (id, notebook, file, path, hash, assets, token, device, created, expires)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        notebook,
+        note.file as string,
+        note.path as string,
+        note.hash as string,
+        JSON.stringify(assets),
+        token,
+        device,
+        created,
+        expires,
+      );
+    return this.shareRecord({ id, path: note.path as string, token, created, expires });
+  }
+  /** Stops a link working. True when there was one to stop, in this notebook. */
+  unshare(notebook: string, id: string): boolean {
+    return (
+      this.db.prepare('delete from shares where notebook = ? and id = ?').run(notebook, id)
+        .changes > 0
+    );
+  }
+  /** A page a visitor asked for, by its link; undefined when there is none, or no longer. */
+  private sharedPage(token: string): { html: string } | undefined {
+    const row = this.db.prepare('select * from shares where token = ?').get(token) as
+      Row | undefined;
+    if (!row) return undefined;
+    const expires = row.expires as number | null;
+    const title = noteTitle(row.path as string);
+    const footer = `Shared from Opsidian · ${
+      expires
+        ? `This link stops working on ${escapeHtml(
+            new Date(expires).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }),
+          )}.`
+        : 'This link works until it is stopped.'
+    }`;
+    if (expires && expires < Date.now()) return undefined;
+    let content: string;
+    try {
+      content = readFileSync(this.blob(row.notebook as string, row.hash as string), 'utf8');
+    } catch {
+      return {
+        html: renderPage({
+          title,
+          body: '<p class="missing">This note is not on the host any more.</p>\n',
+          footer,
+        }),
+      };
+    }
+    const assets = JSON.parse(row.assets as string) as Record<string, string>;
+    const paths = Object.keys(assets);
+    const body = renderMarkdown(content, {
+      paths: [...paths, row.path as string],
+      file: (path) => {
+        const hash = assets[path];
+        return hash
+          ? `/s/${token}/${hash}/${encodeURIComponent(path.slice(path.lastIndexOf('/') + 1))}`
+          : undefined;
+      },
+    });
+    return { html: renderPage({ title, body, footer }) };
+  }
+  /** A file a shared page shows, if that page shows it. */
+  private sharedFile(token: string, hash: string): { path: string; notebook: string } | undefined {
+    const row = this.db
+      .prepare('select notebook, assets, expires from shares where token = ?')
+      .get(token) as Row | undefined;
+    if (!row || (row.expires && (row.expires as number) < Date.now())) return undefined;
+    const assets = JSON.parse(row.assets as string) as Record<string, string>;
+    const path = Object.keys(assets).find((each) => assets[each] === hash);
+    return path ? { path, notebook: row.notebook as string } : undefined;
   }
 
   // Copies of notebooks kept in git repositories. See mirror.ts.
@@ -975,6 +1145,8 @@ export class Host {
     app.addHook('onRequest', async (request, reply) => {
       const path = request.url.split('?')[0]!;
       if (path === '/v1' || path === '/v1/move') return;
+      // Shared pages are for anyone with the link; the link is the credential.
+      if (path === '/s' || path.startsWith('/s/')) return;
       if (path.startsWith('/v1/move/')) return this.mover(request, reply, path);
       const moved = this.movedTo();
       if (moved) {
@@ -1213,6 +1385,124 @@ export class Host {
       const record = copyOf(device);
       if (!record) throw refuse(409, 'This notebook is no longer kept on GitHub.');
       return { copy: copy(record) };
+    });
+
+    // Notes shown to anyone with a link. A device shares, lists and stops its own notebook's;
+    // the pages themselves need no credential but the link.
+    const SHARED_TYPES: Record<string, string> = {
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      gif: 'image/gif',
+      webp: 'image/webp',
+      svg: 'image/svg+xml',
+      avif: 'image/avif',
+      bmp: 'image/bmp',
+      pdf: 'application/pdf',
+      mp3: 'audio/mpeg',
+      m4a: 'audio/mp4',
+      wav: 'audio/wav',
+      ogg: 'audio/ogg',
+      mp4: 'video/mp4',
+      mov: 'video/quicktime',
+      webm: 'video/webm',
+      txt: 'text/plain; charset=utf-8',
+      md: 'text/plain; charset=utf-8',
+    };
+    app.get('/v1/shares', async (request) => {
+      const device = signedIn(request);
+      return { shares: this.shares(device.notebook) };
+    });
+    app.post('/v1/shares', async (request) => {
+      const device = signedIn(request);
+      const body = request.body as { path?: unknown; hours?: unknown } | undefined;
+      if (!validPath(body?.path)) throw refuse(400, 'Say which note to share.');
+      const hours = body?.hours === undefined ? undefined : Number(body.hours);
+      if (hours !== undefined && !(hours > 0 && hours <= 24 * 366))
+        throw refuse(400, 'A link can last from an hour to a year.');
+      return this.share(device.notebook, body!.path as string, hours, device.id);
+    });
+    app.delete('/v1/shares/:id', async (request, reply) => {
+      const device = signedIn(request);
+      const { id } = request.params as { id: string };
+      if (!this.unshare(device.notebook, id)) throw refuse(404, 'That note is not shared.');
+      return reply.code(204).send();
+    });
+    /** Slows down anyone guessing links, as pairing does with codes. */
+    const guessed = (request: FastifyRequest) => {
+      const now = Date.now();
+      const tries = (this.attempts.get(`share:${request.ip}`) ?? []).filter(
+        (at) => at > now - 60000,
+      );
+      this.attempts.set(`share:${request.ip}`, tries);
+      if (tries.length >= 20) throw refuse(429, 'Too many requests. Wait a minute.');
+      return () => {
+        tries.push(now);
+        if (this.attempts.size > 10000) this.attempts.clear();
+      };
+    };
+    const tokenOf = (request: FastifyRequest) => {
+      const { token } = request.params as { token: string };
+      if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) throw refuse(404, 'There is no such page.');
+      return token;
+    };
+    // Nothing on the page may run, load from elsewhere, or be put in a frame by another site.
+    const guard = (reply: { header(name: string, value: string): unknown }) => {
+      reply.header(
+        'content-security-policy',
+        "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; sandbox",
+      );
+      reply.header('x-content-type-options', 'nosniff');
+      reply.header('referrer-policy', 'no-referrer');
+      reply.header('x-robots-tag', 'noindex, nofollow');
+      reply.header('cache-control', 'private, no-store');
+    };
+    const gone = (reply: {
+      header(name: string, value: string): unknown;
+      code(status: number): unknown;
+      type(value: string): unknown;
+      send(body: string): unknown;
+    }) => {
+      guard(reply);
+      reply.code(404);
+      reply.type('text/html; charset=utf-8');
+      return reply.send(
+        renderPage({
+          title: 'This link no longer works',
+          body: '<p>The note it showed is not shared any more, or the link has run out. Ask whoever sent it to share it again.</p>\n',
+        }),
+      );
+    };
+    app.get('/s/:token', async (request, reply) => {
+      const miss = guessed(request);
+      const page = this.sharedPage(tokenOf(request));
+      if (!page) {
+        miss();
+        return gone(reply);
+      }
+      guard(reply);
+      reply.type('text/html; charset=utf-8');
+      return reply.send(page.html);
+    });
+    app.get('/s/:token/:hash/:name', async (request, reply) => {
+      const miss = guessed(request);
+      const { hash } = request.params as { hash: string };
+      const found = HASH.test(hash) ? this.sharedFile(tokenOf(request), hash) : undefined;
+      if (!found) {
+        miss();
+        return gone(reply);
+      }
+      const bytes = await readFile(this.blob(found.notebook, hash)).catch(() => undefined);
+      if (!bytes) return gone(reply);
+      guard(reply);
+      // Not a page: whatever it is, the browser must not run it as one.
+      reply.header('content-security-policy', "default-src 'none'; sandbox");
+      const extension = found.path.slice(found.path.lastIndexOf('.') + 1).toLowerCase();
+      const type = SHARED_TYPES[extension];
+      reply.type(type ?? 'application/octet-stream');
+      if (!type) reply.header('content-disposition', 'attachment');
+      reply.header('cache-control', 'private, max-age=3600');
+      return reply.send(bytes);
     });
 
     app.get('/v1/files/:file/history', async (request) => {

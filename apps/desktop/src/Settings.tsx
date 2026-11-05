@@ -16,6 +16,7 @@ import { defaultMode, setDefaultMode } from './preferences';
 import { Button } from '@/components/ui/button';
 import { GitHubSettings } from './GitHub';
 import { FollowDialog, MoveDialog, MovedSettings, TakeOverDialog } from './MoveHost';
+import { SharedNotes } from './ShareDialog';
 
 export type SettingsSection =
   'general' | 'editor' | 'appearance' | 'sync' | 'devices' | 'backups' | 'github' | 'check';
@@ -507,6 +508,12 @@ export function Settings(props: Props) {
             </Line>
           ))}
         </section>
+        {sync.connected && hosting.sharing && (
+          <section>
+            <Label>Shared notes in “{props.notebook}”</Label>
+            <SharedNotes />
+          </section>
+        )}
         {!sync.connected && (
           <div className="border-border flex items-center justify-between gap-6 rounded-xl border px-5 py-4 text-sm">
             <span>“{props.notebook}” is not hosted yet, so it lives only on this Mac.</span>
@@ -532,6 +539,26 @@ export function Settings(props: Props) {
               className="accent-primary size-5"
               checked={hosting.keepRunning}
               onChange={(event) => run(() => bridge.setKeepRunning(event.target.checked))}
+            />
+          </Row>
+          <Row
+            name={<label htmlFor="sharing">Share notes over the internet</label>}
+            description={
+              hosting.sharing
+                ? `Notes shared from any device are published at ${hosting.sharing}/s/…, through Tailscale Funnel. Only shared pages; sync stays private.`
+                : 'Lets any device share a note as a link anyone can open, for a while. Uses Tailscale Funnel: your tailnet has to allow it once.'
+            }
+          >
+            <input
+              id="sharing"
+              type="checkbox"
+              role="switch"
+              className="accent-primary size-5"
+              checked={Boolean(hosting.sharing)}
+              disabled={busy}
+              onChange={(event) =>
+                run(() => bridge.setSharing(event.target.checked).then(setHosting))
+              }
             />
           </Row>
           {sync.connected && checkRow}
@@ -605,6 +632,10 @@ export function Settings(props: Props) {
             <span className="text-muted-foreground">This device</span>
             <span>{sync.device}</span>
           </Line>
+        </section>
+        <section>
+          <Label>Shared notes</Label>
+          <SharedNotes />
         </section>
         <div>
           {checkRow}

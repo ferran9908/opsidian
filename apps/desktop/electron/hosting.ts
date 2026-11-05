@@ -38,6 +38,7 @@ import {
   type Schedule,
 } from '../../host/src/mirror';
 import { invitationLink } from '../../host/src/home';
+import { funnelOff, funnelOn, funnelTarget, tailscaleBinary } from '../../host/src/funnel';
 import type { HostReply, HostRequest } from './host-worker';
 
 interface Saved {
@@ -277,7 +278,11 @@ export class Hosting {
   async info(): Promise<HostingInfo> {
     const own = new Set([...(this.saved.own ?? []), this.sync.deviceId]);
     const seen = await this.host?.call<Snapshot>({ op: 'snapshot' }).catch(() => undefined);
+    const sharing = await this.host
+      ?.call<string | undefined>({ op: 'shareBase' })
+      .catch(() => undefined);
     return {
+      ...(sharing ? { sharing } : {}),
       hosting: Boolean(this.host),
       ...(this.error ? { error: this.error } : {}),
       port: this.saved.port,
@@ -442,6 +447,28 @@ export class Hosting {
   async setKeepRunning(value: boolean): Promise<HostingInfo> {
     this.saved.keepRunning = value;
     await this.save();
+    return this.tell();
+  }
+
+  /**
+   * Publishes shared notes through Tailscale Funnel, under `/s` of this Mac's tailnet name,
+   * and tells the host that address; or takes them off the internet again. Funnel keeps the
+   * setting itself across restarts, so this is done once, not at every start.
+   */
+  async setSharing(on: boolean): Promise<HostingInfo> {
+    if (!this.host) throw new Error('This Mac is not hosting.');
+    const binary = tailscaleBinary();
+    if (on) {
+      if (!binary)
+        throw new Error(
+          'Tailscale is not installed on this Mac, so there is no way to the internet for shared pages. Install it from tailscale.com and sign in.',
+        );
+      const { base } = await funnelOn(binary, funnelTarget('0.0.0.0', this.saved.port));
+      await this.host.call({ op: 'shareBase', base });
+    } else {
+      await this.host.call({ op: 'shareBase', base: undefined });
+      if (binary) await funnelOff(binary).catch(() => {});
+    }
     return this.tell();
   }
 

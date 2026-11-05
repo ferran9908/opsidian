@@ -156,6 +156,12 @@ export const previewVault: VaultBridge = {
   startHosting: async () => notHosting,
   stopHosting: async () => notHosting,
   setKeepRunning: async () => notHosting,
+  setSharing: async () => notHosting,
+  shares: async () => [],
+  share: async () => {
+    throw new Error('Sharing needs a host. Set up sync first.');
+  },
+  unshare: async () => {},
   invite: async () => {
     throw new Error('Hosting needs the Mac app.');
   },

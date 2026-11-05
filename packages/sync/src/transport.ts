@@ -3,6 +3,7 @@ import {
   Unauthorized,
   type Changes,
   type GitHubCopy,
+  type NoteShare,
   type Op,
   type OpResult,
   type Pairing,
@@ -137,4 +138,87 @@ export async function github(
     throw new Error('The host is too old to sync with GitHub from here. Update it first.');
   if (!response.ok) await fail(response);
   return ((await response.json()) as { copy?: GitHubCopy }).copy;
+}
+
+/** A request to the host about shared notes, which a host from before sharing does not know. */
+async function sharing(
+  host: string,
+  token: string,
+  path: string,
+  init: RequestInit,
+  request: Fetch,
+): Promise<Response> {
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), 20_000);
+  let response: Response;
+  try {
+    response = await request(`${trim(host)}/v1/shares${path}`, {
+      ...init,
+      headers: { authorization: `Bearer ${token}`, ...init.headers },
+      signal: stop.signal,
+    });
+  } catch {
+    throw new Error(
+      stop.signal.aborted ? 'The host took too long to answer.' : 'The host could not be reached.',
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+  if (response.status === 404) {
+    // Fastify's own answer for a route the host does not have, as opposed to the host's.
+    const body = (await response
+      .clone()
+      .json()
+      .catch(() => undefined)) as { error?: unknown } | undefined;
+    if (body?.error === 'Not Found')
+      throw new Error('The host is too old to share notes. Update it first.');
+  }
+  if (!response.ok) await fail(response);
+  return response;
+}
+
+/** The notes this device's notebook shares right now. */
+export async function shares(
+  host: string,
+  token: string,
+  request: Fetch = fetch,
+): Promise<NoteShare[]> {
+  const response = await sharing(host, token, '', {}, request);
+  return ((await response.json()) as { shares: NoteShare[] }).shares;
+}
+
+/**
+ * Asks the host to show a note to anyone with the link, for `hours`, or until stopped when
+ * no hours are given. The host serves the note as it has it now, so the device sends its own
+ * changes first.
+ */
+export async function share(
+  host: string,
+  token: string,
+  path: string,
+  hours: number | undefined,
+  request: Fetch = fetch,
+): Promise<NoteShare> {
+  const response = await sharing(
+    host,
+    token,
+    '',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, ...(hours ? { hours } : {}) }),
+    },
+    request,
+  );
+  return (await response.json()) as NoteShare;
+}
+
+/** Stops a shared link working. */
+export async function unshare(
+  host: string,
+  token: string,
+  id: string,
+  request: Fetch = fetch,
+): Promise<void> {
+  await sharing(host, token, `/${encodeURIComponent(id)}`, { method: 'DELETE' }, request);
 }

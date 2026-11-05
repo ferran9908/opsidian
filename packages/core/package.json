@@ -11,6 +11,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "node-diff3": "^3.2.1"
+    "node-diff3": "^3.2.1",
+    "@lezer/markdown": "1.7.2",
+    "@lezer/common": "^1.2.0"
   }
 }
