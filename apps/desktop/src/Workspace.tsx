@@ -48,6 +48,7 @@ import { SyncDialog } from './SyncDialog';
 import { Settings, SETTINGS_SECTIONS, type SettingsSection } from './Settings';
 import { HistoryDialog } from './HistoryDialog';
 import { ShareDialog } from './ShareDialog';
+import { copyText } from './clipboard';
 import { Sidebar, type TreeSort } from './Sidebar';
 import { StatusBar, type NoteStatus } from './StatusBar';
 import { MissingNotice } from './MissingNotice';
@@ -74,19 +75,6 @@ interface Props {
    * offers it, or given up (null), with a `warning` worth showing.
    */
   onClose(missing: MissingNotebook | null, warning?: string): void;
-}
-
-/** Puts text on the clipboard without asking for the clipboard permission, which is refused. */
-function copyText(text: string): Promise<void> {
-  const field = document.createElement('textarea');
-  field.value = text;
-  field.style.position = 'fixed';
-  field.style.opacity = '0';
-  document.body.append(field);
-  field.select();
-  const copied = document.execCommand('copy');
-  field.remove();
-  return copied ? Promise.resolve() : Promise.reject(new Error('Could not copy.'));
 }
 
 export function Workspace({ vault, theme, onSwitch, onOpened, onClose }: Props) {

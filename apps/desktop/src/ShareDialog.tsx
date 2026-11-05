@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, Copy, Link, X } from 'lucide-react';
 import { noteTitle, type NoteShare } from '@opsidian/core';
 import { bridge, message } from './bridge';
+import { copyText } from './clipboard';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -36,7 +37,7 @@ function CopyButton({ url, primary }: { url: string; primary?: boolean }) {
       variant={primary ? 'default' : 'secondary'}
       size="sm"
       className="shrink-0"
-      onClick={() => void navigator.clipboard.writeText(url).then(() => setCopied(true))}
+      onClick={() => void copyText(url).then(() => setCopied(true))}
     >
       {copied ? <Check /> : <Copy />} {copied ? 'Copied' : 'Copy link'}
     </Button>
@@ -79,7 +80,7 @@ export function ShareDialog({ path, flush, onClose }: Props) {
       .then((share) => {
         setMade(share);
         setExisting((all) => [share, ...(all ?? [])]);
-        return navigator.clipboard.writeText(share.url).catch(() => {});
+        return copyText(share.url).catch(() => {});
       })
       .catch((reason) => setError(message(reason)))
       .finally(() => setBusy(false));
